@@ -1,5 +1,6 @@
 import Phaser from 'phaser'
 import { MatchScene } from './scenes/MatchScene'
+import { MapSelectScene } from './scenes/MapSelectScene'
 import { GAME_HEIGHT, GAME_WIDTH } from '../shared/constants'
 
 export function createGame(parent: HTMLElement): Phaser.Game {
@@ -9,7 +10,7 @@ export function createGame(parent: HTMLElement): Phaser.Game {
     width: GAME_WIDTH,
     height: GAME_HEIGHT,
     backgroundColor: '#10172a',
-    scene: [MatchScene],
+    scene: [MapSelectScene, MatchScene],
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     render: { antialias: true, pixelArt: false },
   })

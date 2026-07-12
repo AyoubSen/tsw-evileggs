@@ -35,6 +35,7 @@ import {
 } from '../../shared/constants'
 import type { Character, ProjectileState, TurnPhase, Vector } from '../../shared/types'
 import { TerrainMask } from '../../terrain/TerrainMask'
+import { createMapTerrain, getMap, type MapId } from '../../maps/registry'
 import {
   WEAPON_ORDER,
   WEAPONS,
@@ -89,9 +90,14 @@ export class MatchScene extends Phaser.Scene {
   private jumpReady = true
   private settleDuration = 0
   private winner: number | null = null
+  private mapId: MapId = 'rolling-hills'
 
   constructor() {
     super('match')
+  }
+
+  init(data: { mapId?: string }): void {
+    this.mapId = getMap(data.mapId).id
   }
 
   create(): void {
@@ -121,15 +127,11 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private resetMatch(): void {
-    this.terrain = new TerrainMask(
-      GAME_WIDTH / TERRAIN_SCALE,
-      GAME_HEIGHT / TERRAIN_SCALE,
-      TERRAIN_SCALE,
-    )
-    this.terrain.fillBelow((x) => 385 + Math.sin(x / 105) * 25 + Math.sin(x / 43) * 10)
+    const map = getMap(this.mapId)
+    this.terrain = createMapTerrain(map, TERRAIN_SCALE)
     this.characters = [
-      this.makeCharacter('Lumen', 0x62d7ff, 175),
-      this.makeCharacter('Morrow', 0xffab5b, 785),
+      this.makeCharacter('Lumen', 0x62d7ff, map.spawnPoints[0]),
+      this.makeCharacter('Morrow', 0xffab5b, map.spawnPoints[1]),
     ]
     this.inventories = [createWeaponInventory(), createWeaponInventory()]
     this.selectedWeapons = ['basic-rocket', 'basic-rocket']
@@ -220,6 +222,8 @@ export class MatchScene extends Phaser.Scene {
         'KeyD',
         'KeyZ',
         'KeyW',
+        'KeyM',
+        'Enter',
         'Space',
         'KeyR',
         'Digit1',
@@ -232,6 +236,14 @@ export class MatchScene extends Phaser.Scene {
       return
     event.preventDefault()
     this.pressedCodes.add(event.code)
+    if (this.phase === 'victory' && event.code === 'Enter') {
+      this.scene.start('match', { mapId: this.mapId })
+      return
+    }
+    if (this.phase === 'victory' && event.code === 'KeyM') {
+      this.scene.start('map-select')
+      return
+    }
     if (event.code === 'KeyR' && !event.repeat) this.resetMatch()
     if (event.code.startsWith('Digit') && !event.repeat && this.canControlActivePlayer())
       this.selectWeapon(Number(event.code.slice(-1)) - 1)
@@ -709,7 +721,7 @@ export class MatchScene extends Phaser.Scene {
             : this.phase
     const winnerText =
       this.phase === 'victory'
-        ? `\n${this.winner === null ? 'DRAW' : `${this.characters[this.winner].name} WINS`}  [R] restart`
+        ? `\n${this.winner === null ? 'DRAW' : `${this.characters[this.winner].name} WINS`} on ${getMap(this.mapId).displayName}\n[Enter] rematch  [M] choose map  [R] restart`
         : ''
     const displayAim = this.dragPreview ?? {
       direction: this.shotDirection,
@@ -728,7 +740,7 @@ export class MatchScene extends Phaser.Scene {
       return `${this.selectedWeapons[this.activeIndex] === id ? '[' : ''}${index + 1}:${WEAPONS[id].displayName} ${ammo === 'unlimited' ? '∞' : ammo}${this.selectedWeapons[this.activeIndex] === id ? ']' : ''}`
     }).join('  ')
     this.hudText.setText(
-      `PROJECT SHELLSHOCK  |  ${this.selectedWeapon().displayName} (${this.inventories[this.activeIndex][this.selectedWeapon().id] === 'unlimited' ? 'unlimited' : this.inventories[this.activeIndex][this.selectedWeapon().id]})\n` +
+      `PROJECT SHELLSHOCK  |  ${getMap(this.mapId).displayName}  |  ${this.selectedWeapon().displayName} (${this.inventories[this.activeIndex][this.selectedWeapon().id] === 'unlimited' ? 'unlimited' : this.inventories[this.activeIndex][this.selectedWeapon().id]})\n` +
         `Lumen ${Math.ceil(this.characters[0].health)} HP     Morrow ${Math.ceil(this.characters[1].health)} HP\n` +
         `${this.phase === 'input' ? inputText : phaseText}  Time ${timeText}  ${this.selectedWeapon().aimMode === 'directional' ? `Angle ${Math.round(displayAim.worldAngle)}°  ${this.selectedWeapon().powerMode === 'variable' ? `Power ${Math.round(displayAim.power)}%` : 'Fixed spread'}` : 'Point at a safe destination'}\n` +
         `${weaponList}\n${this.selectedWeapon().description}\n[Q/A] left [D] right [Z/W] jump [1-5] weapon [Mouse] aim [Space] use [R] restart${winnerText}`,
