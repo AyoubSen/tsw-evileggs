@@ -1,0 +1,11 @@
+export const GAME_WIDTH = 960
+export const GAME_HEIGHT = 540
+export const FIXED_STEP_SECONDS = 1 / 60
+export const GRAVITY = 700
+export const AIM_MIN_ELEVATION = 8
+export const AIM_MAX_ELEVATION = 82
+export const POWER_MIN_PERCENT = 30
+export const POWER_MAX_PERCENT = 100
+export const DEFAULT_AIM_ELEVATION = 45
+export const DEFAULT_POWER_PERCENT = 68
+export const TURN_DURATION_SECONDS = 30

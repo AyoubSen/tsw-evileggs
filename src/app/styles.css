@@ -1,0 +1,61 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: #eaf5ff;
+  background: #0b1020;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+  background: radial-gradient(circle at 50% 0%, #1d2d50, #0b1020 60%);
+}
+.app-shell {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  padding: 26px 20px 18px;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+h1 {
+  font-size: clamp(1.45rem, 4vw, 2.1rem);
+  letter-spacing: -0.05em;
+  margin: 0;
+}
+.eyebrow {
+  color: #ffdf86;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  margin: 0;
+}
+.subtitle,
+footer {
+  color: #9fb2ca;
+  font-size: 0.9rem;
+  margin: 0;
+}
+.game-frame {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid #42607a;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px #0008;
+  background: #10172a;
+}
+.game-frame canvas {
+  display: block;
+}
+.error {
+  color: #ffb4a8;
+}
+footer {
+  margin-top: 12px;
+}
