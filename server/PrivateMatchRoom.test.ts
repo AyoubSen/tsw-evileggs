@@ -17,6 +17,8 @@ const createOptions = {
   compatibility: CURRENT_COMPATIBILITY,
 }
 const joinOptions = { playerName: 'Guest', compatibility: CURRENT_COMPATIBILITY }
+const DEPLOYED_WEB_ORIGIN = 'https://evileggs.vercel.app'
+const HTTP_ENDPOINT = 'http://127.0.0.1:2568'
 
 const waitFor = async (condition: () => boolean, timeoutMs = 3000): Promise<void> => {
   const deadline = Date.now() + timeoutMs
@@ -79,6 +81,68 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
       protocolVersion: 1,
     })
     expect(JSON.stringify(HEALTH_RESPONSE)).not.toMatch(/room|player|snapshot|secret/i)
+  })
+
+  it('serves health with the shared allowlisted CORS policy', async () => {
+    const response = await fetch(`${HTTP_ENDPOINT}/health`, {
+      headers: { Origin: DEPLOYED_WEB_ORIGIN },
+    })
+    expect(response.ok).toBe(true)
+    expect(response.headers.get('content-type')).toMatch(/^application\/json\b/)
+    expect(response.headers.get('access-control-allow-origin')).toBe(DEPLOYED_WEB_ORIGIN)
+    expect(response.headers.get('vary')).toMatch(/(?:^|,\s*)Origin(?:,|$)/i)
+    const body = await response.json()
+    expect(body).toEqual(HEALTH_RESPONSE)
+    expect(JSON.stringify(body)).not.toMatch(/room|player|snapshot|secret/i)
+
+    const disallowed = await fetch(`${HTTP_ENDPOINT}/health`, {
+      headers: { Origin: 'https://attacker.example' },
+    })
+    expect(disallowed.ok).toBe(true)
+    expect(disallowed.headers.has('access-control-allow-origin')).toBe(false)
+  })
+
+  it('applies the shared CORS policy to preflight and matchmaking HTTP routes', async () => {
+    const preflight = await fetch(`${HTTP_ENDPOINT}/health`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: DEPLOYED_WEB_ORIGIN,
+        'Access-Control-Request-Method': 'GET',
+      },
+    })
+    expect(preflight.status).toBe(204)
+    expect(preflight.headers.get('access-control-allow-origin')).toBe(DEPLOYED_WEB_ORIGIN)
+    expect(preflight.headers.get('access-control-allow-methods')).toContain('GET')
+
+    const disallowedPreflight = await fetch(`${HTTP_ENDPOINT}/health`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://attacker.example',
+        'Access-Control-Request-Method': 'GET',
+      },
+    })
+    expect(disallowedPreflight.status).toBe(204)
+    expect(disallowedPreflight.headers.has('access-control-allow-origin')).toBe(false)
+
+    const matchmaking = await fetch(`${HTTP_ENDPOINT}/matchmake/create/private_match`, {
+      method: 'POST',
+      headers: { Origin: DEPLOYED_WEB_ORIGIN, 'Content-Type': 'application/json' },
+      body: JSON.stringify(createOptions),
+    })
+    expect(matchmaking.ok).toBe(true)
+    expect(matchmaking.headers.get('access-control-allow-origin')).toBe(DEPLOYED_WEB_ORIGIN)
+    expect(matchmaking.headers.get('vary')).toMatch(/(?:^|,\s*)Origin(?:,|$)/i)
+  })
+
+  it('applies the shared CORS policy to room-code resolution', async () => {
+    const room = await testServer.createRoom<PrivateMatchRoom>('private_match', createOptions)
+    const response = await fetch(`${HTTP_ENDPOINT}/api/private-rooms/${room.state.roomCode}`, {
+      headers: { Origin: DEPLOYED_WEB_ORIGIN },
+    })
+    expect(response.ok).toBe(true)
+    expect(response.headers.get('access-control-allow-origin')).toBe(DEPLOYED_WEB_ORIGIN)
+    expect(response.headers.get('vary')).toMatch(/(?:^|,\s*)Origin(?:,|$)/i)
+    expect(await response.json()).toEqual({ roomId: room.roomId, code: room.state.roomCode })
   })
 
   it('assigns creator seat 0, joiner seat 1, and rejects a third player', async () => {

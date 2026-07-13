@@ -1,12 +1,14 @@
-import cors from 'cors'
 import { defineRoom, defineServer, matchMaker } from '@colyseus/core'
 import { WebSocketTransport } from '@colyseus/ws-transport'
 import { isRoomCode, normalizeRoomCode } from '../src/network/protocol'
+import { createCorsPolicy } from './corsPolicy'
 import { allowedWebOrigins, isAllowedOrigin } from './environment'
 import { PrivateMatchRoom } from './rooms/PrivateMatchRoom'
 import { roomCodeRegistry } from './roomCodeRegistry'
 
 const origins = allowedWebOrigins()
+const corsPolicy = createCorsPolicy(origins)
+corsPolicy.installForColyseus()
 export const HEALTH_RESPONSE = {
   status: 'ok',
   service: 'mossfire-server',
@@ -23,7 +25,7 @@ export const server = defineServer({
       done(isAllowedOrigin(origin, origins), 403, 'Origin not allowed'),
   }),
   express: (app) => {
-    app.use(cors({ origin: origins, methods: ['GET'], maxAge: 3600 }))
+    app.use(corsPolicy.expressMiddleware)
     app.get('/health', (_request, response) => response.json(HEALTH_RESPONSE))
     app.get('/api/private-rooms/:code', (request, response) => {
       const code = normalizeRoomCode(request.params.code)

@@ -108,6 +108,14 @@ At the default 68% power and 45°, the rocket's ideal level-ground range is abou
 
 Vitest tests cover command validation, wind determinism, fixed-step physics, pause and timer authority, all five weapons, terrain reconstruction, serialization, replay checksums, effect deduplication, audio safety, interpolation, room codes, server command authority, snapshots, reconnection, forfeit, and rematch. Run simulation-only tests with `pnpm test:simulation` and online tests with `pnpm test:server`. The Playwright smoke test uses installed headless Edge and two isolated browser contexts.
 
+After deploying the server, verify the production health CORS response with:
+
+```powershell
+curl.exe -i -H "Origin: https://evileggs.vercel.app" https://tsw-evileggs.onrender.com/health
+```
+
+The response must include `Access-Control-Allow-Origin: https://evileggs.vercel.app`.
+
 ## Known limitations
 
 - Character collision is deliberately simple: it is ground/surface based rather than a full capsule-vs-terrain solver, so steep crater walls can look rough.

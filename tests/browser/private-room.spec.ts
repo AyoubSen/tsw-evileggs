@@ -16,9 +16,15 @@ test('private room authority, reconnect, result, and rematch', async ({ browser,
   const contextB = await browser.newContext()
   const playerA = await contextA.newPage()
   const playerB = await contextB.newPage()
+  const corsErrors: string[] = []
+  for (const page of [playerA, playerB])
+    page.on('console', (message) => {
+      if (message.type() === 'error' && /cors|cross-origin/i.test(message.text()))
+        corsErrors.push(message.text())
+    })
 
   const health = await request.get('http://127.0.0.1:2677/health', {
-    headers: { Origin: 'http://127.0.0.1:5173' },
+    headers: { Origin: 'http://127.0.0.1:4173' },
   })
   expect(health.ok()).toBe(true)
   expect(await health.json()).toEqual({
@@ -26,7 +32,12 @@ test('private room authority, reconnect, result, and rematch', async ({ browser,
     service: 'mossfire-server',
     protocolVersion: 1,
   })
-  expect(health.headers()['access-control-allow-origin']).toBe('http://127.0.0.1:5173')
+  expect(health.headers()['access-control-allow-origin']).toBe('http://127.0.0.1:4173')
+  expect(health.headers().vary).toMatch(/(?:^|,\s*)Origin(?:,|$)/i)
+  const disallowedHealth = await request.get('http://127.0.0.1:2677/health', {
+    headers: { Origin: 'https://attacker.example' },
+  })
+  expect(disallowedHealth.headers()['access-control-allow-origin']).toBeUndefined()
 
   await enterOnlineMenu(playerA)
   await playerA.getByRole('button', { name: /Create Private Room/i }).click()
@@ -56,6 +67,13 @@ test('private room authority, reconnect, result, and rematch', async ({ browser,
   await playerA.getByRole('button', { name: /^Create Room/i }).click()
   const roomCode = (await playerA.locator('[data-room-code]').textContent())?.trim()
   expect(roomCode).toMatch(/^[A-Z2-9]{6}$/)
+  await expect(playerA.getByRole('button', { name: /Connecting/i })).toHaveCount(0)
+
+  const resolution = await request.get(`http://127.0.0.1:2677/api/private-rooms/${roomCode}`, {
+    headers: { Origin: 'http://127.0.0.1:4173' },
+  })
+  expect(resolution.ok()).toBe(true)
+  expect(resolution.headers()['access-control-allow-origin']).toBe('http://127.0.0.1:4173')
 
   await enterOnlineMenu(playerB)
   await playerB.getByRole('button', { name: /Join Private Room/i }).click()
@@ -181,6 +199,7 @@ test('private room authority, reconnect, result, and rematch', async ({ browser,
   await playerA.getByRole('button', { name: /^Create Room/i }).click()
   await expect(playerA.locator('[data-room-code]')).toBeVisible()
   await expect(playerA.getByRole('heading', { name: 'Unable to start' })).toHaveCount(0)
+  expect(corsErrors).toEqual([])
 
   await contextA.close()
   await contextB.close()
