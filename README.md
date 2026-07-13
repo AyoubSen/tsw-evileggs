@@ -1,10 +1,8 @@
-# Project Shellshock
+# Mossfire Skirmish
 
 An original local browser artillery-game prototype. It takes broad inspiration from the readable, turn-based projectile play found in classic artillery games, but is not a remake or clone of any existing game. The characters, map, UI, naming, and code are original placeholder work.
 
-## Current milestone: Map Architecture and Local Match Flow
-
-This repository proves a local artillery match with destructible terrain, timed turns, movement, pull-back aiming, five original placeholder weapons, and selectable original maps. It deliberately has no accounts, networking, bots, menus, progression, or mobile controls.
+Mossfire Skirmish is an original local turn-based artillery game with destructible terrain, timed turns, movement, pull-back aiming, five weapons, and selectable maps.
 
 ## Run locally
 
@@ -35,7 +33,7 @@ pnpm format:check
 - `Space`: activate the selected weapon on the active player's turn.
 - `R`: restart the match at any time.
 
-Before a match, use Left/Right or A/D to choose a map and Enter/Space to start; clicking a listed map also starts it. After victory, Enter rematches the same map and M returns to map selection.
+Use the main menu to start a local match, configure names, duration, and map, and access settings or controls. Escape pauses an active match.
 
 ## Maps
 

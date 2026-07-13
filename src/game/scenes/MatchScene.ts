@@ -31,7 +31,6 @@ import {
   GRAVITY,
   POWER_MAX_PERCENT,
   POWER_MIN_PERCENT,
-  TURN_DURATION_SECONDS,
 } from '../../shared/constants'
 import type { Character, ProjectileState, TurnPhase, Vector } from '../../shared/types'
 import { TerrainMask } from '../../terrain/TerrainMask'
@@ -45,6 +44,8 @@ import {
   type WeaponId,
   type WeaponInventory,
 } from '../../weapons/registry'
+import { validateMatchConfig, type LocalMatchConfig } from '../../match/config'
+import type { GameEvents, MatchResult } from '../types'
 
 const CHARACTER_RADIUS = 15
 const TERRAIN_SCALE = 2
@@ -68,7 +69,7 @@ export class MatchScene extends Phaser.Scene {
   private shotDirection: Vector = aimDirection(DEFAULT_AIM_ELEVATION, 1)
   private worldAngle = DEFAULT_AIM_ELEVATION
   private shotDragDistance = DRAG_MIN_DISTANCE
-  private turnTimeRemaining = TURN_DURATION_SECONDS
+  private turnTimeRemaining = 30
   private expiredDuration = 0
   private projectile: ProjectileState | null = null
   private projectileWeapon: WeaponId = 'basic-rocket'
@@ -80,7 +81,12 @@ export class MatchScene extends Phaser.Scene {
   private terrainGraphics!: Phaser.GameObjects.Graphics
   private actorGraphics!: Phaser.GameObjects.Graphics
   private overlayGraphics!: Phaser.GameObjects.Graphics
-  private hudText!: Phaser.GameObjects.Text
+  private backgroundGraphics!: Phaser.GameObjects.Graphics
+  private hudGraphics!: Phaser.GameObjects.Graphics
+  private topHud!: Phaser.GameObjects.Text
+  private rightHud!: Phaser.GameObjects.Text
+  private bottomHud!: Phaser.GameObjects.Text
+  private bannerText!: Phaser.GameObjects.Text
   private canvas!: HTMLCanvasElement
   private pressedCodes = new Set<string>()
   private dragging = false
@@ -91,35 +97,76 @@ export class MatchScene extends Phaser.Scene {
   private settleDuration = 0
   private winner: number | null = null
   private mapId: MapId = 'rolling-hills'
+  private config: LocalMatchConfig = validateMatchConfig(undefined)
+  private eventsFromHost: GameEvents | null = null
+  private paused = false
+  private introDuration = 0
+  private turnBannerDuration = 0
+  private turnsTaken = 0
+  private matchDuration = 0
+  private reducedMotion = false
+  private aimGuide: 'normal' | 'minimal' = 'normal'
 
   constructor() {
     super('match')
   }
 
-  init(data: { mapId?: string }): void {
-    this.mapId = getMap(data.mapId).id
+  init(data: {
+    config?: LocalMatchConfig
+    events?: GameEvents
+    reducedMotion?: boolean
+    aimGuide?: 'normal' | 'minimal'
+  }): void {
+    this.config = validateMatchConfig(data.config)
+    this.mapId = this.config.mapId
+    this.eventsFromHost = data.events ?? null
+    this.reducedMotion = data.reducedMotion === true
+    this.aimGuide = data.aimGuide === 'minimal' ? 'minimal' : 'normal'
   }
 
   create(): void {
+    this.backgroundGraphics = this.add.graphics()
     this.terrainGraphics = this.add.graphics()
     this.actorGraphics = this.add.graphics()
     this.overlayGraphics = this.add.graphics()
-    this.hudText = this.add.text(18, 14, '', {
-      fontFamily: 'monospace',
-      fontSize: '15px',
-      color: '#eaf5ff',
-      lineSpacing: 5,
-    })
+    this.hudGraphics = this.add.graphics()
+    const hudStyle: Phaser.Types.GameObjects.Text.TextStyle = {
+      fontFamily: 'Trebuchet MS, Arial, sans-serif',
+      fontSize: '13px',
+      color: '#fff8df',
+      fontStyle: 'bold',
+    }
+    this.topHud = this.add.text(0, 0, '', hudStyle)
+    this.rightHud = this.add.text(0, 0, '', hudStyle)
+    this.bottomHud = this.add.text(0, 0, '', hudStyle)
+    this.bannerText = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 18, '', {
+        ...hudStyle,
+        fontSize: '25px',
+        color: '#fff8df',
+        align: 'center',
+        stroke: '#473b31',
+        strokeThickness: 5,
+      })
+      .setOrigin(0.5)
     this.installInput()
     this.resetMatch()
   }
 
   update(_: number, deltaMilliseconds: number): void {
     const delta = Math.min(deltaMilliseconds / 1000, 0.05)
+    if (this.paused) return
     if (this.phase === 'victory') {
       this.render()
       return
     }
+    this.matchDuration += delta
+    if (this.introDuration > 0) {
+      this.introDuration = Math.max(0, this.introDuration - delta)
+      this.render()
+      return
+    }
+    this.turnBannerDuration = Math.max(0, this.turnBannerDuration - delta)
     this.advanceInputTimer(delta)
     this.handleInput(delta)
     this.simulate(delta)
@@ -130,15 +177,15 @@ export class MatchScene extends Phaser.Scene {
     const map = getMap(this.mapId)
     this.terrain = createMapTerrain(map, TERRAIN_SCALE)
     this.characters = [
-      this.makeCharacter('Lumen', 0x62d7ff, map.spawnPoints[0]),
-      this.makeCharacter('Morrow', 0xffab5b, map.spawnPoints[1]),
+      this.makeCharacter(this.config.playerNames[0], 0x62d7ff, map.spawnPoints[0]),
+      this.makeCharacter(this.config.playerNames[1], 0xffab5b, map.spawnPoints[1]),
     ]
     this.inventories = [createWeaponInventory(), createWeaponInventory()]
     this.selectedWeapons = ['basic-rocket', 'basic-rocket']
     this.activeIndex = 0
     this.phase = 'input'
     this.setDefaultAim()
-    this.turnTimeRemaining = TURN_DURATION_SECONDS
+    this.turnTimeRemaining = this.config.turnDurationSeconds
     this.expiredDuration = 0
     this.projectile = null
     this.clusterChildren = []
@@ -148,6 +195,11 @@ export class MatchScene extends Phaser.Scene {
     this.clearDrag()
     this.pressedCodes.clear()
     this.jumpReady = true
+    this.paused = false
+    this.introDuration = this.reducedMotion ? 0 : 1.8
+    this.turnBannerDuration = 0
+    this.turnsTaken = 0
+    this.matchDuration = 0
     this.render()
   }
 
@@ -172,10 +224,17 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private canControlActivePlayer(): boolean {
-    return canAcceptPlayerInput(this.phase) && this.turnTimeRemaining > 0
+    return (
+      !this.paused &&
+      this.introDuration <= 0 &&
+      this.turnBannerDuration <= 0 &&
+      canAcceptPlayerInput(this.phase) &&
+      this.turnTimeRemaining > 0
+    )
   }
 
   private advanceInputTimer(delta: number): void {
+    if (this.turnBannerDuration > 0) return
     if (!canAcceptPlayerInput(this.phase)) return
     this.turnTimeRemaining = advanceTurnTimer(this.phase, this.turnTimeRemaining, delta)
     if (hasTurnExpired(this.phase, this.turnTimeRemaining)) this.expireTurn()
@@ -215,6 +274,17 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
+    if (event.code === 'Escape' && this.phase !== 'victory') {
+      event.preventDefault()
+      this.eventsFromHost?.onPauseRequest()
+      return
+    }
+    if (this.introDuration > 0 && ['Enter', 'Space'].includes(event.code)) {
+      event.preventDefault()
+      this.introDuration = 0
+      this.turnBannerDuration = 0
+      return
+    }
     if (
       ![
         'KeyQ',
@@ -222,7 +292,6 @@ export class MatchScene extends Phaser.Scene {
         'KeyD',
         'KeyZ',
         'KeyW',
-        'KeyM',
         'Enter',
         'Space',
         'KeyR',
@@ -236,15 +305,7 @@ export class MatchScene extends Phaser.Scene {
       return
     event.preventDefault()
     this.pressedCodes.add(event.code)
-    if (this.phase === 'victory' && event.code === 'Enter') {
-      this.scene.start('match', { mapId: this.mapId })
-      return
-    }
-    if (this.phase === 'victory' && event.code === 'KeyM') {
-      this.scene.start('map-select')
-      return
-    }
-    if (event.code === 'KeyR' && !event.repeat) this.resetMatch()
+    if (event.code === 'KeyR' && !event.repeat) this.eventsFromHost?.onPauseRequest()
     if (event.code.startsWith('Digit') && !event.repeat && this.canControlActivePlayer())
       this.selectWeapon(Number(event.code.slice(-1)) - 1)
     if (event.code === 'Space' && !event.repeat && this.canControlActivePlayer()) this.fire()
@@ -688,11 +749,13 @@ export class MatchScene extends Phaser.Scene {
     this.phase = 'input'
     this.setDefaultAim()
     this.ensureSelectedWeapon()
-    this.turnTimeRemaining = TURN_DURATION_SECONDS
+    this.turnTimeRemaining = this.config.turnDurationSeconds
     this.expiredDuration = 0
     this.clearDrag()
     this.pressedCodes.clear()
     this.jumpReady = true
+    this.turnsTaken += 1
+    this.turnBannerDuration = this.reducedMotion ? 0 : 0.85
   }
 
   private checkVictory(): void {
@@ -703,26 +766,46 @@ export class MatchScene extends Phaser.Scene {
       this.phase = 'victory'
       this.turnTimeRemaining = 0
       this.clearDrag()
+      this.eventsFromHost?.onResult(this.resultData())
+    }
+  }
+
+  public setPaused(paused: boolean): void {
+    this.paused = paused
+    this.pressedCodes.clear()
+    this.clearDrag()
+    this.render()
+  }
+
+  public restartMatch(): void {
+    this.resetMatch()
+  }
+
+  private resultData(): MatchResult {
+    const winner = this.winner === null ? null : this.characters[this.winner]
+    return {
+      config: this.config,
+      winnerIndex: this.winner,
+      remainingHealth: winner ? Math.ceil(winner.health) : 0,
+      turnsTaken: this.turnsTaken,
+      durationSeconds: Math.floor(this.matchDuration),
     }
   }
 
   private render(): void {
+    this.renderBackdrop()
     this.renderTerrain()
     this.renderActors()
     this.renderOverlay()
     const active = this.characters[this.activeIndex]
     const phaseText =
       this.phase === 'settling'
-        ? 'World settling...'
+        ? 'Terrain settling'
         : this.phase === 'projectile'
-          ? 'Rocket in flight...'
+          ? 'Projectile in flight'
           : this.phase === 'expired'
             ? 'Time expired'
-            : this.phase
-    const winnerText =
-      this.phase === 'victory'
-        ? `\n${this.winner === null ? 'DRAW' : `${this.characters[this.winner].name} WINS`} on ${getMap(this.mapId).displayName}\n[Enter] rematch  [M] choose map  [R] restart`
-        : ''
+            : ''
     const displayAim = this.dragPreview ?? {
       direction: this.shotDirection,
       power: this.power,
@@ -733,23 +816,88 @@ export class MatchScene extends Phaser.Scene {
       ? this.dragPreview
         ? 'Pull back: release to lock'
         : 'Pull farther to set aim'
-      : `${active.name}'s turn`
+      : `${active.name}'s Turn`
     const timeText = `${this.turnTimeRemaining <= 5 ? this.turnTimeRemaining.toFixed(1) : Math.ceil(this.turnTimeRemaining)}s`
     const weaponList = WEAPON_ORDER.map((id, index) => {
       const ammo = this.inventories[this.activeIndex][id]
-      return `${this.selectedWeapons[this.activeIndex] === id ? '[' : ''}${index + 1}:${WEAPONS[id].displayName} ${ammo === 'unlimited' ? '∞' : ammo}${this.selectedWeapons[this.activeIndex] === id ? ']' : ''}`
-    }).join('  ')
-    this.hudText.setText(
-      `PROJECT SHELLSHOCK  |  ${getMap(this.mapId).displayName}  |  ${this.selectedWeapon().displayName} (${this.inventories[this.activeIndex][this.selectedWeapon().id] === 'unlimited' ? 'unlimited' : this.inventories[this.activeIndex][this.selectedWeapon().id]})\n` +
-        `Lumen ${Math.ceil(this.characters[0].health)} HP     Morrow ${Math.ceil(this.characters[1].health)} HP\n` +
-        `${this.phase === 'input' ? inputText : phaseText}  Time ${timeText}  ${this.selectedWeapon().aimMode === 'directional' ? `Angle ${Math.round(displayAim.worldAngle)}°  ${this.selectedWeapon().powerMode === 'variable' ? `Power ${Math.round(displayAim.power)}%` : 'Fixed spread'}` : 'Point at a safe destination'}\n` +
-        `${weaponList}\n${this.selectedWeapon().description}\n[Q/A] left [D] right [Z/W] jump [1-5] weapon [Mouse] aim [Space] use [R] restart${winnerText}`,
-    )
+      const selected = this.selectedWeapons[this.activeIndex] === id
+      return `${selected ? '◆' : '◇'} ${index + 1} ${ammo === 'unlimited' ? '∞' : ammo}`
+    }).join('    ')
+    this.renderHud(timeText, inputText || phaseText, weaponList, displayAim)
+    if (this.introDuration > 0 || this.turnBannerDuration > 0) {
+      const message =
+        this.introDuration > 0
+          ? `${getMap(this.mapId).displayName}\n${this.characters[0].name} vs ${this.characters[1].name}\n${this.introDuration > 0.6 ? Math.ceil(this.introDuration / 0.6) : 'Begin'}`
+          : `${active.name}'s Turn`
+      this.bannerText
+        .setText(message)
+        .setPosition(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 18)
+        .setOrigin(0.5)
+        .setStyle({ fontSize: '25px', strokeThickness: 5 })
+        .setVisible(true)
+    }
+  }
+
+  private renderHud(timeText: string, status: string, weapons: string, aim: DragAim): void {
+    this.hudGraphics.clear()
+    const left = this.characters[0]
+    const right = this.characters[1]
+    this.hudGraphics.fillStyle(0x473b31, 0.88)
+    this.hudGraphics.fillRoundedRect(12, 10, 225, 46, 10)
+    this.hudGraphics.fillRoundedRect(GAME_WIDTH - 237, 10, 225, 46, 10)
+    this.hudGraphics.fillRoundedRect(GAME_WIDTH / 2 - 64, 9, 128, 47, 18)
+    this.hudGraphics.fillRoundedRect(15, GAME_HEIGHT - 72, GAME_WIDTH - 30, 57, 14)
+    this.hudGraphics.fillStyle(0x5bbf72)
+    this.hudGraphics.fillRoundedRect(32, 40, 150 * (left.health / 100), 6, 3)
+    this.hudGraphics.fillRoundedRect(GAME_WIDTH - 182, 40, 150 * (right.health / 100), 6, 3)
+    this.hudGraphics.fillStyle(this.turnTimeRemaining <= 5 ? 0xe65d3d : 0xf7bd3f)
+    this.hudGraphics.fillCircle(GAME_WIDTH / 2, 31, 18)
+    this.topHud
+      .setPosition(27, 17)
+      .setOrigin(0, 0)
+      .setText(
+        `${this.activeIndex === 0 ? '◆ ' : ''}${left.name}\n${Math.ceil(left.health)} health`,
+      )
+    this.rightHud
+      .setPosition(GAME_WIDTH - 27, 17)
+      .setOrigin(1, 0)
+      .setText(
+        `${this.activeIndex === 1 ? '◆ ' : ''}${right.name}\n${Math.ceil(right.health)} health`,
+      )
+    this.bannerText
+      .setText(timeText)
+      .setPosition(GAME_WIDTH / 2, 17)
+      .setOrigin(0.5, 0)
+      .setStyle({ fontSize: '17px', strokeThickness: 3 })
+      .setVisible(true)
+    const hint =
+      status ||
+      (this.selectedWeapon().aimMode === 'target-position'
+        ? 'Point at safe ground · Space to warp'
+        : `Power ${Math.round(aim.power)}%`)
+    this.bottomHud
+      .setPosition(31, GAME_HEIGHT - 64)
+      .setOrigin(0, 0)
+      .setText(`${weapons}\n${this.selectedWeapon().displayName} · ${hint}`)
+  }
+
+  private renderBackdrop(): void {
+    this.backgroundGraphics.clear()
+    this.backgroundGraphics.fillStyle(0x9edce5).fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT)
+    this.backgroundGraphics.fillStyle(0xffedb1, 0.7).fillCircle(GAME_WIDTH - 110, 105, 46)
+    this.backgroundGraphics
+      .fillStyle(0x78b996, 0.45)
+      .fillEllipse(170, 340, 430, 155)
+      .fillEllipse(775, 330, 470, 165)
+    this.backgroundGraphics
+      .fillStyle(0xffffff, 0.62)
+      .fillEllipse(135, 112, 115, 20)
+      .fillEllipse(655, 145, 145, 25)
   }
 
   private renderTerrain(): void {
     this.terrainGraphics.clear()
-    this.terrainGraphics.fillStyle(0x315f47)
+    this.terrainGraphics.fillStyle(0x9a673e)
     for (let x = 0; x < this.terrain.width; x += 1) {
       let runStart = -1
       for (let y = 0; y <= this.terrain.height; y += 1) {
@@ -767,29 +915,47 @@ export class MatchScene extends Phaser.Scene {
         }
       }
     }
-    this.terrainGraphics.lineStyle(2, 0x7bd27e, 0.75)
-    this.terrainGraphics.lineBetween(0, GAME_HEIGHT - 1, GAME_WIDTH, GAME_HEIGHT - 1)
+    this.terrainGraphics.lineStyle(3, 0x437c53, 0.95)
+    for (let x = 0; x < GAME_WIDTH; x += 3) {
+      const y = this.terrain.surfaceY(x)
+      const next = this.terrain.surfaceY(x + 3)
+      if (y !== null && next !== null) this.terrainGraphics.lineBetween(x, y - 1, x + 3, next - 1)
+    }
   }
 
   private renderActors(): void {
     this.actorGraphics.clear()
     for (const character of this.characters) {
       if (!character.alive) continue
+      const facing = character === this.characters[0] ? 1 : -1
+      const bob = character.grounded
+        ? Math.sin(this.matchDuration * 3 + (facing === 1 ? 0 : 1)) * 1.5
+        : 0
+      const x = character.position.x
+      const y = character.position.y + bob
+      this.actorGraphics.fillStyle(0x473b31, 0.85)
+      this.actorGraphics.fillEllipse(x + 3, y + character.radius + 8, 32, 9)
       this.actorGraphics.fillStyle(character.color)
-      this.actorGraphics.fillCircle(character.position.x, character.position.y, character.radius)
-      this.actorGraphics.fillStyle(0x172033)
-      this.actorGraphics.fillCircle(
-        character.position.x + (character.id === 'lumen' ? 5 : -5),
-        character.position.y - 3,
-        3,
+      this.actorGraphics.fillRoundedRect(x - 17, y - 13, 34, 31, 12)
+      this.actorGraphics.fillStyle(0xfff6d8)
+      this.actorGraphics.fillEllipse(x + facing * 3, y - 3, 22, 15)
+      this.actorGraphics.fillStyle(0x24313a)
+      this.actorGraphics.fillCircle(x + facing * 7, y - 4, 2.8)
+      this.actorGraphics.fillCircle(x + facing * 1, y - 4, 2.8)
+      this.actorGraphics.lineStyle(2, 0x24313a)
+      this.actorGraphics.lineBetween(x + facing * 2, y + 5, x + facing * 8, y + 5)
+      this.actorGraphics.fillStyle(facing === 1 ? 0xf7bd3f : 0xed7090)
+      this.actorGraphics.fillTriangle(
+        x - 13 * facing,
+        y - 13,
+        x - 4 * facing,
+        y - 25,
+        x - 3 * facing,
+        y - 11,
       )
       if (this.phase === 'input' && this.characters[this.activeIndex] === character) {
-        this.actorGraphics.lineStyle(2, 0xffef8a)
-        this.actorGraphics.strokeCircle(
-          character.position.x,
-          character.position.y,
-          character.radius + 5,
-        )
+        this.actorGraphics.lineStyle(3, 0xf7bd3f)
+        this.actorGraphics.strokeCircle(x, y, character.radius + 7)
       }
     }
   }
@@ -875,7 +1041,8 @@ export class MatchScene extends Phaser.Scene {
       radius: 5,
     }
     this.overlayGraphics.fillStyle(0xb5dfff, 0.75)
-    for (let step = 0; step < AIM_GUIDE_STEPS; step += 1) {
+    const guideSteps = this.aimGuide === 'minimal' ? 3 : AIM_GUIDE_STEPS
+    for (let step = 0; step < guideSteps; step += 1) {
       const next = integrateProjectile(
         previous,
         GRAVITY * this.selectedWeapon().gravityScale,
