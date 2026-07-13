@@ -300,12 +300,7 @@ export class MatchScene extends Phaser.Scene {
 
   private readonly onPointerUp = (event: PointerEvent): void => {
     if (!this.dragging) return
-    if (this.canControlActivePlayer() && this.dragPreview) {
-      this.shotDirection = this.dragPreview.direction
-      this.power = this.dragPreview.power
-      this.worldAngle = this.dragPreview.worldAngle
-      this.shotDragDistance = this.dragPreview.distance
-    }
+    if (this.canControlActivePlayer()) this.commitDragPreview()
     this.clearDrag(event.pointerId)
     event.preventDefault()
   }
@@ -319,6 +314,14 @@ export class MatchScene extends Phaser.Scene {
     this.activePointerId = null
     this.dragStart = null
     this.dragPreview = null
+  }
+
+  private commitDragPreview(): void {
+    if (!this.dragPreview) return
+    this.shotDirection = this.dragPreview.direction
+    this.power = this.dragPreview.power
+    this.worldAngle = this.dragPreview.worldAngle
+    this.shotDragDistance = this.dragPreview.distance
   }
 
   private pointerWorldPoint(event: PointerEvent): Vector {
@@ -374,6 +377,7 @@ export class MatchScene extends Phaser.Scene {
     this.ensureSelectedWeapon()
     const weapon = this.selectedWeapon()
     if (!canUseWeapon(this.inventories[this.activeIndex], weapon.id)) return
+    this.commitDragPreview()
     if (weapon.id === 'teleporter') {
       if (!this.isValidTeleport(this.teleportTarget)) return
       shooter.position = { x: this.teleportTarget!.x, y: this.teleportTarget!.y }
