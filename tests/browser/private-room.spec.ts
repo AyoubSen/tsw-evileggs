@@ -11,12 +11,78 @@ const serverTick = async (page: Page) =>
 const statusNumber = async (page: Page, attribute: string) =>
   Number(await page.locator('.online-match-status').getAttribute(attribute))
 
+test('classifies same-origin health and direct realtime failures', async ({ browser }) => {
+  const healthContext = await browser.newContext()
+  const healthPage = await healthContext.newPage()
+  await enterOnlineMenu(healthPage)
+  await healthPage.getByRole('button', { name: /Create Private Room/i }).click()
+  let healthAttempts = 0
+  await healthPage.route('**/game-server/health', async (route) => {
+    healthAttempts += 1
+    await route.abort('blockedbyclient')
+  })
+  await healthPage.getByRole('button', { name: /^Create Room/i }).click()
+  await expect(
+    healthPage.getByText(/privacy extension or network filter may be blocking/i),
+  ).toBeVisible()
+  expect(healthAttempts).toBe(4)
+  await healthPage.getByText('Connection troubleshooting').click()
+  await expect(healthPage.getByText(/Allow this game site in content blockers/i)).toBeVisible()
+  await healthPage.getByRole('button', { name: 'Back' }).click()
+  const attemptsAfterNavigation = healthAttempts
+  await healthPage.waitForTimeout(1800)
+  expect(healthAttempts).toBe(attemptsAfterNavigation)
+  await healthContext.close()
+
+  const realtimeContext = await browser.newContext()
+  await realtimeContext.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket
+    window.WebSocket = class extends NativeWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        const requestedUrl = String(url)
+        const blockForTest = new URL(requestedUrl).port === '2677'
+        if (blockForTest)
+          (window as Window & { __blockedGameSockets?: number }).__blockedGameSockets =
+            ((window as Window & { __blockedGameSockets?: number }).__blockedGameSockets ?? 0) + 1
+        super(blockForTest ? 'ws://127.0.0.1:1/__blocked-game-socket' : url, protocols)
+      }
+    }
+  })
+  const realtimePage = await realtimeContext.newPage()
+  await realtimePage.route('**/game-server/health', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'ok', service: 'mossfire-server', protocolVersion: 1 }),
+    }),
+  )
+  await enterOnlineMenu(realtimePage)
+  await realtimePage.getByRole('button', { name: /Create Private Room/i }).click()
+  await realtimePage.getByRole('button', { name: /^Create Room/i }).click()
+  await expect(
+    realtimePage.getByText(/server is reachable, but the realtime connection could not be opened/i),
+  ).toBeVisible()
+  expect(
+    await realtimePage.evaluate(
+      () => (window as Window & { __blockedGameSockets?: number }).__blockedGameSockets ?? 0,
+    ),
+  ).toBeGreaterThan(0)
+  await realtimeContext.close()
+})
+
 test('private room authority, reconnect, result, and rematch', async ({ browser, request }) => {
   const contextA = await browser.newContext()
   const contextB = await browser.newContext()
   const playerA = await contextA.newPage()
   const playerB = await contextB.newPage()
   const corsErrors: string[] = []
+  const browserHealthRequests: string[] = []
+  const browserRoomLookups: string[] = []
+  for (const page of [playerA, playerB])
+    page.on('request', (request) => {
+      if (request.url().endsWith('/health')) browserHealthRequests.push(request.url())
+      if (/\/api\/private-rooms\//.test(request.url())) browserRoomLookups.push(request.url())
+    })
   for (const page of [playerA, playerB])
     page.on('console', (message) => {
       if (message.type() === 'error' && /cors|cross-origin/i.test(message.text()))
@@ -38,6 +104,13 @@ test('private room authority, reconnect, result, and rematch', async ({ browser,
     headers: { Origin: 'https://attacker.example' },
   })
   expect(disallowedHealth.headers()['access-control-allow-origin']).toBeUndefined()
+  const proxiedHealth = await request.get('http://127.0.0.1:4173/game-server/health')
+  expect(proxiedHealth.ok()).toBe(true)
+  expect(await proxiedHealth.json()).toEqual({
+    status: 'ok',
+    service: 'mossfire-server',
+    protocolVersion: 1,
+  })
 
   await enterOnlineMenu(playerA)
   await playerA.getByRole('button', { name: /Create Private Room/i }).click()
@@ -59,6 +132,7 @@ test('private room authority, reconnect, result, and rematch', async ({ browser,
   await expect(playerA.getByRole('button', { name: /Connecting/i })).toBeDisabled()
   await expect(playerA.getByText(/Waking the game server/i)).toBeVisible({ timeout: 7000 })
   expect(healthAttempts).toBe(1)
+  expect(browserHealthRequests).toContain('http://127.0.0.1:4173/game-server/health')
   await playerA.getByRole('button', { name: 'Cancel' }).click()
   await expect(playerA.getByRole('button', { name: /Create Private Room/i })).toBeVisible()
   await playerA.unrouteAll({ behavior: 'wait' })
@@ -199,6 +273,10 @@ test('private room authority, reconnect, result, and rematch', async ({ browser,
   await playerA.getByRole('button', { name: /^Create Room/i }).click()
   await expect(playerA.locator('[data-room-code]')).toBeVisible()
   await expect(playerA.getByRole('heading', { name: 'Unable to start' })).toHaveCount(0)
+  expect(browserHealthRequests.every((url) => url.startsWith('http://127.0.0.1:4173/'))).toBe(true)
+  expect(browserRoomLookups).toContain(
+    `http://127.0.0.1:4173/game-server/api/private-rooms/${roomCode}`,
+  )
   expect(corsErrors).toEqual([])
 
   await contextA.close()

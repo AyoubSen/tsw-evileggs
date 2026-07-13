@@ -15,7 +15,7 @@ pnpm install
 pnpm dev
 ```
 
-`pnpm dev` runs Vite and the Colyseus server together. Use `pnpm dev:web` or `pnpm dev:server` to run one side. Copy `.env.example` to `.env` when the defaults are not suitable. `VITE_COLYSEUS_URL` selects the browser endpoint, `PORT` selects the server port, and `ALLOWED_WEB_ORIGINS` is the comma-separated HTTP/WebSocket origin allowlist. Production startup fails when that allowlist is missing.
+`pnpm dev` runs Vite and the Colyseus server together. Use `pnpm dev:web` or `pnpm dev:server` to run one side. Copy `.env.example` to `.env` when the defaults are not suitable. `VITE_GAME_HTTP_BASE_URL` selects the custom health and room-code HTTP base. `VITE_COLYSEUS_URL` separately selects the Colyseus SDK endpoint used for matchmaking and realtime transport. `PORT` selects the server port, and `ALLOWED_WEB_ORIGINS` is the comma-separated HTTP/WebSocket origin allowlist. Production online play fails clearly when either browser endpoint is missing, and server startup fails when the origin allowlist is missing.
 
 Other useful commands:
 
@@ -116,6 +116,37 @@ curl.exe -i -H "Origin: https://evileggs.vercel.app" https://tsw-evileggs.onrend
 
 The response must include `Access-Control-Allow-Origin: https://evileggs.vercel.app`.
 
+## Production deployment
+
+The Vercel project must define these build-time variables:
+
+```text
+VITE_GAME_HTTP_BASE_URL=/game-server
+VITE_COLYSEUS_URL=https://tsw-evileggs.onrender.com
+```
+
+`vercel.json` rewrites `/game-server/:path*` to `https://tsw-evileggs.onrender.com/:path*`. The browser therefore requests `/game-server/health` and `/game-server/api/private-rooms/:code` from the frontend origin. The rewrite preserves the server's safe health JSON and room-code resolver behavior. Colyseus matchmaking and its WebSocket still connect directly to Render through `VITE_COLYSEUS_URL`; they are not sent through the Vercel rewrite.
+
+The Render service must define:
+
+```text
+ALLOWED_WEB_ORIGINS=https://evileggs.vercel.app
+DEVELOPMENT_LOGGING=false
+```
+
+Keep `ENABLE_TEST_ROUTES` unset in production. The existing exact-origin CORS and WebSocket checks remain required and must not be replaced with a wildcard.
+
+Vercel must redeploy after changing a frontend environment variable or `vercel.json`, because Vite embeds browser variables at build time. Render needs no environment change for the proxy itself. A content blocker, VPN, firewall, or network filter can still block the direct Colyseus matchmaking or WebSocket connection; the application reports that realtime-specific case without attempting to bypass the user's controls.
+
+For local development, both public bases normally target the same local process:
+
+```text
+VITE_GAME_HTTP_BASE_URL=http://localhost:2567
+VITE_COLYSEUS_URL=http://localhost:2567
+```
+
+When testing the deployed-style same-origin path locally, set `VITE_GAME_HTTP_BASE_URL=/game-server`; Vite proxies that prefix to `VITE_GAME_HTTP_PROXY_TARGET`, or to `VITE_COLYSEUS_URL` when no explicit proxy target is supplied.
+
 ## Known limitations
 
 - Character collision is deliberately simple: it is ground/surface based rather than a full capsule-vs-terrain solver, so steep crater walls can look rough.
@@ -129,6 +160,6 @@ The response must include `Access-Control-Allow-Origin: https://evileggs.vercel.
 - Private-room lookup is intentionally in-memory and single-process. Restarting the server invalidates room codes and active matches.
 - There are no accounts, authentication, public matchmaking, database, Redis, rankings, spectators, or horizontal scaling.
 - Online rendering uses buffered interpolation and bounded extrapolation without rollback or local movement prediction, so very high latency still affects responsiveness.
-- A separately deployed web client must set `VITE_COLYSEUS_URL` to the public TLS endpoint; the server must set its public port/address and exact `ALLOWED_WEB_ORIGINS`. HTTPS pages require WSS/HTTPS for the game server.
+- A separately deployed web client must set both browser endpoints. Custom HTTP can use the Vercel same-origin rewrite, but Colyseus matchmaking and WebSocket traffic remain direct to the public TLS server and may still be blocked by local privacy or network policy. The server must set its public port/address and exact `ALLOWED_WEB_ORIGINS`.
 
 # tsw-evileggs

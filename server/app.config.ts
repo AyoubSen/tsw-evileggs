@@ -5,15 +5,12 @@ import { createCorsPolicy } from './corsPolicy'
 import { allowedWebOrigins, isAllowedOrigin } from './environment'
 import { PrivateMatchRoom } from './rooms/PrivateMatchRoom'
 import { roomCodeRegistry } from './roomCodeRegistry'
+import { HEALTH_RESPONSE } from '../src/network/healthProtocol'
 
 const origins = allowedWebOrigins()
 const corsPolicy = createCorsPolicy(origins)
 corsPolicy.installForColyseus()
-export const HEALTH_RESPONSE = {
-  status: 'ok',
-  service: 'mossfire-server',
-  protocolVersion: 1,
-} as const
+export { HEALTH_RESPONSE }
 
 export const server = defineServer({
   rooms: {

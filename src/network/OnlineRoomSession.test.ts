@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Room } from '@colyseus/sdk'
-import { ONLINE_RECONNECT_STORAGE_KEY, OnlineRoomSession } from './OnlineRoomSession'
+import {
+  ONLINE_RECONNECT_STORAGE_KEY,
+  OnlineRoomSession,
+  playerFacingError,
+} from './OnlineRoomSession'
 
 type Listener<Arguments extends unknown[]> = (...arguments_: Arguments) => void
 type TestSignal<Arguments extends unknown[]> = {
@@ -194,5 +198,23 @@ describe('OnlineRoomSession lifecycle', () => {
     expect(sessionStorage.getItem(ONLINE_RECONNECT_STORAGE_KEY)).toBe('token-new')
     expect(second.isDisposed).toBe(false)
     second.dispose()
+  })
+})
+
+describe('online room error mapping', () => {
+  it.each([
+    ['room-full', 'That private room is already full.'],
+    ['match-started', 'That room match has already started.'],
+    ['room-not-found', 'That room code is no longer active.'],
+    ['incompatible version', 'Your game version is not compatible with this room.'],
+  ])('keeps %s distinct', (serverMessage, expected) => {
+    expect(playerFacingError(new Error(serverMessage)).message).toBe(expected)
+  })
+
+  it('uses realtime guidance only after health has succeeded', () => {
+    expect(playerFacingError(new TypeError('socket failed'), 'realtime')).toMatchObject({
+      code: 'realtime',
+      message: expect.stringMatching(/server is reachable/i),
+    })
   })
 })

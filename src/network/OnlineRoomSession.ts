@@ -15,6 +15,15 @@ import {
   throwIfOnlineStartupAborted,
 } from './onlineLifecycle'
 import { roomViewFromSchema, type OnlineRoomView } from './roomView'
+import {
+  OnlineConnectionError,
+  healthNetworkError,
+  realtimeConnectionError,
+  reconnectConnectionError,
+  unknownNetworkError,
+} from './connectionErrors'
+import { NetworkConfigurationError, joinHttpUrl, runtimeNetworkConfig } from './networkConfig'
+import { waitForGameServer } from './serverWarmup'
 
 export const ONLINE_RECONNECT_STORAGE_KEY = 'toybox-artillery:online-reconnection'
 
@@ -29,19 +38,13 @@ type RoomViewListener = (view: OnlineRoomView) => void
 
 let nextSessionGeneration = 0
 
-function endpoint(): string {
-  return (
-    (import.meta.env.VITE_COLYSEUS_URL as string | undefined)?.trim() || 'http://localhost:2567'
-  )
-}
-
-function httpEndpoint(): string {
-  return endpoint().replace(/^ws:/, 'http:').replace(/^wss:/, 'https:').replace(/\/$/, '')
-}
-
-function playerFacingError(caught: unknown): Error {
+export function playerFacingError(
+  caught: unknown,
+  phase: 'realtime' | 'unknown' = 'unknown',
+): Error {
+  if (caught instanceof OnlineConnectionError || caught instanceof NetworkConfigurationError)
+    return caught
   const message = caught instanceof Error ? caught.message : String(caught)
-  if (/longer than expected to wake/i.test(message)) return new Error(message)
   if (/full|locked/i.test(message)) return new Error('That private room is already full.')
   if (/already started|match-started/i.test(message))
     return new Error('That room match has already started.')
@@ -49,7 +52,7 @@ function playerFacingError(caught: unknown): Error {
     return new Error('Your game version is not compatible with this room.')
   if (/not found|invalid room|room-not-found/i.test(message))
     return new Error('That room code is no longer active.')
-  return new Error('The game server could not be reached. Check the connection and try again.')
+  return phase === 'realtime' ? realtimeConnectionError() : unknownNetworkError()
 }
 
 async function closeCancelledRoom(room: Room): Promise<void> {
@@ -58,47 +61,39 @@ async function closeCancelledRoom(room: Room): Promise<void> {
   await room.leave(true).catch(() => undefined)
 }
 
-const SERVER_WAKE_TIMEOUT_MS = 65_000
-const SERVER_WAKE_RETRY_MS = 1_500
-const SERVER_HEALTH_ATTEMPT_TIMEOUT_MS = 20_000
-
-const abortableDelay = (milliseconds: number, signal?: AbortSignal) =>
-  new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(resolve, milliseconds)
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timeout)
-        reject(new OnlineLifecycleCancellation('aborted-startup'))
-      },
-      { once: true },
+async function resolvePrivateRoom(code: string, signal?: AbortSignal): Promise<string> {
+  let response: Response
+  try {
+    response = await fetch(
+      joinHttpUrl(
+        runtimeNetworkConfig().gameHttpBaseUrl,
+        `api/private-rooms/${encodeURIComponent(code)}`,
+      ),
+      { signal },
     )
-  })
-
-async function waitForServer(signal?: AbortSignal): Promise<void> {
-  const deadline = Date.now() + SERVER_WAKE_TIMEOUT_MS
-  while (Date.now() < deadline) {
-    throwIfOnlineStartupAborted(signal)
-    const attempt = new AbortController()
-    const cancelAttempt = () => attempt.abort()
-    signal?.addEventListener('abort', cancelAttempt, { once: true })
-    const timeout = setTimeout(() => attempt.abort(), SERVER_HEALTH_ATTEMPT_TIMEOUT_MS)
-    try {
-      const response = await fetch(`${httpEndpoint()}/health`, {
-        signal: attempt.signal,
-        cache: 'no-store',
-      })
-      if (response.ok) return
-    } catch (caught) {
-      if (signal?.aborted) throw new OnlineLifecycleCancellation('aborted-startup')
-      if (import.meta.env.DEV) console.debug('Game server warm-up retry', caught)
-    } finally {
-      clearTimeout(timeout)
-      signal?.removeEventListener('abort', cancelAttempt)
-    }
-    await abortableDelay(SERVER_WAKE_RETRY_MS, signal)
+  } catch (caught) {
+    if (signal?.aborted) throw new OnlineLifecycleCancellation('aborted-startup')
+    if (caught instanceof OnlineConnectionError) throw caught
+    throw healthNetworkError()
   }
-  throw new Error('The game server is taking longer than expected to wake. Please try again.')
+  const payload = (await response.json().catch(() => null)) as {
+    roomId?: unknown
+    message?: unknown
+  } | null
+  if (!response.ok) {
+    if (typeof payload?.message === 'string') throw new Error(payload.message)
+    throw new OnlineConnectionError(
+      'server-http',
+      `The game server returned HTTP ${response.status}. Please try again.`,
+      response.status,
+    )
+  }
+  if (typeof payload?.roomId !== 'string' || !payload.roomId)
+    throw new OnlineConnectionError(
+      'invalid-response',
+      'The game server returned an invalid room response. Please try again later.',
+    )
+  return payload.roomId
 }
 
 export class OnlineRoomSession {
@@ -147,7 +142,11 @@ export class OnlineRoomSession {
     const onLeave = () => {
       if (this.disposed) return
       this.clearReconnection()
-      this.emitStatus(this.intentionalLeave ? 'left' : 'failed', 'The room connection ended.')
+      const reconnectFailed = !this.intentionalLeave && this.currentStatus === 'reconnecting'
+      this.emitStatus(
+        this.intentionalLeave ? 'left' : 'failed',
+        reconnectFailed ? reconnectConnectionError().message : 'The room connection ended.',
+      )
       this.dispose()
     }
     const onError = () => {
@@ -196,8 +195,8 @@ export class OnlineRoomSession {
   ): Promise<OnlineRoomSession> {
     try {
       throwIfOnlineStartupAborted(signal)
-      await waitForServer(signal)
-      const client = new Client(endpoint())
+      await waitForGameServer(signal)
+      const client = new Client(runtimeNetworkConfig().colyseusUrl)
       const options: CreateRoomOptions = {
         playerName,
         mapId: config.mapId,
@@ -214,7 +213,7 @@ export class OnlineRoomSession {
       if (isOnlineLifecycleCancellation(caught)) throw caught
       if (signal?.aborted) throw new OnlineLifecycleCancellation('aborted-startup')
       if (import.meta.env.DEV) console.error('Online room creation failed', caught)
-      throw playerFacingError(caught)
+      throw playerFacingError(caught, 'realtime')
     }
   }
 
@@ -225,21 +224,13 @@ export class OnlineRoomSession {
   ): Promise<OnlineRoomSession> {
     try {
       throwIfOnlineStartupAborted(signal)
-      await waitForServer(signal)
+      await waitForGameServer(signal)
       const code = normalizeRoomCode(codeInput)
-      const response = await fetch(
-        `${httpEndpoint()}/api/private-rooms/${encodeURIComponent(code)}`,
-        { signal },
-      )
-      const payload = (await response.json().catch(() => null)) as {
-        roomId?: string
-        message?: string
-      } | null
-      if (!response.ok || !payload?.roomId) throw new Error(payload?.message ?? 'Room not found')
+      const roomId = await resolvePrivateRoom(code, signal)
       throwIfOnlineStartupAborted(signal)
-      const client = new Client(endpoint())
+      const client = new Client(runtimeNetworkConfig().colyseusUrl)
       const options: JoinRoomOptions = { playerName, compatibility: CURRENT_COMPATIBILITY }
-      const room = await client.joinById(payload.roomId, options)
+      const room = await client.joinById(roomId, options)
       if (signal?.aborted) {
         await closeCancelledRoom(room)
         throw new OnlineLifecycleCancellation('aborted-startup')
@@ -248,7 +239,7 @@ export class OnlineRoomSession {
     } catch (caught) {
       if (isOnlineLifecycleCancellation(caught)) throw caught
       if (signal?.aborted) throw new OnlineLifecycleCancellation('aborted-startup')
-      throw playerFacingError(caught)
+      throw playerFacingError(caught, 'realtime')
     }
   }
 
@@ -262,7 +253,7 @@ export class OnlineRoomSession {
     if (!token) return null
     try {
       throwIfOnlineStartupAborted(signal)
-      const client = new Client(endpoint())
+      const client = new Client(runtimeNetworkConfig().colyseusUrl)
       const room = await client.reconnect(token)
       if (signal?.aborted) {
         await closeCancelledRoom(room)

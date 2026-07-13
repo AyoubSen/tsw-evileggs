@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/game-server/:path*",
+      "destination": "https://tsw-evileggs.onrender.com/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

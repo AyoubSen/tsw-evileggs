@@ -29,7 +29,11 @@ export default defineConfig({
       command: 'pnpm dev:web --host 127.0.0.1 --port 4173',
       port: 4173,
       reuseExistingServer: false,
-      env: { VITE_COLYSEUS_URL: 'http://127.0.0.1:2677' },
+      env: {
+        VITE_GAME_HTTP_BASE_URL: '/game-server',
+        VITE_GAME_HTTP_PROXY_TARGET: 'http://127.0.0.1:2677',
+        VITE_COLYSEUS_URL: 'http://127.0.0.1:2677',
+      },
     },
   ],
 })

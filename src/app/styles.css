@@ -794,6 +794,33 @@ select {
   color: #8b271f;
   font-weight: 900;
 }
+.connection-error {
+  margin-top: 0.85rem;
+}
+.connection-error .form-error {
+  margin: 0;
+}
+.connection-error details {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 2px solid rgba(139, 39, 31, 0.28);
+  border-radius: 10px;
+  background: #fffaf0;
+  color: #5c482f;
+  font-size: 0.82rem;
+  text-align: left;
+}
+.connection-error summary {
+  cursor: pointer;
+  font-weight: 900;
+}
+.connection-error ul {
+  margin: 9px 0 2px;
+  padding-left: 20px;
+}
+.connection-error li + li {
+  margin-top: 4px;
+}
 
 .online-wake-message {
   margin: 0.85rem 0 0;

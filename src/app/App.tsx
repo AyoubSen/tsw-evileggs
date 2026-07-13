@@ -229,6 +229,24 @@ function Settings({
   )
 }
 
+function ConnectionTroubleshooting({ message }: { message: string }) {
+  return (
+    <div className="connection-error" role="alert">
+      <p className="form-error">{message}</p>
+      <details>
+        <summary>Connection troubleshooting</summary>
+        <ul>
+          <li>Allow this game site in content blockers, then retry.</li>
+          <li>Test the connection in a private browser window.</li>
+          <li>Temporarily disable a VPN or strict network filter.</li>
+          <li>Verify that the browser is online.</li>
+          <li>Return to the menu if the connection still fails.</li>
+        </ul>
+      </details>
+    </div>
+  )
+}
+
 export function App() {
   const [preferences, setPreferences] = useState<Preferences>(() => loadPreferences())
   const [screen, setScreen] = useState<Screen>('menu')
@@ -778,7 +796,7 @@ export function App() {
               </button>
             ))}
           </div>
-          {onlineError && <p className="form-error">{onlineError}</p>}
+          {onlineError && <ConnectionTroubleshooting message={onlineError} />}
           {onlineSlow && (
             <p className="online-wake-message">
               Waking the game server. This can take up to a minute on the free host.
@@ -832,7 +850,7 @@ export function App() {
               />
             </label>
           </div>
-          {onlineError && <p className="form-error">{onlineError}</p>}
+          {onlineError && <ConnectionTroubleshooting message={onlineError} />}
           {onlineSlow && (
             <p className="online-wake-message">
               Waking the game server. This can take up to a minute on the free host.
@@ -926,6 +944,9 @@ export function App() {
               ? 'Share the code. The match stays here until a second player arrives.'
               : 'The server starts a short countdown as soon as both players are ready.'}
           </p>
+          {connectionStatus === 'failed' && onlineError && (
+            <ConnectionTroubleshooting message={onlineError} />
+          )}
           <div className="actions lobby-actions">
             <button
               className="button-primary"
@@ -1311,11 +1332,15 @@ export function App() {
                     ? 'Reconnecting...'
                     : 'Opponent reconnecting'}
               </h2>
-              <p>
-                {connectionStatus === 'failed'
-                  ? 'The room could not be restored.'
-                  : `The server has paused the match for up to ${Math.ceil((roomView?.reconnectRemainingMs ?? 30000) / 1000)} seconds.`}
-              </p>
+              {connectionStatus === 'failed' && onlineError ? (
+                <ConnectionTroubleshooting message={onlineError} />
+              ) : (
+                <p>
+                  {connectionStatus === 'failed'
+                    ? 'The room could not be restored.'
+                    : `The server has paused the match for up to ${Math.ceil((roomView?.reconnectRemainingMs ?? 30000) / 1000)} seconds.`}
+                </p>
+              )}
               <div className="actions">
                 {connectionStatus === 'failed' && (
                   <button onClick={() => void leaveOnline('online')}>Back to Online</button>
