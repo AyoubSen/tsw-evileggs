@@ -4,10 +4,29 @@ import { loadPreferences, savePreferences, type Preferences } from './preference
 import { MAP_ORDER, MAPS, getMap, type MapId } from '../maps/registry'
 import { validateMatchConfig, type LocalMatchConfig, type TurnDuration } from '../match/config'
 import { createGame, type GameHost } from '../game/GameHost'
+import { LocalMatchSource } from '../game/LocalMatchSource'
 import type { MatchResult } from '../game/types'
+import { isRoomCode, normalizeRoomCode } from '../network/protocol'
+import { OnlineRoomSession } from '../network/OnlineRoomSession'
+import {
+  OnlineSessionGenerationGuard,
+  isOnlineLifecycleCancellation,
+} from '../network/onlineLifecycle'
+import type { OnlineRoomView } from '../network/roomView'
 
-type Screen = 'menu' | 'setup' | 'how-to' | 'settings' | 'credits' | 'match'
+type Screen =
+  | 'menu'
+  | 'setup'
+  | 'online'
+  | 'online-create'
+  | 'online-join'
+  | 'online-lobby'
+  | 'how-to'
+  | 'settings'
+  | 'credits'
+  | 'match'
 type PausePanel = 'main' | 'how-to' | 'settings' | 'confirm-restart' | 'confirm-menu'
+type MatchMode = 'local' | 'online'
 
 const MAP_LABELS: Record<MapId, string> = {
   'rolling-hills': 'Open lanes',
@@ -189,44 +208,181 @@ export function App() {
   const [pausePanel, setPausePanel] = useState<PausePanel>('main')
   const [result, setResult] = useState<MatchResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [matchMode, setMatchMode] = useState<MatchMode>('local')
+  const [onlineSession, setOnlineSession] = useState<OnlineRoomSession | null>(null)
+  const [roomView, setRoomView] = useState<OnlineRoomView | null>(null)
+  const [roomCodeInput, setRoomCodeInput] = useState('')
+  const [onlineBusy, setOnlineBusy] = useState(false)
+  const [onlineError, setOnlineError] = useState<string | null>(null)
+  const [connectionStatus, setConnectionStatus] = useState<
+    'connected' | 'reconnecting' | 'failed' | 'left'
+  >('connected')
+  const [rematchVoted, setRematchVoted] = useState(false)
   const hostRef = useRef<HTMLDivElement>(null)
   const gameRef = useRef<GameHost | null>(null)
+  const reconnectAttemptedRef = useRef(false)
+  const activeSessionRef = useRef<OnlineRoomSession | null>(null)
+  const sessionGuardRef = useRef(new OnlineSessionGenerationGuard())
+  const startupAbortRef = useRef<AbortController | null>(null)
   const getVisualPreferences = useEffectEvent(() => ({
     reducedMotion: preferences.reducedMotion,
     aimGuide: preferences.aimGuide,
   }))
+  const isMatchCallbackCurrent = useEffectEvent((sessionGeneration: number | null) =>
+    Boolean(
+      screen === 'match' &&
+      (sessionGeneration === null || activeSessionRef.current?.generation === sessionGeneration),
+    ),
+  )
+
+  const beginOnlineOperation = () => {
+    startupAbortRef.current?.abort()
+    const controller = new AbortController()
+    startupAbortRef.current = controller
+    return { controller, generation: sessionGuardRef.current.begin() }
+  }
+
+  const isActiveSession = (session: OnlineRoomSession) =>
+    activeSessionRef.current?.generation === session.generation && !session.isDisposed
+
+  const activateSession = (
+    session: OnlineRoomSession,
+    operationGeneration: number,
+    controller: AbortController,
+  ): boolean => {
+    if (
+      controller.signal.aborted ||
+      !sessionGuardRef.current.isCurrent(operationGeneration) ||
+      session.isDisposed
+    ) {
+      void session.leave().catch(() => undefined)
+      return false
+    }
+    startupAbortRef.current = null
+    activeSessionRef.current = session
+    setOnlineSession(session)
+    setRoomView(session.view)
+    setMatchMode('online')
+    setConnectionStatus('connected')
+    return true
+  }
 
   useEffect(() => {
     savePreferences(preferences)
   }, [preferences])
   useEffect(() => {
+    if (reconnectAttemptedRef.current) return
+    reconnectAttemptedRef.current = true
+    const operation = beginOnlineOperation()
+    setConnectionStatus('reconnecting')
+    void OnlineRoomSession.reconnectStored(operation.controller.signal)
+      .then((session) => {
+        if (!sessionGuardRef.current.isCurrent(operation.generation)) {
+          if (session) void session.leave().catch(() => undefined)
+          return
+        }
+        startupAbortRef.current = null
+        if (!session) {
+          setConnectionStatus('connected')
+          return
+        }
+        if (!activateSession(session, operation.generation, operation.controller)) return
+        setScreen(session.view?.phase === 'waiting' ? 'online-lobby' : 'menu')
+      })
+      .catch((caught) => {
+        if (
+          isOnlineLifecycleCancellation(caught) ||
+          !sessionGuardRef.current.isCurrent(operation.generation)
+        )
+          return
+        startupAbortRef.current = null
+        setConnectionStatus('connected')
+      })
+  }, [])
+  useEffect(() => {
+    if (!onlineSession || !isActiveSession(onlineSession)) return
+    const sessionGeneration = onlineSession.generation
+    const isCurrent = () =>
+      activeSessionRef.current?.generation === sessionGeneration && !onlineSession.isDisposed
+    const enterMatchWhenReady = () => {
+      if (!isCurrent()) return
+      const view = onlineSession.view
+      if (!view || !onlineSession.source.ready || view.phase === 'waiting') return
+      setConfig(onlineSession.source.state.config)
+      setMatchMode('online')
+      if (view.phase !== 'results') {
+        setResult(null)
+        setRematchVoted(false)
+      }
+      setScreen('match')
+    }
+    const unsubscribeView = onlineSession.subscribeView((view) => {
+      if (!isCurrent()) return
+      setRoomView(view)
+      if (view.phase === 'waiting' && onlineSession.source.ready) setScreen('online-lobby')
+      if (view.phase === 'results' && view.result.available && onlineSession.source.ready)
+        setResult({
+          config: onlineSession.source.state.config,
+          winnerIndex: view.result.winnerSeat >= 0 ? view.result.winnerSeat : null,
+          remainingHealth: view.result.remainingHealth,
+          turnsTaken: view.result.turnsTaken,
+          durationSeconds: view.result.durationSeconds,
+        })
+      if (view.phase !== 'results') setRematchVoted(false)
+      enterMatchWhenReady()
+    })
+    const unsubscribeStatus = onlineSession.subscribeStatus((status, message) => {
+      if (!isCurrent()) return
+      setConnectionStatus(status)
+      if (status === 'failed' && message) setOnlineError(message)
+    })
+    const unsubscribeSource = onlineSession.source.subscribeState(enterMatchWhenReady)
+    enterMatchWhenReady()
+    return () => {
+      unsubscribeView()
+      unsubscribeStatus()
+      unsubscribeSource()
+    }
+  }, [onlineSession])
+  useEffect(() => {
     if (screen !== 'match' || !hostRef.current) return
+    if (matchMode === 'online' && (!onlineSession || !isActiveSession(onlineSession))) return
+    const sessionGeneration = onlineSession?.generation ?? null
+    const callbackIsCurrent = () => isMatchCallbackCurrent(sessionGeneration)
     try {
       const visualPreferences = getVisualPreferences()
-      gameRef.current = createGame(
+      const source = matchMode === 'online' ? onlineSession?.source : new LocalMatchSource(config)
+      if (!source) return
+      const gameHost = createGame(
         hostRef.current,
-        config,
+        source,
         {
           onPauseRequest: () => {
+            if (!callbackIsCurrent()) return
             setPausePanel('main')
             setPaused(true)
           },
-          onResult: setResult,
+          onResult: (nextResult) => {
+            if (callbackIsCurrent()) setResult(nextResult)
+          },
         },
         visualPreferences.reducedMotion,
         visualPreferences.aimGuide,
       )
+      gameRef.current = gameHost
       return () => {
-        gameRef.current?.destroy()
-        gameRef.current = null
+        gameHost.destroy()
+        if (gameRef.current === gameHost) gameRef.current = null
       }
     } catch (caught) {
+      if (isOnlineLifecycleCancellation(caught) || !callbackIsCurrent()) return
       console.error(caught)
-      queueMicrotask(() =>
-        setError('The match could not start. Please return to the menu and try again.'),
-      )
+      queueMicrotask(() => {
+        if (!callbackIsCurrent()) return
+        setError('The match could not start. Please return to the menu and try again.')
+      })
     }
-  }, [screen, config])
+  }, [screen, config, matchMode, onlineSession])
   useEffect(() => {
     if (paused) gameRef.current?.pause()
     else gameRef.current?.resume()
@@ -241,6 +397,7 @@ export function App() {
 
   const updatePreferences = (value: Preferences) => setPreferences(value)
   const openSetup = () => {
+    setMatchMode('local')
     setConfig(
       validateMatchConfig({
         playerNames: preferences.playerNames,
@@ -261,12 +418,106 @@ export function App() {
     })
     setResult(null)
     setError(null)
+    setMatchMode('local')
     setScreen('match')
   }
   const leaveMatch = () => {
     setPaused(false)
     setResult(null)
     setScreen('menu')
+  }
+  const createOnlineRoom = async () => {
+    const operation = beginOnlineOperation()
+    setOnlineBusy(true)
+    setOnlineError(null)
+    try {
+      const next = validateMatchConfig({
+        ...config,
+        playerNames: [config.playerNames[0], 'Opponent'],
+      })
+      const session = await OnlineRoomSession.create(
+        next.playerNames[0],
+        next,
+        operation.controller.signal,
+      )
+      if (!activateSession(session, operation.generation, operation.controller)) return
+      setPreferences({
+        ...preferences,
+        playerNames: [next.playerNames[0], preferences.playerNames[1]],
+        lastMapId: next.mapId,
+        turnDurationSeconds: next.turnDurationSeconds,
+      })
+      setConfig(next)
+      setScreen('online-lobby')
+    } catch (caught) {
+      if (
+        isOnlineLifecycleCancellation(caught) ||
+        !sessionGuardRef.current.isCurrent(operation.generation)
+      )
+        return
+      setOnlineError(caught instanceof Error ? caught.message : 'The room could not be created.')
+    } finally {
+      if (sessionGuardRef.current.isCurrent(operation.generation)) {
+        startupAbortRef.current = null
+        setOnlineBusy(false)
+      }
+    }
+  }
+  const joinOnlineRoom = async () => {
+    const code = normalizeRoomCode(roomCodeInput)
+    setRoomCodeInput(code)
+    if (!isRoomCode(code)) {
+      setOnlineError('Enter a valid 6-character room code.')
+      return
+    }
+    const operation = beginOnlineOperation()
+    setOnlineBusy(true)
+    setOnlineError(null)
+    try {
+      const session = await OnlineRoomSession.join(
+        code,
+        config.playerNames[0],
+        operation.controller.signal,
+      )
+      if (!activateSession(session, operation.generation, operation.controller)) return
+      setPreferences({
+        ...preferences,
+        playerNames: [config.playerNames[0], preferences.playerNames[1]],
+      })
+      setScreen('online-lobby')
+    } catch (caught) {
+      if (
+        isOnlineLifecycleCancellation(caught) ||
+        !sessionGuardRef.current.isCurrent(operation.generation)
+      )
+        return
+      setOnlineError(caught instanceof Error ? caught.message : 'The room could not be joined.')
+    } finally {
+      if (sessionGuardRef.current.isCurrent(operation.generation)) {
+        startupAbortRef.current = null
+        setOnlineBusy(false)
+      }
+    }
+  }
+  const leaveOnline = (destination: 'online' | 'menu' = 'online') => {
+    sessionGuardRef.current.invalidate()
+    startupAbortRef.current?.abort()
+    startupAbortRef.current = null
+    const session = activeSessionRef.current ?? onlineSession
+    activeSessionRef.current = null
+    setScreen(destination)
+    setMatchMode('local')
+    setPaused(false)
+    setResult(null)
+    setError(null)
+    setOnlineError(null)
+    setOnlineBusy(false)
+    setConnectionStatus('connected')
+    setRoomView(null)
+    setRoomCodeInput('')
+    setRematchVoted(false)
+    setOnlineSession(null)
+    if (session) void session.leave().catch(() => undefined)
   }
   const chooseMap = (mapId: MapId) => setConfig({ ...config, mapId })
   const content = () => {
@@ -287,6 +538,15 @@ export function App() {
               <button className="button-primary button-play" autoFocus onClick={openSetup}>
                 Play Local <span>›</span>
               </button>
+              <button
+                className="button-quiet button-play button-online"
+                onClick={() => {
+                  setOnlineError(null)
+                  setScreen('online')
+                }}
+              >
+                Play Online <span>›</span>
+              </button>
               <div className="menu-links">
                 <button className="button-quiet" onClick={() => setScreen('how-to')}>
                   How to Play
@@ -301,6 +561,259 @@ export function App() {
             </div>
           </div>
           <HeroDiorama />
+        </section>
+      )
+    if (screen === 'online')
+      return (
+        <section className="panel online-panel">
+          <p className="eyebrow">PRIVATE 1V1 ROOMS</p>
+          <h2>Meet across the table</h2>
+          <p>Create a six-character invite or join a friend. No account or public matchmaking.</p>
+          <div className="online-choice-grid">
+            <button
+              className="online-choice create-choice"
+              onClick={() => {
+                setOnlineError(null)
+                setConfig(
+                  validateMatchConfig({
+                    playerNames: [preferences.playerNames[0], 'Opponent'],
+                    mapId: preferences.lastMapId,
+                    turnDurationSeconds: preferences.turnDurationSeconds,
+                  }),
+                )
+                setScreen('online-create')
+              }}
+            >
+              <strong>Create Private Room</strong>
+              <span>Choose the map and clock, then share the code.</span>
+            </button>
+            <button
+              className="online-choice join-choice"
+              onClick={() => {
+                setOnlineError(null)
+                setConfig(
+                  validateMatchConfig({
+                    playerNames: [preferences.playerNames[0], 'Opponent'],
+                    mapId: preferences.lastMapId,
+                    turnDurationSeconds: preferences.turnDurationSeconds,
+                  }),
+                )
+                setScreen('online-join')
+              }}
+            >
+              <strong>Join Private Room</strong>
+              <span>Enter the code from the room creator.</span>
+            </button>
+          </div>
+          <button className="button-quiet" onClick={() => setScreen('menu')}>
+            Back
+          </button>
+        </section>
+      )
+    if (screen === 'online-create')
+      return (
+        <section className="battle-setup online-setup">
+          <header className="screen-heading">
+            <p className="eyebrow">CREATE PRIVATE ROOM</p>
+            <h2>Pack the invite</h2>
+            <p>Your server owns the match. You only choose where and how long each turn lasts.</p>
+          </header>
+          <div className="online-form-row">
+            <label>
+              <span>Your player name</span>
+              <input
+                maxLength={18}
+                value={config.playerNames[0]}
+                onChange={(event) =>
+                  setConfig({ ...config, playerNames: [event.target.value, 'Opponent'] })
+                }
+              />
+            </label>
+            <label>
+              <span>Turn clock</span>
+              <select
+                value={config.turnDurationSeconds}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    turnDurationSeconds: Number(event.target.value) as TurnDuration,
+                  })
+                }
+              >
+                <option value={20}>20 seconds</option>
+                <option value={30}>30 seconds</option>
+                <option value={45}>45 seconds</option>
+              </select>
+            </label>
+          </div>
+          <div className="map-cards online-map-cards">
+            {MAP_ORDER.map((id) => (
+              <button
+                key={id}
+                className={`map-card ${config.mapId === id ? 'selected' : ''}`}
+                onClick={() => chooseMap(id)}
+              >
+                <MapPreview mapId={id} />
+                <strong>{MAPS[id].displayName}</strong>
+                <em>{MAP_LABELS[id]}</em>
+                <span>{MAPS[id].description}</span>
+              </button>
+            ))}
+          </div>
+          {onlineError && <p className="form-error">{onlineError}</p>}
+          <div className="actions setup-actions">
+            <button
+              className="button-primary button-play"
+              disabled={onlineBusy}
+              onClick={createOnlineRoom}
+            >
+              {onlineBusy ? 'Connecting...' : 'Create Room'} <span>›</span>
+            </button>
+            <button
+              className="button-quiet"
+              disabled={onlineBusy}
+              onClick={() => setScreen('online')}
+            >
+              Back
+            </button>
+          </div>
+        </section>
+      )
+    if (screen === 'online-join')
+      return (
+        <section className="panel join-room-panel">
+          <p className="eyebrow">JOIN PRIVATE ROOM</p>
+          <h2>Unpack the code</h2>
+          <p>Spaces and letter case do not matter.</p>
+          <div className="join-room-form">
+            <label>
+              <span>Room code</span>
+              <input
+                className="room-code-input"
+                maxLength={10}
+                autoCapitalize="characters"
+                autoComplete="off"
+                autoFocus
+                placeholder="ABC234"
+                value={roomCodeInput}
+                onChange={(event) => setRoomCodeInput(normalizeRoomCode(event.target.value))}
+              />
+            </label>
+            <label>
+              <span>Your player name</span>
+              <input
+                maxLength={18}
+                value={config.playerNames[0]}
+                onChange={(event) =>
+                  setConfig({ ...config, playerNames: [event.target.value, 'Opponent'] })
+                }
+              />
+            </label>
+          </div>
+          {onlineError && <p className="form-error">{onlineError}</p>}
+          <div className="actions">
+            <button disabled={onlineBusy} onClick={joinOnlineRoom}>
+              {onlineBusy ? 'Joining...' : 'Join Room'}
+            </button>
+            <button className="secondary" disabled={onlineBusy} onClick={() => setScreen('online')}>
+              Back
+            </button>
+          </div>
+        </section>
+      )
+    if (screen === 'online-lobby' && roomView && onlineSession) {
+      const localPlayer = roomView.players.find(
+        (player) => player.sessionId === onlineSession.room.sessionId,
+      )
+      return (
+        <section className="panel room-lobby">
+          <div className="lobby-heading">
+            <div>
+              <p className="eyebrow">PRIVATE ROOM</p>
+              <h2>Ready the toybox</h2>
+            </div>
+            <div className="room-code-card">
+              <span>Room code</span>
+              <strong data-room-code>{roomView.roomCode}</strong>
+              <button
+                className="button-quiet"
+                onClick={() => void navigator.clipboard?.writeText(roomView.roomCode)}
+              >
+                Copy code
+              </button>
+            </div>
+          </div>
+          <div className="lobby-status-line">
+            <span className={`status-dot ${connectionStatus}`} />
+            {connectionStatus === 'connected' ? 'Connected to server' : 'Reconnecting...'}
+            <span>Compatible protocol {roomView.protocolVersion}</span>
+          </div>
+          <div className="lobby-seats">
+            {[0, 1].map((seat) => {
+              const player = roomView.players.find((candidate) => candidate.seat === seat)
+              return (
+                <article className={`lobby-seat seat-${seat + 1}`} key={seat}>
+                  <ToyAvatar player={seat === 0 ? 1 : 2} />
+                  <div>
+                    <span>{seat === 0 ? 'Host · Player 1' : 'Guest · Player 2'}</span>
+                    <strong>{player?.name ?? 'Waiting for player...'}</strong>
+                    <em>
+                      {!player
+                        ? 'Open seat'
+                        : !player.connected
+                          ? 'Reconnecting'
+                          : player.ready
+                            ? 'Ready'
+                            : 'Not ready'}
+                    </em>
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+          <div className="lobby-rules">
+            <div>
+              <span>Battlefield</span>
+              <strong>{getMap(roomView.mapId).displayName}</strong>
+            </div>
+            <div>
+              <span>Turn clock</span>
+              <strong>{roomView.turnDurationSeconds} seconds</strong>
+            </div>
+            <div>
+              <span>Start rule</span>
+              <strong>Both players ready</strong>
+            </div>
+          </div>
+          <p className="lobby-note">
+            {roomView.players.length < 2
+              ? 'Share the code. The match stays here until a second player arrives.'
+              : 'The server starts a short countdown as soon as both players are ready.'}
+          </p>
+          <div className="actions lobby-actions">
+            <button
+              className="button-primary"
+              disabled={!localPlayer?.connected}
+              onClick={() => onlineSession.setReady(!localPlayer?.ready)}
+            >
+              {localPlayer?.ready ? 'Cancel Ready' : 'Ready Up'}
+            </button>
+            <button className="secondary" onClick={() => void leaveOnline('online')}>
+              Leave Room
+            </button>
+          </div>
+        </section>
+      )
+    }
+    if (screen === 'online-lobby')
+      return (
+        <section className="panel room-lobby loading-lobby">
+          <p className="eyebrow">PRIVATE ROOM</p>
+          <h2>Connecting...</h2>
+          <p>Opening the room and checking game compatibility.</p>
+          <button className="button-quiet" onClick={() => void leaveOnline('online')}>
+            Cancel
+          </button>
         </section>
       )
     if (screen === 'setup')
@@ -455,18 +968,44 @@ export function App() {
       className={`app-shell ${preferences.reducedMotion ? 'reduced-motion' : ''} ${preferences.highContrastHud ? 'high-contrast' : ''}`}
     >
       <header className="brand">
-        <p className="eyebrow">TURN-BASED LOCAL PLAY</p>
+        <p className="eyebrow">TURN-BASED ARTILLERY</p>
         <h1>{BRAND.title}</h1>
         <p>{BRAND.subtitle}</p>
       </header>
-      {screen === 'match' ? <div className="game-frame" ref={hostRef} /> : content()}
+      {screen === 'match' ? (
+        <div className="online-game-stage">
+          <div className="game-frame" ref={hostRef} />
+          {matchMode === 'online' && roomView && (
+            <output
+              className="online-match-status"
+              data-room-code={roomView.roomCode}
+              data-server-tick={roomView.simulationTick}
+              data-match-generation={roomView.matchGeneration}
+              data-active-seat={roomView.activePlayerSeat}
+              data-player-zero-x={roomView.players.find((player) => player.seat === 0)?.x ?? 0}
+              data-player-zero-y={roomView.players.find((player) => player.seat === 0)?.y ?? 0}
+              data-player-one-x={roomView.players.find((player) => player.seat === 1)?.x ?? 0}
+              data-player-one-y={roomView.players.find((player) => player.seat === 1)?.y ?? 0}
+            >
+              <span className={`status-dot ${connectionStatus}`} />
+              Server tick {roomView.simulationTick} · room {roomView.roomCode}
+            </output>
+          )}
+        </div>
+      ) : (
+        content()
+      )}
       <footer>v{BRAND.version}</footer>
       {error && (
         <div className="modal">
           <section className="panel">
             <h2>Unable to start</h2>
             <p>{error}</p>
-            <button onClick={leaveMatch}>Return to menu</button>
+            <button
+              onClick={() => (matchMode === 'online' ? void leaveOnline('menu') : leaveMatch())}
+            >
+              Return to menu
+            </button>
           </section>
         </div>
       )}
@@ -480,7 +1019,9 @@ export function App() {
                 <button autoFocus onClick={() => setPaused(false)}>
                   Resume
                 </button>
-                <button onClick={() => setPausePanel('confirm-restart')}>Restart Match</button>
+                {matchMode === 'local' && (
+                  <button onClick={() => setPausePanel('confirm-restart')}>Restart Match</button>
+                )}
                 <button onClick={() => setPausePanel('how-to')}>How to Play</button>
                 <button onClick={() => setPausePanel('settings')}>Settings</button>
                 <button onClick={() => setPausePanel('confirm-menu')}>Return to Main Menu</button>
@@ -517,7 +1058,11 @@ export function App() {
             {pausePanel === 'confirm-menu' && (
               <>
                 <p>Return to the main menu and discard this match?</p>
-                <button onClick={leaveMatch}>Return to menu</button>
+                <button
+                  onClick={() => (matchMode === 'online' ? void leaveOnline('menu') : leaveMatch())}
+                >
+                  Return to menu
+                </button>
                 <button className="secondary" onClick={() => setPausePanel('main')}>
                   Cancel
                 </button>
@@ -540,30 +1085,90 @@ export function App() {
               {getMap(result.config.mapId).displayName} · {result.remainingHealth} health remaining
               · {result.turnsTaken} turns · {result.durationSeconds}s
             </p>
-            <div className="actions">
-              <button
-                onClick={() => {
-                  setResult(null)
-                  setScreen('setup')
-                }}
-              >
-                Change Map / Setup
-              </button>
-              <button
-                onClick={() => {
-                  gameRef.current?.restart()
-                  setResult(null)
-                }}
-              >
-                Rematch
-              </button>
-              <button className="secondary" onClick={leaveMatch}>
-                Main Menu
-              </button>
-            </div>
+            {matchMode === 'local' ? (
+              <div className="actions">
+                <button
+                  onClick={() => {
+                    setResult(null)
+                    setScreen('setup')
+                  }}
+                >
+                  Change Map / Setup
+                </button>
+                <button
+                  onClick={() => {
+                    gameRef.current?.restart()
+                    setResult(null)
+                  }}
+                >
+                  Rematch
+                </button>
+                <button className="secondary" onClick={leaveMatch}>
+                  Main Menu
+                </button>
+              </div>
+            ) : (
+              <>
+                <p className="rematch-status">
+                  {rematchVoted
+                    ? 'Rematch requested. Waiting for the other player.'
+                    : 'A rematch starts only when both players vote yes.'}
+                </p>
+                <div className="actions">
+                  <button
+                    onClick={() => {
+                      const next = !rematchVoted
+                      onlineSession?.voteRematch(next)
+                      setRematchVoted(next)
+                    }}
+                  >
+                    {rematchVoted ? 'Cancel Rematch' : 'Vote Rematch'}
+                  </button>
+                  <button className="secondary" onClick={() => void leaveOnline('online')}>
+                    Online Menu
+                  </button>
+                  <button className="secondary" onClick={() => void leaveOnline('menu')}>
+                    Main Menu
+                  </button>
+                </div>
+              </>
+            )}
           </section>
         </div>
       )}
+      {matchMode === 'online' &&
+        screen === 'match' &&
+        !result &&
+        !paused &&
+        (connectionStatus === 'reconnecting' ||
+          connectionStatus === 'failed' ||
+          roomView?.phase === 'reconnecting') && (
+          <div className="modal network-modal">
+            <section className="panel">
+              <p className="eyebrow">CONNECTION HOLD</p>
+              <h2>
+                {connectionStatus === 'failed'
+                  ? 'Connection ended'
+                  : connectionStatus === 'reconnecting'
+                    ? 'Reconnecting...'
+                    : 'Opponent reconnecting'}
+              </h2>
+              <p>
+                {connectionStatus === 'failed'
+                  ? 'The room could not be restored.'
+                  : `The server has paused the match for up to ${Math.ceil((roomView?.reconnectRemainingMs ?? 30000) / 1000)} seconds.`}
+              </p>
+              <div className="actions">
+                {connectionStatus === 'failed' && (
+                  <button onClick={() => void leaveOnline('online')}>Back to Online</button>
+                )}
+                <button className="secondary" onClick={() => void leaveOnline('menu')}>
+                  Leave Room
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
     </main>
   )
 }

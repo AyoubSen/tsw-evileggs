@@ -1,8 +1,8 @@
 # Mossfire Skirmish
 
-An original local browser artillery-game prototype. It takes broad inspiration from the readable, turn-based projectile play found in classic artillery games, but is not a remake or clone of any existing game. The characters, map, UI, naming, and code are original placeholder work.
+An original browser artillery game with local hot-seat and private online 1v1 play. It takes broad inspiration from the readable, turn-based projectile play found in classic artillery games, but is not a remake or clone of any existing game. The characters, maps, UI, naming, and code are original placeholder work.
 
-Mossfire Skirmish is an original local turn-based artillery game with destructible terrain, timed turns, movement, pull-back aiming, five weapons, and selectable maps.
+Mossfire Skirmish is an original turn-based artillery game with destructible terrain, timed turns, movement, pull-back aiming, five weapons, and selectable maps.
 
 ## Run locally
 
@@ -13,12 +13,16 @@ pnpm install
 pnpm dev
 ```
 
+`pnpm dev` runs Vite and the Colyseus server together. Use `pnpm dev:web` or `pnpm dev:server` to run one side. Copy `.env.example` to `.env` when the defaults are not suitable. `VITE_COLYSEUS_URL` selects the browser endpoint, `PORT` selects the server port, and `ALLOWED_WEB_ORIGINS` is the comma-separated HTTP/WebSocket origin allowlist. Production startup fails when that allowlist is missing.
+
 Other useful commands:
 
 ```sh
 pnpm typecheck
 pnpm lint
 pnpm test
+pnpm test:server
+pnpm test:browser
 pnpm build
 pnpm format:check
 ```
@@ -31,9 +35,9 @@ pnpm format:check
 - Primary mouse drag: pull backward from the firing direction and choose power from pull distance. Releasing locks the aim; it does not fire.
 - `1`–`5`: select Basic Rocket, Timed Grenade, Scatter Shot, Cluster Charge, or Teleporter.
 - `Space`: activate the selected weapon on the active player's turn.
-- `R`: restart the match at any time.
+- `R`: open the pause menu during a legal input turn.
 
-Use the main menu to start a local match, configure names, duration, and map, and access settings or controls. Escape pauses an active match.
+Use the main menu to start a local match or create/join a private online room. Escape pauses local play; online it opens only the local menu and never pauses the server.
 
 ## Maps
 
@@ -57,20 +61,25 @@ Successful activation consumes ammunition once and locks input until the action 
 ## Technology and architecture
 
 - **React + Vite** owns the page shell and starts/destroys the game canvas in `src/app/App.tsx`.
-- **Phaser** owns the active match input, render loop, and draw calls in `src/game/scenes/MatchScene.ts`.
-- **Pure simulation helpers** in `src/simulation/` contain projectile integration, damage/knockback falloff, and turn transition logic. These are intentionally independent of Phaser to make a future server-authoritative simulation extraction practical.
+- **MatchSimulation** in `src/simulation/match/MatchSimulation.ts` owns players, fixed-tick movement, turns, timer, ammunition, every weapon, projectiles, terrain mutations, damage, falling, and victory without depending on Phaser or browser APIs.
+- **Typed commands and events** in `src/simulation/match/` form the authority boundary used by both local and server-hosted play.
+- **Match sources** in `src/game/matchSource.ts`, `src/game/LocalMatchSource.ts`, and `src/network/OnlineMatchSource.ts` let one Phaser scene consume either local authority or synchronized server state.
+- **Phaser** converts keyboard and pointer intent into commands, renders read-only source state, interpolates online entity positions through the online source, and consumes events in `src/game/scenes/MatchScene.ts`.
+- **PrivateMatchRoom** in `server/rooms/PrivateMatchRoom.ts` owns the online `MatchSimulation`, 60 Hz command/tick loop, ready/countdown flow, Schema projection, snapshots, sequenced events, disconnect pause, forfeit, and rematch.
+- **Colyseus Schema** patches player/projectile and room state every 50 ms (20 Hz). The authoritative simulation still runs at 60 Hz; clients interpolate only visual positions between patches.
+- **Private room codes** are six-character aliases held by the single-process registry in `server/roomCodeRegistry.ts` and resolved by `server/app.config.ts`. They are invitations, not authentication secrets.
+- **Shared protocol validation** and explicit protocol/snapshot/map/weapon/build versions live in `src/network/protocol.ts`.
 - **Weapon registry and inventories** live in `src/weapons/registry.ts`; shared definitions are separate from scene runtime behaviour.
 - **Map registry** lives in `src/maps/registry.ts`; it owns terrain profiles and spawn points independently of scenes.
-- **MapSelectScene** owns the small pre-match selector; `MatchScene` receives the chosen map ID through Phaser scene data.
-- **Shared numerical game data** is in `src/shared/`.
+- **Serialization and replay** live in `src/simulation/serialization/` and `src/simulation/replay/`. Snapshots store the map plus ordered terrain operations rather than texture data.
 
-The prototype keeps Phaser from becoming the conceptual source of truth for projectile math and damage. The scene orchestrates those pure functions and performs rendering/input only where Phaser is useful.
+The simulation advances at 60 fixed ticks per second. Local Phaser play uses a capped accumulator; online rooms use the server room interval and deterministic FIFO command ordering. Authoritative state uses plain JSON-compatible objects and arrays; Phaser graphics, input objects, and effects never enter snapshots.
 
 ## Terrain implementation
 
 `TerrainMask` is a compact `Uint8Array` occupancy grid at half the logical canvas resolution (2 game pixels per cell). Terrain begins as a deterministic rolling ground fill. A rocket removes all occupied cells whose centers lie inside its blast circle. The same mask is used for rendering, projectile collision, and character ground detection, so visible holes and gameplay collision stay aligned.
 
-This approach is simple and reliable for one small map. Rendering scans each occupancy column into solid runs every frame, which is intentionally unoptimized but transparent and acceptable for this prototype. A future milestone should cache/redraw terrain only after destruction and improve terrain-side collision.
+This approach is simple and reliable for the small maps. Rendering scans each occupancy column into solid runs every frame, which is intentionally unoptimized but transparent and acceptable for this prototype. Online clients reconstruct the initial terrain from the map registry and apply duplicate-safe ordered subtraction operations. A future milestone may compact long operation histories into periodic terrain checkpoints.
 
 ## Physics and turns
 
@@ -94,15 +103,21 @@ At the default 68% power and 45°, the rocket's ideal level-ground range is abou
 
 ## Tests
 
-Vitest tests cover keyboard aliases, pull-back direction/power clamping, responsive canvas-to-world conversion, jump eligibility, launch velocity, short fixed-step guide integration, timer progression/pausing/expiration, input permissions, turn transitions/victory detection, circular terrain removal, and weapon validation. Browser rendering and pointer integration remain manual testing concerns.
+Vitest tests cover command validation, fixed-step determinism, pause and timer authority, all five weapons, terrain reconstruction, serialization, replay checksums, victory and draw handling, room codes, seat assignment, ready/start lifecycle, server command authority, snapshots, event gaps, terrain deduplication, reconnection, forfeit, and rematch. Run simulation-only tests with `pnpm test:simulation` and online tests with `pnpm test:server`. The Playwright smoke test uses installed headless Edge and two isolated browser contexts.
 
 ## Known limitations
 
 - Character collision is deliberately simple: it is ground/surface based rather than a full capsule-vs-terrain solver, so steep crater walls can look rough.
-- There is one map, no sound, no particles, and no mobile controls.
+- There is no sound, no particles, and no mobile controls.
 - Scatter traces are simulation-only in this prototype; their impact feedback is limited to damage and knockback.
 - The trajectory guide intentionally shows only its initial 8/60 s segment and does not predict impacts.
 - The terrain renderer redraws the entire small mask each frame rather than caching a texture.
-- This is local hot-seat only and contains no networking or persistence.
+- Terrain operation history currently grows for the life of a match. A long-running server should compact old operations into periodic terrain snapshots.
+- The event queue is capped and intended to be drained every simulation update; events are presentation notifications, not reconstruction data.
+- Character physics remain intentionally simple, and authoritative floating-point math assumes the same JavaScript runtime semantics on server and replay hosts.
+- Private-room lookup is intentionally in-memory and single-process. Restarting the server invalidates room codes and active matches.
+- There are no accounts, authentication, public matchmaking, database, Redis, rankings, spectators, or horizontal scaling.
+- Online rendering uses simple interpolation without client prediction or rollback, so movement can feel less immediate on high-latency links.
+- A separately deployed web client must set `VITE_COLYSEUS_URL` to the public TLS endpoint; the server must set its public port/address and exact `ALLOWED_WEB_ORIGINS`. HTTPS pages require WSS/HTTPS for the game server.
 
 # tsw-evileggs

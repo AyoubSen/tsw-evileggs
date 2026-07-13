@@ -12,6 +12,11 @@ export type DragAim = {
   worldAngle: number
 }
 
+export type RectangleBounds = Pick<
+  { left: number; top: number; width: number; height: number },
+  'left' | 'top' | 'width' | 'height'
+>
+
 export function movementDirection(codes: ReadonlySet<string>): -1 | 0 | 1 {
   return (Number(codes.has('KeyD')) - Number(codes.has('KeyQ') || codes.has('KeyA'))) as -1 | 0 | 1
 }
@@ -68,7 +73,7 @@ export function dragAim(
 export function canvasPointToWorld(
   clientX: number,
   clientY: number,
-  bounds: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>,
+  bounds: RectangleBounds,
   worldWidth: number,
   worldHeight: number,
 ): Vector {

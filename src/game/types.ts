@@ -1,12 +1,6 @@
-import type { LocalMatchConfig } from '../match/config'
+import type { SimulationMatchResult } from '../simulation/match/MatchEvent'
 
-export type MatchResult = {
-  config: LocalMatchConfig
-  winnerIndex: number | null
-  remainingHealth: number
-  turnsTaken: number
-  durationSeconds: number
-}
+export type MatchResult = SimulationMatchResult
 
 export type GameEvents = {
   onPauseRequest: () => void

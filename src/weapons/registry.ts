@@ -2,6 +2,7 @@ import { BASIC_ROCKET } from './basicRocket'
 
 export type WeaponId =
   'basic-rocket' | 'timed-grenade' | 'scatter-shot' | 'cluster-charge' | 'teleporter'
+export const WEAPON_REGISTRY_VERSION = 'weapons-1'
 export type WeaponDefinition = {
   id: WeaponId
   displayName: string
@@ -90,6 +91,10 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     gravityScale: 0,
     knockbackForce: 0,
   },
+}
+
+export function isWeaponId(value: unknown): value is WeaponId {
+  return typeof value === 'string' && value in WEAPONS
 }
 
 export type WeaponInventory = Record<WeaponId, number | 'unlimited'>

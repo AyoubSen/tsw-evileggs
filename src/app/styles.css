@@ -202,6 +202,11 @@ select:focus-visible {
   font-size: 1.65em;
   line-height: 0.6;
 }
+.button-online {
+  margin-top: 12px;
+  background: #dff1e8;
+  color: var(--blue-dark);
+}
 .menu-links {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -685,6 +690,255 @@ select {
 .copy-grid {
   display: grid;
 }
+.online-panel,
+.join-room-panel,
+.room-lobby {
+  max-width: 960px;
+}
+.online-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin: 30px 0;
+}
+.online-choice {
+  min-height: 190px;
+  padding: 28px;
+  border: 3px solid var(--line);
+  border-radius: 26px 19px 29px 18px;
+  background: #dceef2;
+  color: var(--ink);
+  box-shadow: 0 7px 0 #86a9b6;
+  text-align: left;
+  transition:
+    transform 0.14s ease,
+    box-shadow 0.14s ease;
+}
+.online-choice.join-choice {
+  background: #f9d9dc;
+  box-shadow: 0 7px 0 #d598a2;
+  transform: rotate(0.7deg);
+}
+.online-choice:hover,
+.online-choice:focus-visible {
+  transform: translateY(-4px) rotate(-0.5deg);
+  box-shadow: 0 11px 0 var(--line);
+}
+.online-choice strong,
+.online-choice span {
+  display: block;
+}
+.online-choice strong {
+  margin-bottom: 12px;
+  font:
+    900 clamp(1.4rem, 3vw, 2.1rem)/1 Impact,
+    'Arial Black',
+    sans-serif;
+  text-transform: uppercase;
+}
+.online-choice span {
+  max-width: 300px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+.online-form-row,
+.join-room-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+}
+.online-form-row label,
+.join-room-form label {
+  padding: 16px;
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  background: #fffaf0;
+}
+.online-form-row label span,
+.join-room-form label span {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--clay-dark);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.online-form-row input,
+.join-room-form input {
+  width: 100%;
+  padding: 11px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  color: var(--ink);
+  font-weight: 900;
+}
+.online-map-cards {
+  margin-top: 20px;
+}
+.room-code-input {
+  color: var(--blue-dark) !important;
+  font:
+    900 1.65rem/1 'Courier New',
+    monospace !important;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.form-error {
+  padding: 11px 14px;
+  border: 2px solid var(--danger);
+  border-radius: 12px;
+  background: #ffe3dc;
+  color: #8b271f;
+  font-weight: 900;
+}
+.lobby-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.room-code-card {
+  min-width: 260px;
+  padding: 16px;
+  border: 3px solid var(--line);
+  border-radius: 18px 23px 16px 20px;
+  background: var(--sun);
+  box-shadow: 0 5px 0 var(--line);
+  text-align: center;
+  transform: rotate(1deg);
+}
+.room-code-card > span,
+.room-code-card > strong {
+  display: block;
+}
+.room-code-card > span {
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.room-code-card > strong {
+  margin: 7px 0 12px;
+  font:
+    900 2.1rem/1 'Courier New',
+    monospace;
+  letter-spacing: 0.16em;
+}
+.room-code-card button {
+  padding: 7px 12px;
+  box-shadow: 0 3px 0 var(--line);
+}
+.lobby-status-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 25px 0 14px;
+  color: #66584a;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+.lobby-status-line span:last-child {
+  margin-left: auto;
+}
+.status-dot {
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  background: var(--health);
+}
+.status-dot.reconnecting {
+  background: var(--sun);
+}
+.status-dot.failed {
+  background: var(--danger);
+}
+.lobby-seats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.lobby-seat {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 130px;
+  padding: 20px;
+  border: 3px solid var(--line);
+  border-radius: 23px 17px 26px 19px;
+  background: #dceef2;
+  box-shadow: 0 6px 0 #8aaebd;
+}
+.lobby-seat.seat-2 {
+  background: #f9d9dc;
+  box-shadow: 0 6px 0 #d598a2;
+}
+.lobby-seat div > span,
+.lobby-seat div > strong,
+.lobby-seat div > em {
+  display: block;
+}
+.lobby-seat div > span {
+  color: #66584a;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.lobby-seat div > strong {
+  margin: 5px 0;
+  font-size: 1.2rem;
+}
+.lobby-seat div > em {
+  color: var(--clay-dark);
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 900;
+}
+.lobby-rules {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 22px;
+}
+.lobby-rules > div {
+  padding: 13px;
+  border: 2px dashed #a98c5e;
+  border-radius: 12px;
+  background: #fff9e9;
+}
+.lobby-rules span,
+.lobby-rules strong {
+  display: block;
+}
+.lobby-rules span {
+  color: #786753;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.lobby-rules strong {
+  margin-top: 4px;
+  font-size: 0.9rem;
+}
+.lobby-note,
+.rematch-status {
+  color: #66584a;
+  font-weight: 700;
+}
+.lobby-actions button {
+  padding: 13px 18px;
+}
+.loading-lobby {
+  text-align: center;
+}
+.network-modal .panel {
+  max-width: 560px;
+  text-align: center;
+}
 .game-frame {
   width: 100%;
   aspect-ratio: 16/9;
@@ -695,6 +949,25 @@ select {
   box-shadow:
     0 10px 0 var(--line),
     0 18px 34px var(--shadow);
+}
+.online-game-stage {
+  position: relative;
+}
+.online-match-status {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: #fff4d8df;
+  color: var(--ink);
+  font-size: 0.68rem;
+  font-weight: 900;
+  pointer-events: none;
 }
 .game-frame canvas {
   display: block;
@@ -839,6 +1112,28 @@ footer {
   }
   .hero-diorama {
     min-height: 230px;
+  }
+  .online-choice-grid,
+  .online-form-row,
+  .join-room-form,
+  .lobby-seats,
+  .lobby-rules {
+    grid-template-columns: 1fr;
+  }
+  .lobby-heading {
+    display: block;
+  }
+  .room-code-card {
+    min-width: 0;
+    margin-top: 20px;
+  }
+  .lobby-status-line {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .lobby-status-line span:last-child {
+    width: 100%;
+    margin-left: 20px;
   }
   .battle-setup,
   .panel {

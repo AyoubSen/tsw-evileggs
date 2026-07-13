@@ -2,6 +2,7 @@ import { GAME_HEIGHT, GAME_WIDTH } from '../shared/constants'
 import { TerrainMask } from '../terrain/TerrainMask'
 
 export type MapId = 'rolling-hills' | 'twin-peaks' | 'broken-crossing' | 'crater-basin'
+export const MAP_REGISTRY_VERSION = 'maps-1'
 export type MapDefinition = {
   id: MapId
   displayName: string
@@ -48,6 +49,10 @@ export const MAPS: Record<MapId, MapDefinition> = {
 
 export function getMap(id: string | undefined): MapDefinition {
   return id && id in MAPS ? MAPS[id as MapId] : MAPS['rolling-hills']
+}
+
+export function isMapId(value: unknown): value is MapId {
+  return typeof value === 'string' && value in MAPS
 }
 
 export function createMapTerrain(map: MapDefinition, scale = 2): TerrainMask {
