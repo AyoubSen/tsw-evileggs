@@ -794,6 +794,16 @@ select {
   color: #8b271f;
   font-weight: 900;
 }
+
+.online-wake-message {
+  margin: 0.85rem 0 0;
+  padding: 0.8rem 1rem;
+  border: 2px solid rgba(247, 189, 63, 0.55);
+  border-radius: 12px;
+  background: rgba(255, 237, 177, 0.45);
+  color: #5c482f;
+  font-weight: 700;
+}
 .lobby-heading {
   display: flex;
   align-items: flex-start;

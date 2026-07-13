@@ -8,8 +8,8 @@ import type { SerializedMatchState } from '../simulation/match/MatchState'
 import { WEAPON_ORDER, WEAPON_REGISTRY_VERSION } from '../weapons/registry'
 
 export const PRIVATE_MATCH_ROOM = 'private_match'
-export const PROTOCOL_VERSION = 'private-room-1'
-export const SIMULATION_SNAPSHOT_VERSION = 1
+export const PROTOCOL_VERSION = 'private-room-2'
+export const SIMULATION_SNAPSHOT_VERSION = 2
 export const CLIENT_BUILD_VERSION = '0.5.0'
 export const ROOM_CODE_LENGTH = 6
 export const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/
@@ -52,6 +52,7 @@ export type ClientRoomMessage =
       lastTerrainSequence: number
     }
   | { type: 'rematch-vote'; wantsRematch: boolean }
+  | { type: 'latency-ping'; nonce: number }
 
 export type NetworkCommandRejection =
   | CommandRejection
@@ -79,10 +80,21 @@ export type ServerRoomMessage =
       authoritativeTick: number
       matchGeneration: number
     }
-  | { type: 'simulation-events'; fromSequence: number; events: MatchEvent[] }
+  | {
+      type: 'simulation-events'
+      matchGeneration: number
+      fromSequence: number
+      events: MatchEvent[]
+    }
   | FullSnapshotMessage
-  | { type: 'match-result'; result: SimulationMatchResult; reason: 'normal' | 'forfeit' }
+  | {
+      type: 'match-result'
+      matchGeneration: number
+      result: SimulationMatchResult
+      reason: 'normal' | 'forfeit'
+    }
   | { type: 'room-error'; code: string; message: string }
+  | { type: 'latency-pong'; nonce: number }
 
 export type CreateRoomOptions = {
   playerName: string
@@ -178,6 +190,9 @@ export const clientRoomMessageSchema = z.discriminatedUnion('type', [
     })
     .strict(),
   z.object({ type: z.literal('rematch-vote'), wantsRematch: z.boolean() }).strict(),
+  z
+    .object({ type: z.literal('latency-ping'), nonce: z.number().int().safe().nonnegative() })
+    .strict(),
 ])
 
 export function normalizeRoomCode(value: string): string {

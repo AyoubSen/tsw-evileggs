@@ -267,7 +267,8 @@ export class PrivateMatchRoom extends Room<{
     if (message.type === 'set-ready') this.setReady(player, message.ready)
     else if (message.type === 'command') this.queueCommand(client, player, message)
     else if (message.type === 'request-snapshot') this.sendSnapshot(client)
-    else this.setRematchVote(player, message.wantsRematch)
+    else if (message.type === 'rematch-vote') this.setRematchVote(player, message.wantsRematch)
+    else this.sendTo(client, { type: 'latency-pong', nonce: message.nonce })
   }
 
   private setReady(player: RoomPlayerState, ready: boolean): void {
@@ -452,6 +453,7 @@ export class PrivateMatchRoom extends Room<{
       this.recentEvents.splice(0, this.recentEvents.length - MAX_RECENT_EVENTS)
     this.broadcast(NETWORK_MESSAGE_TYPE, {
       type: 'simulation-events',
+      matchGeneration: this.state.matchGeneration,
       fromSequence: events[0].sequence,
       events,
     } satisfies ServerRoomMessage)
@@ -506,6 +508,7 @@ export class PrivateMatchRoom extends Room<{
     projectSimulationState(this.state, this.simulation.state)
     this.broadcast(NETWORK_MESSAGE_TYPE, {
       type: 'match-result',
+      matchGeneration: this.state.matchGeneration,
       result,
       reason,
     } satisfies ServerRoomMessage)
@@ -538,7 +541,6 @@ export class PrivateMatchRoom extends Room<{
     this.countdownRemainingMs = 0
     this.matchHasBegun = false
     this.state.phase = 'waiting'
-    this.state.matchGeneration = Math.max(0, this.state.matchGeneration - 1)
     this.state.countdownRemainingMs = 0
     this.state.reconnectRemainingMs = 0
     this.state.simulationTick = 0

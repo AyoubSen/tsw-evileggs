@@ -8,13 +8,49 @@ const enterOnlineMenu = async (page: Page) => {
 const serverTick = async (page: Page) =>
   Number(await page.locator('.online-match-status').getAttribute('data-server-tick'))
 
+const statusNumber = async (page: Page, attribute: string) =>
+  Number(await page.locator('.online-match-status').getAttribute(attribute))
+
 test('private room authority, reconnect, result, and rematch', async ({ browser, request }) => {
   const contextA = await browser.newContext()
   const contextB = await browser.newContext()
   const playerA = await contextA.newPage()
   const playerB = await contextB.newPage()
 
+  const health = await request.get('http://127.0.0.1:2677/health', {
+    headers: { Origin: 'http://127.0.0.1:5173' },
+  })
+  expect(health.ok()).toBe(true)
+  expect(await health.json()).toEqual({
+    status: 'ok',
+    service: 'mossfire-server',
+    protocolVersion: 1,
+  })
+  expect(health.headers()['access-control-allow-origin']).toBe('http://127.0.0.1:5173')
+
   await enterOnlineMenu(playerA)
+  await playerA.getByRole('button', { name: /Create Private Room/i }).click()
+  await playerA.getByLabel('Your player name').fill('Atlas')
+  let healthAttempts = 0
+  await playerA.route('**/health', async (route) => {
+    healthAttempts += 1
+    await new Promise((resolve) => setTimeout(resolve, 6500))
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'ok', service: 'mossfire-server', protocolVersion: 1 }),
+    })
+  })
+  await playerA.getByRole('button', { name: /^Create Room/i }).evaluate((button) => {
+    ;(button as HTMLButtonElement).click()
+    ;(button as HTMLButtonElement).click()
+  })
+  await expect(playerA.getByRole('button', { name: /Connecting/i })).toBeDisabled()
+  await expect(playerA.getByText(/Waking the game server/i)).toBeVisible({ timeout: 7000 })
+  expect(healthAttempts).toBe(1)
+  await playerA.getByRole('button', { name: 'Cancel' }).click()
+  await expect(playerA.getByRole('button', { name: /Create Private Room/i })).toBeVisible()
+  await playerA.unrouteAll({ behavior: 'wait' })
   await playerA.getByRole('button', { name: /Create Private Room/i }).click()
   await playerA.getByLabel('Your player name').fill('Atlas')
   await playerA.getByRole('button', { name: /^Create Room/i }).click()
@@ -36,6 +72,36 @@ test('private room authority, reconnect, result, and rematch', async ({ browser,
   await expect.poll(() => serverTick(playerA)).toBeGreaterThan(0)
   await expect.poll(() => serverTick(playerB)).toBeGreaterThan(0)
   expect(Math.abs((await serverTick(playerA)) - (await serverTick(playerB)))).toBeLessThan(8)
+  await expect(playerA.locator('canvas')).toHaveAttribute('data-wind', /-?\d+/)
+  expect(await playerA.locator('canvas').getAttribute('data-wind')).toBe(
+    await playerB.locator('canvas').getAttribute('data-wind'),
+  )
+  expect(await statusNumber(playerA, 'data-wind')).toBe(await statusNumber(playerB, 'data-wind'))
+
+  await playerA.locator('canvas').focus()
+  await playerA.keyboard.press('Space')
+  await expect.poll(() => statusNumber(playerA, 'data-projectile-count')).toBeGreaterThan(0)
+  await expect.poll(() => statusNumber(playerB, 'data-projectile-count')).toBeGreaterThan(0)
+  await expect.poll(() => statusNumber(playerA, 'data-terrain-sequence')).toBeGreaterThan(0)
+  expect(await statusNumber(playerA, 'data-terrain-sequence')).toBe(
+    await statusNumber(playerB, 'data-terrain-sequence'),
+  )
+  await expect
+    .poll(async () => Number(await playerA.locator('canvas').getAttribute('data-explosion-count')))
+    .toBeGreaterThan(0)
+  await expect
+    .poll(async () => Number(await playerB.locator('canvas').getAttribute('data-explosion-count')))
+    .toBeGreaterThan(0)
+  const explosionsA = Number(await playerA.locator('canvas').getAttribute('data-explosion-count'))
+  const explosionsB = Number(await playerB.locator('canvas').getAttribute('data-explosion-count'))
+  expect(explosionsA).toBe(1)
+  expect(explosionsA).toBe(explosionsB)
+  await expect
+    .poll(async () => Number(await playerA.locator('canvas').getAttribute('data-damage-count')))
+    .toBeGreaterThan(0)
+  expect(await playerA.locator('canvas').getAttribute('data-damage-count')).toBe(
+    await playerB.locator('canvas').getAttribute('data-damage-count'),
+  )
 
   const tickBeforeMove = await serverTick(playerA)
   await playerA.locator('canvas').focus()
@@ -50,6 +116,8 @@ test('private room authority, reconnect, result, and rematch', async ({ browser,
   await expect(playerA.getByRole('heading', { name: /Opponent reconnecting/i })).toBeHidden({
     timeout: 15_000,
   })
+  expect(await playerB.locator('canvas').getAttribute('data-explosion-count')).toBe('0')
+  expect(await playerB.locator('canvas').getAttribute('data-damage-count')).toBe('0')
   const simulatedResult = await request.post(
     `http://127.0.0.1:2677/__test/private-rooms/${roomCode}/result`,
   )
@@ -68,6 +136,13 @@ test('private room authority, reconnect, result, and rematch', async ({ browser,
   await expect(playerB.locator('.online-match-status')).toHaveAttribute(
     'data-match-generation',
     '2',
+  )
+  await expect(playerA.locator('canvas')).toHaveAttribute('data-effect-count', '0')
+  await expect(playerB.locator('canvas')).toHaveAttribute('data-effect-count', '0')
+  await expect(playerA.locator('.online-match-status')).toHaveAttribute('data-event-sequence', '0')
+  await expect(playerB.locator('.online-match-status')).toHaveAttribute('data-event-sequence', '0')
+  expect(await playerA.locator('canvas').getAttribute('data-wind')).toBe(
+    await playerB.locator('canvas').getAttribute('data-wind'),
   )
 
   await expect.poll(() => serverTick(playerA)).toBeGreaterThan(0)

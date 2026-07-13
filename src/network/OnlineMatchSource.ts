@@ -5,10 +5,12 @@ import type { MatchEvent, SimulationMatchResult } from '../simulation/match/Matc
 import type { MatchState, SimProjectile } from '../simulation/match/MatchState'
 import { reconstructTerrain } from '../simulation/match/MatchSimulation'
 import { SIMULATION_HZ } from '../simulation/match/MatchState'
+import { matchStateChecksum } from '../simulation/serialization/matchSerialization'
 import type { TerrainMask } from '../terrain/TerrainMask'
 import type { Vector } from '../shared/types'
 import { GAME_HEIGHT, GAME_WIDTH } from '../shared/constants'
 import { NETWORK_MESSAGE_TYPE, type FullSnapshotMessage, type ServerRoomMessage } from './protocol'
+import { INTERPOLATION_SNAP_THRESHOLD, samplePosition, type PositionSample } from './interpolation'
 
 type StateListener = (state: MatchState) => void
 type PendingCommand = {
@@ -58,6 +60,7 @@ type OnlineSchemaState = {
   activePlayerSeat: number
   matchPhase: MatchState['phase']
   timerRemainingTicks: number
+  wind: number
   result: {
     available: boolean
     winnerSeat: number
@@ -81,8 +84,8 @@ export class OnlineMatchSource implements MatchSource {
   private readonly events: MatchEvent[] = []
   private readonly stateListeners = new Set<StateListener>()
   private readonly pendingCommands = new Map<number, PendingCommand>()
-  private readonly targetPlayers = new Map<number, Vector>()
-  private readonly targetProjectiles = new Map<string, Vector>()
+  private readonly playerSamples = new Map<number, PositionSample[]>()
+  private readonly projectileSamples = new Map<string, PositionSample[]>()
   private listenerDisposers: Array<() => void> = []
   private commandId = 0
   private lastEventSequence = 0
@@ -131,18 +134,21 @@ export class OnlineMatchSource implements MatchSource {
 
   update(deltaSeconds: number): void {
     if (this.disposed || !this.snapshotState) return
-    const alpha = 1 - Math.exp(-Math.max(0, deltaSeconds) * 18)
+    if (!Number.isFinite(deltaSeconds)) return
+    const now = performance.now()
     this.snapshotState.players.forEach((player, seat) => {
-      const target = this.targetPlayers.get(seat)
-      if (!target) return
-      player.position.x += (target.x - player.position.x) * alpha
-      player.position.y += (target.y - player.position.y) * alpha
+      const sampled = samplePosition(this.playerSamples.get(seat) ?? [], now, player.position)
+      player.position = sampled.position
+      if (sampled.snap) this.keepLatestSample(this.playerSamples, seat)
     })
     for (const projectile of this.snapshotState.projectiles) {
-      const target = this.targetProjectiles.get(projectile.id)
-      if (!target) continue
-      projectile.position.x += (target.x - projectile.position.x) * alpha
-      projectile.position.y += (target.y - projectile.position.y) * alpha
+      const sampled = samplePosition(
+        this.projectileSamples.get(projectile.id) ?? [],
+        now,
+        projectile.position,
+      )
+      projectile.position = sampled.position
+      if (sampled.snap) this.keepLatestSample(this.projectileSamples, projectile.id)
     }
   }
 
@@ -249,8 +255,8 @@ export class OnlineMatchSource implements MatchSource {
     this.pendingCommands.clear()
     this.stateListeners.clear()
     this.events.splice(0)
-    this.targetPlayers.clear()
-    this.targetProjectiles.clear()
+    this.playerSamples.clear()
+    this.projectileSamples.clear()
   }
 
   private receiveServerMessage(value: unknown): void {
@@ -258,9 +264,13 @@ export class OnlineMatchSource implements MatchSource {
     if (!isRecord(value) || typeof value.type !== 'string') return
     const message = value as ServerRoomMessage
     if (message.type === 'full-snapshot') this.applySnapshot(message)
-    else if (message.type === 'simulation-events')
+    else if (
+      message.type === 'simulation-events' &&
+      message.matchGeneration === this.matchGeneration
+    )
       this.applyEvents(message.events, message.fromSequence)
     else if (message.type === 'command-result') {
+      if (message.matchGeneration !== this.matchGeneration) return
       const pending = this.pendingCommands.get(message.commandId)
       if (!pending) return
       clearTimeout(pending.timeout)
@@ -279,12 +289,20 @@ export class OnlineMatchSource implements MatchSource {
               reason: message.reason ?? 'malformed-message',
             },
       )
-    } else if (message.type === 'match-result') this.queueResult(message.result)
+    } else if (message.type === 'match-result' && message.matchGeneration === this.matchGeneration)
+      this.queueResult(message.result)
   }
 
   private applySnapshot(message: FullSnapshotMessage): void {
     if (this.disposed) return
-    if (message.snapshot.version !== 1 || !message.snapshot.state) return
+    if (message.snapshot.version !== 2 || !message.snapshot.state) return
+    if (message.matchGeneration < this.matchGeneration) return
+    if (matchStateChecksum(message.snapshot.state) !== message.checksum) {
+      this.requestSnapshot()
+      return
+    }
+    const generationChanged = message.matchGeneration !== this.matchGeneration
+    if (generationChanged) this.cancelPendingCommands()
     this.snapshotState = structuredClone(message.snapshot.state)
     this.terrain = reconstructTerrain(
       this.snapshotState.mapId,
@@ -292,10 +310,13 @@ export class OnlineMatchSource implements MatchSource {
     )
     this.lastEventSequence = message.lastEventSequence
     this.lastTerrainSequence = message.lastTerrainSequence
-    if (message.matchGeneration !== this.matchGeneration) this.commandId = 0
+    this.events.splice(0)
+    if (generationChanged) {
+      this.commandId = 0
+      this.resultQueuedForMatch = ''
+    }
     this.matchGeneration = message.matchGeneration
     this.refreshTargets()
-    if (this.snapshotState.phase === 'victory') this.queueResult(this.resultFromState())
     for (const listener of this.stateListeners) listener(this.snapshotState)
   }
 
@@ -309,10 +330,23 @@ export class OnlineMatchSource implements MatchSource {
     state.phase = schema.matchPhase
     state.paused = schema.phase !== 'playing'
     state.timerRemainingTicks = schema.timerRemainingTicks
+    state.wind = schema.wind
+    const receivedAt = performance.now()
     for (const projected of schema.players.values()) {
       const player = state.players[projected.seat]
       if (projected.sessionId === this.room.sessionId) this.playerId = projected.playerId
-      this.targetPlayers.set(projected.seat, { x: projected.x, y: projected.y })
+      const position = { x: projected.x, y: projected.y }
+      const distance = Math.hypot(position.x - player.position.x, position.y - player.position.y)
+      const sample = {
+        tick: schema.simulationTick,
+        receivedAt,
+        position,
+        velocity: { x: projected.velocityX, y: projected.velocityY },
+      }
+      if (distance >= INTERPOLATION_SNAP_THRESHOLD) {
+        player.position = { ...position }
+        this.playerSamples.set(projected.seat, [sample])
+      } else this.pushSample(this.playerSamples, projected.seat, sample)
       player.velocity = { x: projected.velocityX, y: projected.velocityY }
       player.health = projected.health
       player.alive = projected.alive
@@ -348,10 +382,23 @@ export class OnlineMatchSource implements MatchSource {
       }
       projectile.velocity = { x: source.velocityX, y: source.velocityY }
       projectile.fuseTicks = source.fuseTicks
-      this.targetProjectiles.set(source.id, { x: source.x, y: source.y })
+      const position = { x: source.x, y: source.y }
+      const sample = {
+        tick: schema.simulationTick,
+        receivedAt,
+        position,
+        velocity: { x: source.velocityX, y: source.velocityY },
+      }
+      if (
+        Math.hypot(position.x - projectile.position.x, position.y - projectile.position.y) >=
+        INTERPOLATION_SNAP_THRESHOLD
+      ) {
+        projectile.position = { ...position }
+        this.projectileSamples.set(source.id, [sample])
+      } else this.pushSample(this.projectileSamples, source.id, sample)
     }
-    for (const id of this.targetProjectiles.keys())
-      if (!ids.has(id)) this.targetProjectiles.delete(id)
+    for (const id of this.projectileSamples.keys())
+      if (!ids.has(id)) this.projectileSamples.delete(id)
     if (schema.result.available) {
       const winnerSeat = schema.result.winnerSeat
       state.winnerPlayerId = winnerSeat >= 0 ? (state.players[winnerSeat]?.id ?? null) : null
@@ -393,8 +440,22 @@ export class OnlineMatchSource implements MatchSource {
           this.snapshotState?.terrainOperations.push(structuredClone(operation))
         }
       }
+      if (event.type === 'teleported' && this.snapshotState) {
+        const seat = this.snapshotState.players.findIndex((player) => player.id === event.playerId)
+        if (seat >= 0) {
+          this.snapshotState.players[seat].position = { ...event.to }
+          this.playerSamples.set(seat, [])
+        }
+      }
       this.lastEventSequence = event.sequence
+      if (
+        event.type === 'match-ended' &&
+        this.resultQueuedForMatch === (this.snapshotState?.matchId ?? '')
+      )
+        continue
       this.events.push(structuredClone(event))
+      if (event.type === 'match-ended')
+        this.resultQueuedForMatch = this.snapshotState?.matchId ?? ''
     }
   }
 
@@ -404,35 +465,65 @@ export class OnlineMatchSource implements MatchSource {
     this.resultQueuedForMatch = matchId
     this.events.push({
       type: 'match-ended',
-      sequence: this.lastEventSequence,
+      sequence: this.lastEventSequence + 1,
       tick: this.snapshotState?.tick ?? 0,
       result,
     })
   }
 
-  private resultFromState(): SimulationMatchResult {
-    const state = this.state
-    const winnerIndex = state.winnerPlayerId
-      ? state.players.findIndex((player) => player.id === state.winnerPlayerId)
-      : null
-    const winner = winnerIndex === null ? null : state.players[winnerIndex]
-    return {
-      config: state.config,
-      winnerIndex,
-      remainingHealth: winner ? Math.ceil(winner.health) : 0,
-      turnsTaken: state.turnNumber,
-      durationSeconds: Math.floor(state.durationTicks / SIMULATION_HZ),
-    }
-  }
-
   private refreshTargets(): void {
     if (!this.snapshotState) return
-    this.targetPlayers.clear()
+    const receivedAt = performance.now()
+    this.playerSamples.clear()
     this.snapshotState.players.forEach((player, seat) =>
-      this.targetPlayers.set(seat, { ...player.position }),
+      this.playerSamples.set(seat, [
+        {
+          tick: this.snapshotState!.tick,
+          receivedAt,
+          position: { ...player.position },
+          velocity: { ...player.velocity },
+        },
+      ]),
     )
-    this.targetProjectiles.clear()
+    this.projectileSamples.clear()
     for (const projectile of this.snapshotState.projectiles)
-      this.targetProjectiles.set(projectile.id, { ...projectile.position })
+      this.projectileSamples.set(projectile.id, [
+        {
+          tick: this.snapshotState.tick,
+          receivedAt,
+          position: { ...projectile.position },
+          velocity: { ...projectile.velocity },
+        },
+      ])
+  }
+
+  private pushSample<Key>(
+    samples: Map<Key, PositionSample[]>,
+    key: Key,
+    sample: PositionSample,
+  ): void {
+    const history = samples.get(key) ?? []
+    if (history.at(-1)?.tick === sample.tick) history[history.length - 1] = sample
+    else history.push(sample)
+    if (history.length > 8) history.splice(0, history.length - 8)
+    samples.set(key, history)
+  }
+
+  private cancelPendingCommands(): void {
+    for (const [commandId, pending] of this.pendingCommands) {
+      clearTimeout(pending.timeout)
+      pending.resolve({
+        accepted: false,
+        commandId,
+        authoritativeTick: this.snapshotState?.tick ?? 0,
+        reason: 'navigation-cancelled',
+      })
+    }
+    this.pendingCommands.clear()
+  }
+
+  private keepLatestSample<Key>(samples: Map<Key, PositionSample[]>, key: Key): void {
+    const latest = samples.get(key)?.at(-1)
+    if (latest) samples.set(key, [latest])
   }
 }

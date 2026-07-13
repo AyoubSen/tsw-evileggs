@@ -4,6 +4,8 @@ An original browser artillery game with local hot-seat and private online 1v1 pl
 
 Mossfire Skirmish is an original turn-based artillery game with destructible terrain, timed turns, movement, pull-back aiming, five weapons, and selectable maps.
 
+See the canonical [product roadmap](ROADMAP.md) for verified status, priorities, and major feature dependencies.
+
 ## Run locally
 
 Prerequisites: Node.js 22+ and pnpm 10+.
@@ -77,13 +79,13 @@ The simulation advances at 60 fixed ticks per second. Local Phaser play uses a c
 
 ## Terrain implementation
 
-`TerrainMask` is a compact `Uint8Array` occupancy grid at half the logical canvas resolution (2 game pixels per cell). Terrain begins as a deterministic rolling ground fill. A rocket removes all occupied cells whose centers lie inside its blast circle. The same mask is used for rendering, projectile collision, and character ground detection, so visible holes and gameplay collision stay aligned.
+`TerrainMask` is a compact `Uint8Array` occupancy grid at half the logical canvas resolution (2 game pixels per cell). Terrain begins as a deterministic rolling ground fill. Explosive weapons remove occupied cells inside their configured terrain radius. The same mask is used for rendering, projectile collision, and character ground detection, so visible holes and gameplay collision stay aligned.
 
 This approach is simple and reliable for the small maps. Rendering scans each occupancy column into solid runs every frame, which is intentionally unoptimized but transparent and acceptable for this prototype. Online clients reconstruct the initial terrain from the map registry and apply duplicate-safe ordered subtraction operations. A future milestone may compact long operation histories into periodic terrain checkpoints.
 
 ## Physics and turns
 
-The match uses a capped fixed-step simulation (up to 1/60 s per step). Rockets integrate explicit velocity and gravity, with swept point samples every three logical pixels to reduce terrain tunnelling. A projectile explodes on terrain, a character, or map exit. Explosions remove terrain, use linear radial damage falloff, and apply radial knockback with a small upward lift. The aiming guide renders only the first eight fixed simulation steps near the firing character, using the exact launch velocity and gravity applied to a real rocket.
+The match uses a capped fixed-step simulation (up to 1/60 s per step). Ballistic projectiles integrate explicit velocity, gravity, and deterministic per-turn horizontal wind, with swept point samples every three logical pixels to reduce terrain tunnelling. A projectile explodes on terrain, a character, or map exit. Explosions remove terrain, use linear radial damage falloff, and apply radial knockback with a small upward lift. The aiming guide renders only the first eight fixed simulation steps near the firing character, using the same wind-aware integration as a real projectile.
 
 Characters use simple gravity, horizontal damping, and terrain surface checks. During input, they can walk across gentle rises and descend into craters, but cannot climb a rise greater than 12 px per movement step. Movement and jumping are unrestricted until firing or timeout. A jump applies a 310 px/s upward impulse and may include a small horizontal push from a held movement key. It requires grounded support and key release before another jump. Characters fall into newly created craters and are eliminated if they fall below the map. After impact, the game waits for character velocity and ground state to settle before switching turns. A draw is possible if both fall or are reduced to zero health in one blast.
 
@@ -95,6 +97,7 @@ The 30-second timer runs only in the input phase. Firing freezes it immediately.
 - Aim: any world-space drag direction; `0°` is right, `90°` is up, and `180°` is left.
 - Power: 30% to 100%; Basic Rocket launch speed is `950 * power / 100`, or 285 to 950 px/s.
 - Gravity: 700 px/s²; fixed simulation step: 1/60 s.
+- Wind: deterministic -45 to 45 px/s² horizontal acceleration, in steps of 5, selected at each turn start.
 - Movement: 105 px/s while the input timer is active; jumps have no movement cost.
 - Turn timer: 30 seconds per player input phase.
 - Mouse pull: 36 to 180 logical px maps linearly from 30% to 100% power. The firing arrow points opposite the pull and is clamped to this range.
@@ -103,13 +106,13 @@ At the default 68% power and 45°, the rocket's ideal level-ground range is abou
 
 ## Tests
 
-Vitest tests cover command validation, fixed-step determinism, pause and timer authority, all five weapons, terrain reconstruction, serialization, replay checksums, victory and draw handling, room codes, seat assignment, ready/start lifecycle, server command authority, snapshots, event gaps, terrain deduplication, reconnection, forfeit, and rematch. Run simulation-only tests with `pnpm test:simulation` and online tests with `pnpm test:server`. The Playwright smoke test uses installed headless Edge and two isolated browser contexts.
+Vitest tests cover command validation, wind determinism, fixed-step physics, pause and timer authority, all five weapons, terrain reconstruction, serialization, replay checksums, effect deduplication, audio safety, interpolation, room codes, server command authority, snapshots, reconnection, forfeit, and rematch. Run simulation-only tests with `pnpm test:simulation` and online tests with `pnpm test:server`. The Playwright smoke test uses installed headless Edge and two isolated browser contexts.
 
 ## Known limitations
 
 - Character collision is deliberately simple: it is ground/surface based rather than a full capsule-vs-terrain solver, so steep crater walls can look rough.
-- There is no sound, no particles, and no mobile controls.
-- Scatter traces are simulation-only in this prototype; their impact feedback is limited to damage and knockback.
+- Sound effects are synthesized with Web Audio; there is no music or recorded sound library.
+- Procedural effects and characters are intentionally lightweight and do not use custom sprite artwork.
 - The trajectory guide intentionally shows only its initial 8/60 s segment and does not predict impacts.
 - The terrain renderer redraws the entire small mask each frame rather than caching a texture.
 - Terrain operation history currently grows for the life of a match. A long-running server should compact old operations into periodic terrain snapshots.
@@ -117,7 +120,7 @@ Vitest tests cover command validation, fixed-step determinism, pause and timer a
 - Character physics remain intentionally simple, and authoritative floating-point math assumes the same JavaScript runtime semantics on server and replay hosts.
 - Private-room lookup is intentionally in-memory and single-process. Restarting the server invalidates room codes and active matches.
 - There are no accounts, authentication, public matchmaking, database, Redis, rankings, spectators, or horizontal scaling.
-- Online rendering uses simple interpolation without client prediction or rollback, so movement can feel less immediate on high-latency links.
+- Online rendering uses buffered interpolation and bounded extrapolation without rollback or local movement prediction, so very high latency still affects responsiveness.
 - A separately deployed web client must set `VITE_COLYSEUS_URL` to the public TLS endpoint; the server must set its public port/address and exact `ALLOWED_WEB_ORIGINS`. HTTPS pages require WSS/HTTPS for the game server.
 
 # tsw-evileggs

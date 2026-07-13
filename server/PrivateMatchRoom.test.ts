@@ -4,7 +4,9 @@ import type { Room as ClientRoom } from '@colyseus/sdk'
 import { CURRENT_COMPATIBILITY, NETWORK_MESSAGE_TYPE } from '../src/network/protocol'
 import type { ServerRoomMessage } from '../src/network/protocol'
 import { matchStateChecksum } from '../src/simulation/serialization/matchSerialization'
-import { server } from './app.config'
+import type { MatchSimulation } from '../src/simulation/match/MatchSimulation'
+import { windForTurn } from '../src/simulation/wind/wind'
+import { HEALTH_RESPONSE, server } from './app.config'
 import { PrivateMatchRoom } from './rooms/PrivateMatchRoom'
 import { roomCodeRegistry } from './roomCodeRegistry'
 
@@ -29,6 +31,7 @@ const internals = (room: PrivateMatchRoom) =>
     updateRoom(deltaMs: number): void
     finishByForfeit(winnerSeat: 0 | 1): void
     reconnectGraceSeconds: number
+    simulation: MatchSimulation | null
   }
 
 const playersBySeat = (room: PrivateMatchRoom) =>
@@ -69,6 +72,15 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
 
   const START_COUNTDOWN_FOR_TEST = 3100
 
+  it('defines a safe public health response without room data', () => {
+    expect(HEALTH_RESPONSE).toEqual({
+      status: 'ok',
+      service: 'mossfire-server',
+      protocolVersion: 1,
+    })
+    expect(JSON.stringify(HEALTH_RESPONSE)).not.toMatch(/room|player|snapshot|secret/i)
+  })
+
   it('assigns creator seat 0, joiner seat 1, and rejects a third player', async () => {
     const { room } = await connectPair()
     expect(playersBySeat(room).map((player) => [player.seat, player.name])).toEqual([
@@ -102,6 +114,7 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
     await waitFor(() => room.state.phase === 'starting' && snapshot !== null)
     expect(room.state.matchGeneration).toBe(1)
     expect(matchStateChecksum(snapshot!.snapshot.state)).toBe(snapshot!.checksum)
+    expect(room.state.wind).toBe(snapshot!.snapshot.state.wind)
     internals(room).updateRoom(START_COUNTDOWN_FOR_TEST)
     expect(room.state.phase).toBe('playing')
     expect(room.state.simulationTick).toBe(0)
@@ -116,7 +129,7 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
     await waitFor(() => room.state.phase === 'waiting')
     expect(playersBySeat(room)).toHaveLength(1)
     expect(playersBySeat(room)[0].ready).toBe(false)
-    expect(room.state.matchGeneration).toBe(0)
+    expect(room.state.matchGeneration).toBe(1)
   })
 
   it('orders commands on the server and rejects wrong-seat, duplicate, and claimed outcomes', async () => {
@@ -241,6 +254,7 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
     await startMatch(room, host, guest)
     const code = room.state.roomCode
     const playerIds = playersBySeat(room).map((player) => player.playerId)
+    const firstSeed = internals(room).simulation!.state.seed
     internals(room).finishByForfeit(0)
     expect(room.state.phase).toBe('results')
     host.send(NETWORK_MESSAGE_TYPE, { type: 'rematch-vote', wantsRematch: true })
@@ -252,6 +266,9 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
     expect(playersBySeat(room).map((player) => player.playerId)).toEqual(playerIds)
     expect(room.state).toMatchObject({ simulationTick: 0, terrainSequence: 0, eventSequence: 0 })
     expect(room.state.projectiles.size).toBe(0)
+    const rematch = internals(room).simulation!
+    expect(rematch.state.wind).toBe(windForTurn(rematch.state.seed, 1))
+    expect(rematch.state.seed).not.toBe(firstSeed)
   })
 
   it('cancels a pending rematch when one player leaves results', async () => {

@@ -126,7 +126,7 @@ describe('OnlineRoomSession lifecycle', () => {
     expect(room.reconnection.enqueuedMessages).toEqual([])
     expect(sessionStorage.getItem(ONLINE_RECONNECT_STORAGE_KEY)).toBeNull()
     expect(session.isDisposed).toBe(true)
-    expect(room.messageDisposeCount).toBe(1)
+    expect(room.messageDisposeCount).toBe(2)
     expect(room.onStateChange.removeCount).toBe(2)
     expect(room.onDrop.removeCount).toBe(1)
   })
@@ -151,8 +151,8 @@ describe('OnlineRoomSession lifecycle', () => {
     room.lateMessage({ type: 'full-snapshot' })
 
     expect(viewUpdates).toBe(0)
-    expect(statusUpdates).toBe(0)
-    expect(room.sent).toEqual([])
+    expect(statusUpdates).toBe(1)
+    expect(room.sent).toEqual([expect.objectContaining({ type: 'latency-ping' })])
   })
 
   it('keeps legitimate unexpected-disconnect reconnection active', () => {
@@ -162,13 +162,23 @@ describe('OnlineRoomSession lifecycle', () => {
     session.subscribeStatus((status) => statuses.push(status))
 
     room.onDrop.invoke(1006, 'network lost')
-    expect(statuses).toEqual(['reconnecting'])
+    expect(statuses).toEqual(['connected', 'reconnecting'])
     expect(room.reconnection.enabled).toBe(true)
     expect(sessionStorage.getItem(ONLINE_RECONNECT_STORAGE_KEY)).toBe('token-drop')
 
     room.onReconnect.invoke()
-    expect(statuses).toEqual(['reconnecting', 'connected'])
+    expect(statuses).toEqual(['connected', 'reconnecting', 'connected'])
     expect(room.sent).toContainEqual(expect.objectContaining({ type: 'request-snapshot' }))
+  })
+
+  it('reports presentation-only latency quality without affecting room state', () => {
+    const room = new FakeSessionRoom('token-latency')
+    const session = new SessionConstructor(room as unknown as Room)
+    const quality: string[] = []
+    session.subscribeQuality((value) => quality.push(value))
+    room.lateMessage({ type: 'latency-pong', nonce: Date.now() - 100 })
+    expect(quality).toEqual(['unknown', 'good'])
+    session.dispose()
   })
 
   it('does not let an old disposed session clear a newer session token', async () => {

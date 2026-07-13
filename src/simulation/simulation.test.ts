@@ -24,8 +24,13 @@ import {
 } from './turns/turnMachine'
 import { TerrainMask } from '../terrain/TerrainMask'
 import { DEFAULT_POWER_PERCENT, FIXED_STEP_SECONDS, GRAVITY } from '../shared/constants'
-import { BASIC_ROCKET, validateWeapon } from '../weapons/basicRocket'
-import { WEAPONS, canUseWeapon, consumeWeapon, createWeaponInventory } from '../weapons/registry'
+import {
+  WEAPONS,
+  canUseWeapon,
+  consumeWeapon,
+  createWeaponInventory,
+  validateWeaponRegistry,
+} from '../weapons/registry'
 import { MAPS, MAP_ORDER, createMapTerrain, getMap, hasSafeSpawns } from '../maps/registry'
 
 describe('explosions', () => {
@@ -48,23 +53,31 @@ describe('projectile integration', () => {
       { position: { x: 10, y: 20 }, velocity: { x: 30, y: -10 }, radius: 5 },
       20,
       0.5,
+      0,
     )
     expect(result.velocity).toEqual({ x: 30, y: 0 })
     expect(result.position).toEqual({ x: 25, y: 20 })
   })
 
+  it('applies wind through the same helper used by live projectiles and the aim guide', () => {
+    const initial = { position: { x: 0, y: 0 }, velocity: { x: 10, y: -20 }, radius: 5 }
+    const guide = integratedTrajectory(initial, 10, 30, 0.5, 1)
+    expect(guide[0]).toEqual(integrateProjectile(initial, 10, 0.5, 30))
+    expect(guide[0].velocity.x).toBe(25)
+  })
+
   it('builds a preview from the same fixed-step integration as a live rocket', () => {
     const initial = { position: { x: 0, y: 0 }, velocity: { x: 10, y: -20 }, radius: 5 }
-    const preview = integratedTrajectory(initial, 10, 0.5, 2)
-    expect(preview[0]).toEqual(integrateProjectile(initial, 10, 0.5))
+    const preview = integratedTrajectory(initial, 10, 0, 0.5, 2)
+    expect(preview[0]).toEqual(integrateProjectile(initial, 10, 0.5, 0))
     expect(preview[1].position).toEqual({ x: 10, y: -12.5 })
   })
 
   it('uses the live integration for a short local aim guide only', () => {
     const initial = { position: { x: 20, y: 40 }, velocity: { x: 300, y: -240 }, radius: 5 }
-    const guide = integratedTrajectory(initial, GRAVITY, FIXED_STEP_SECONDS, AIM_GUIDE_STEPS)
+    const guide = integratedTrajectory(initial, GRAVITY, 25, FIXED_STEP_SECONDS, AIM_GUIDE_STEPS)
     expect(guide).toHaveLength(8)
-    expect(guide[0]).toEqual(integrateProjectile(initial, GRAVITY, FIXED_STEP_SECONDS))
+    expect(guide[0]).toEqual(integrateProjectile(initial, GRAVITY, FIXED_STEP_SECONDS, 25))
   })
 })
 
@@ -89,14 +102,14 @@ describe('aiming', () => {
 
   it('can carry the default facing-right shot to the opposing spawn', () => {
     const direction = aimDirection(45, 1)
-    const speed = launchSpeed(BASIC_ROCKET.projectileSpeed, DEFAULT_POWER_PERCENT)
+    const speed = launchSpeed(WEAPONS['basic-rocket'].projectileSpeed, DEFAULT_POWER_PERCENT)
     let rocket = {
       position: { x: 192.7, y: 369.2 },
       velocity: { x: direction.x * speed, y: direction.y * speed },
       radius: 5,
     }
     while (rocket.position.x < 785) {
-      rocket = integrateProjectile(rocket, GRAVITY, FIXED_STEP_SECONDS)
+      rocket = integrateProjectile(rocket, GRAVITY, FIXED_STEP_SECONDS, 0)
     }
     expect(rocket.position.y).toBeGreaterThan(365)
     expect(rocket.position.y).toBeLessThan(390)
@@ -193,11 +206,6 @@ describe('terrain mask', () => {
 })
 
 describe('weapons', () => {
-  it('accepts the prototype rocket and rejects invalid definitions', () => {
-    expect(validateWeapon(BASIC_ROCKET)).toBe(true)
-    expect(validateWeapon({ ...BASIC_ROCKET, blastRadius: 0 })).toBe(false)
-  })
-
   it('gives each player an independent finite inventory while keeping rockets unlimited', () => {
     const first = createWeaponInventory()
     const second = createWeaponInventory()
@@ -211,6 +219,7 @@ describe('weapons', () => {
   })
 
   it('defines five distinct arsenal entries with configured behaviour', () => {
+    expect(validateWeaponRegistry()).toBe(true)
     expect(Object.keys(WEAPONS)).toHaveLength(5)
     expect(WEAPONS['timed-grenade'].projectileSpeed).toBeGreaterThan(0)
     expect(WEAPONS['scatter-shot'].blastRadius).toBe(0)

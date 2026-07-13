@@ -2,18 +2,21 @@ import { MatchSimulation } from '../match/MatchSimulation'
 import type { MatchState, SerializedMatchState } from '../match/MatchState'
 
 export function serializeMatchState(state: MatchState): string {
-  return JSON.stringify({ version: 1, state } satisfies SerializedMatchState)
+  return JSON.stringify({ version: 2, state, accumulatorSeconds: 0 } satisfies SerializedMatchState)
 }
 
 export function deserializeMatchState(payload: string): SerializedMatchState {
   const parsed: unknown = JSON.parse(payload)
-  if (!parsed || typeof parsed !== 'object' || (parsed as { version?: unknown }).version !== 1)
+  if (!parsed || typeof parsed !== 'object' || (parsed as { version?: unknown }).version !== 2)
     throw new Error('Unsupported match snapshot')
   const snapshot = parsed as SerializedMatchState
   if (
     !snapshot.state ||
     !Array.isArray(snapshot.state.players) ||
-    !Array.isArray(snapshot.state.terrainOperations)
+    !Array.isArray(snapshot.state.terrainOperations) ||
+    !Number.isFinite(snapshot.state.wind) ||
+    !Number.isFinite(snapshot.accumulatorSeconds) ||
+    snapshot.accumulatorSeconds < 0
   )
     throw new Error('Invalid match snapshot')
   return structuredClone(snapshot)

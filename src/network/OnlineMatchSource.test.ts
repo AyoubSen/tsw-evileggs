@@ -3,6 +3,7 @@ import type { Room } from '@colyseus/sdk'
 import { MatchSimulation } from '../simulation/match/MatchSimulation'
 import { OnlineMatchSource } from './OnlineMatchSource'
 import { NETWORK_MESSAGE_TYPE, type ServerRoomMessage } from './protocol'
+import { matchStateChecksum } from '../simulation/serialization/matchSerialization'
 
 class FakeRoom {
   sessionId = 'session-host'
@@ -14,6 +15,7 @@ class FakeRoom {
     activePlayerSeat: 0,
     matchPhase: 'input',
     timerRemainingTicks: 1800,
+    wind: 0,
     result: {
       available: false,
       winnerSeat: -1,
@@ -77,13 +79,16 @@ class FakeRoom {
   }
 }
 
-const snapshotMessage = (simulation: MatchSimulation): ServerRoomMessage => ({
+const snapshotMessage = (
+  simulation: MatchSimulation,
+  matchGeneration = 1,
+): Extract<ServerRoomMessage, { type: 'full-snapshot' }> => ({
   type: 'full-snapshot',
   snapshot: simulation.snapshot(),
-  checksum: 'diagnostic-only',
+  checksum: matchStateChecksum(simulation.state),
   lastEventSequence: simulation.state.nextEventSequence - 1,
   lastTerrainSequence: simulation.state.nextTerrainSequence - 1,
-  matchGeneration: 1,
+  matchGeneration,
 })
 
 describe('OnlineMatchSource synchronization', () => {
@@ -106,8 +111,18 @@ describe('OnlineMatchSource synchronization', () => {
       sourceActionId: 'action-1',
     }
     const event = { sequence: 1, tick: 1, type: 'terrain-destroyed' as const, operation }
-    room.message({ type: 'simulation-events', fromSequence: 1, events: [event] })
-    room.message({ type: 'simulation-events', fromSequence: 1, events: [event] })
+    room.message({
+      type: 'simulation-events',
+      matchGeneration: 1,
+      fromSequence: 1,
+      events: [event],
+    })
+    room.message({
+      type: 'simulation-events',
+      matchGeneration: 1,
+      fromSequence: 1,
+      events: [event],
+    })
     expect(source.getTerrain().isSolid(480, 470)).toBe(false)
     expect(source.state.terrainOperations).toHaveLength(1)
     expect(source.drainEvents()).toHaveLength(1)
@@ -120,6 +135,7 @@ describe('OnlineMatchSource synchronization', () => {
     expect(source.ready).toBe(true)
     room.message({
       type: 'simulation-events',
+      matchGeneration: 1,
       fromSequence: 2,
       events: [{ sequence: 2, tick: 1, type: 'player-died', playerId: 'player-2' }],
     })
@@ -162,8 +178,7 @@ describe('OnlineMatchSource synchronization', () => {
     expect(source.state.players[0].health).toBe(83)
     expect(source.state.players[0].position.x).toBe(startX)
     source.update(1 / 60)
-    expect(source.state.players[0].position.x).toBeGreaterThan(startX)
-    expect(source.state.players[0].position.x).toBeLessThan(startX + 60)
+    expect(source.state.players[0].position.x).toBe(startX)
     expect(source.localSeat).toBe(0)
   })
 
@@ -175,6 +190,20 @@ describe('OnlineMatchSource synchronization', () => {
     source.state.players[0].health = 1
     room.message(snapshotMessage(simulation))
     expect(source.state.players[0].health).toBe(100)
+  })
+
+  it('rejects corrupt and older-generation snapshots', () => {
+    const room = new FakeRoom()
+    const source = new OnlineMatchSource(room as unknown as Room)
+    const current = new MatchSimulation(undefined, { seed: 2, matchId: 'generation-2' })
+    room.message(snapshotMessage(current, 2))
+    const corrupt = snapshotMessage(new MatchSimulation(undefined, { seed: 3 }), 3)
+    room.message({ ...corrupt, checksum: '00000000' })
+    room.message(snapshotMessage(new MatchSimulation(undefined, { seed: 1 }), 1))
+    expect(source.state.matchId).toBe('generation-2')
+    expect(room.sent).toContainEqual(
+      expect.objectContaining({ payload: expect.objectContaining({ type: 'request-snapshot' }) }),
+    )
   })
 
   it('recovers authoritative results from Schema when a transient result is missed', () => {

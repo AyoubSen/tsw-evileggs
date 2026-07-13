@@ -68,6 +68,7 @@ export const PrivateMatchState = schema({
   activePlayerSeat: { type: 'int8', default: -1 },
   matchPhase: { type: 'string', default: '' },
   timerRemainingTicks: { type: 'uint32', default: 0 },
+  wind: { type: 'int16', default: 0 },
   eventSequence: { type: 'uint32', default: 0 },
   terrainSequence: { type: 'uint32', default: 0 },
   players: { map: RoomPlayerState, default: new MapSchema<RoomPlayerState>() },
@@ -117,6 +118,7 @@ export function projectSimulationState(state: PrivateMatchState, simulation: Mat
   state.activePlayerSeat = simulation.activePlayerIndex
   state.matchPhase = simulation.phase
   state.timerRemainingTicks = simulation.timerRemainingTicks
+  state.wind = simulation.wind
   state.eventSequence = Math.max(0, simulation.nextEventSequence - 1)
   state.terrainSequence = Math.max(0, simulation.nextTerrainSequence - 1)
   for (const roomPlayer of state.players.values())

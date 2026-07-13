@@ -9,6 +9,7 @@ export class LocalMatchSource implements MatchSource {
   readonly localSeat = null
   private simulation: MatchSimulation
   private commandSequence = 0
+  private matchGeneration = 1
 
   constructor(private readonly config: LocalMatchConfig) {
     this.simulation = this.createSimulation()
@@ -69,6 +70,7 @@ export class LocalMatchSource implements MatchSource {
   }
 
   restart(): void {
+    this.matchGeneration += 1
     this.simulation = this.createSimulation()
     this.commandSequence = 0
   }
@@ -76,6 +78,9 @@ export class LocalMatchSource implements MatchSource {
   dispose(): void {}
 
   private createSimulation(): MatchSimulation {
-    return new MatchSimulation(this.config, { seed: 1, matchId: 'local-match' })
+    return new MatchSimulation(this.config, {
+      seed: this.matchGeneration,
+      matchId: `local-match-${this.matchGeneration}`,
+    })
   }
 }

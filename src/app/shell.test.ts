@@ -52,4 +52,23 @@ describe('preferences', () => {
     expect(loadPreferences(storage).playerNames).toEqual(['Ash', 'Birch'])
     expect(() => savePreferences(DEFAULT_PREFERENCES, undefined)).not.toThrow()
   })
+
+  it('loads and clamps persisted audio preferences', () => {
+    const key = `${BRAND.storageNamespace}:preferences`
+    const preferences = loadPreferences(
+      memoryStorage({
+        [key]: JSON.stringify({
+          ...DEFAULT_PREFERENCES,
+          mute: true,
+          masterVolume: 2,
+          soundEffectsVolume: 0.35,
+        }),
+      }),
+    )
+    expect(preferences).toMatchObject({
+      mute: true,
+      masterVolume: 1,
+      soundEffectsVolume: 0.35,
+    })
+  })
 })

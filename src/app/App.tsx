@@ -7,12 +7,13 @@ import { createGame, type GameHost } from '../game/GameHost'
 import { LocalMatchSource } from '../game/LocalMatchSource'
 import type { MatchResult } from '../game/types'
 import { isRoomCode, normalizeRoomCode } from '../network/protocol'
-import { OnlineRoomSession } from '../network/OnlineRoomSession'
+import { OnlineRoomSession, type ConnectionQuality } from '../network/OnlineRoomSession'
 import {
   OnlineSessionGenerationGuard,
   isOnlineLifecycleCancellation,
 } from '../network/onlineLifecycle'
 import type { OnlineRoomView } from '../network/roomView'
+import { AudioDirector } from '../audio/AudioDirector'
 
 type Screen =
   | 'menu'
@@ -187,6 +188,36 @@ function Settings({
         />{' '}
         High-contrast HUD
       </label>
+      <label className="toggle">
+        <input
+          type="checkbox"
+          checked={preferences.mute}
+          onChange={(event) => update({ mute: event.target.checked })}
+        />{' '}
+        Mute sound effects
+      </label>
+      <label>
+        Master volume
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          value={preferences.masterVolume}
+          onChange={(event) => update({ masterVolume: Number(event.target.value) })}
+        />
+      </label>
+      <label>
+        Sound effects volume
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          value={preferences.soundEffectsVolume}
+          onChange={(event) => update({ soundEffectsVolume: Number(event.target.value) })}
+        />
+      </label>
       <button
         type="button"
         className="secondary"
@@ -213,20 +244,34 @@ export function App() {
   const [roomView, setRoomView] = useState<OnlineRoomView | null>(null)
   const [roomCodeInput, setRoomCodeInput] = useState('')
   const [onlineBusy, setOnlineBusy] = useState(false)
+  const [onlineSlow, setOnlineSlow] = useState(false)
   const [onlineError, setOnlineError] = useState<string | null>(null)
   const [connectionStatus, setConnectionStatus] = useState<
     'connected' | 'reconnecting' | 'failed' | 'left'
   >('connected')
+  const [connectionQuality, setConnectionQuality] = useState<ConnectionQuality>('unknown')
+  const [latencyMs, setLatencyMs] = useState<number | null>(null)
   const [rematchVoted, setRematchVoted] = useState(false)
   const hostRef = useRef<HTMLDivElement>(null)
   const gameRef = useRef<GameHost | null>(null)
-  const reconnectAttemptedRef = useRef(false)
   const activeSessionRef = useRef<OnlineRoomSession | null>(null)
   const sessionGuardRef = useRef(new OnlineSessionGenerationGuard())
   const startupAbortRef = useRef<AbortController | null>(null)
+  const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const userOperationBusyRef = useRef(false)
+  const screenRef = useRef<Screen>(screen)
+  const audioRef = useRef<AudioDirector | null>(null)
+  audioRef.current ??= new AudioDirector({
+    mute: preferences.mute,
+    masterVolume: preferences.masterVolume,
+    soundEffectsVolume: preferences.soundEffectsVolume,
+  })
   const getVisualPreferences = useEffectEvent(() => ({
     reducedMotion: preferences.reducedMotion,
+    highContrastHud: preferences.highContrastHud,
+    cameraShake: preferences.cameraShake,
     aimGuide: preferences.aimGuide,
+    screenFlash: preferences.screenFlash,
   }))
   const isMatchCallbackCurrent = useEffectEvent((sessionGeneration: number | null) =>
     Boolean(
@@ -271,33 +316,63 @@ export function App() {
     savePreferences(preferences)
   }, [preferences])
   useEffect(() => {
-    if (reconnectAttemptedRef.current) return
-    reconnectAttemptedRef.current = true
-    const operation = beginOnlineOperation()
-    setConnectionStatus('reconnecting')
-    void OnlineRoomSession.reconnectStored(operation.controller.signal)
-      .then((session) => {
-        if (!sessionGuardRef.current.isCurrent(operation.generation)) {
-          if (session) void session.leave().catch(() => undefined)
-          return
-        }
-        startupAbortRef.current = null
-        if (!session) {
+    screenRef.current = screen
+  }, [screen])
+  useEffect(() => {
+    audioRef.current?.setPreferences({
+      mute: preferences.mute,
+      masterVolume: preferences.masterVolume,
+      soundEffectsVolume: preferences.soundEffectsVolume,
+    })
+    gameRef.current?.setPresentationPreferences(getVisualPreferences())
+  }, [preferences])
+  useEffect(() => {
+    const sessionGuard = sessionGuardRef.current
+    let operation: ReturnType<typeof beginOnlineOperation> | null = null
+    const startReconnect = setTimeout(() => {
+      operation = beginOnlineOperation()
+      const currentOperation = operation
+      setConnectionStatus('reconnecting')
+      void OnlineRoomSession.reconnectStored(currentOperation.controller.signal)
+        .then((session) => {
+          if (!sessionGuard.isCurrent(currentOperation.generation)) {
+            if (session) void session.leave().catch(() => undefined)
+            return
+          }
+          startupAbortRef.current = null
+          if (!session) {
+            setConnectionStatus('connected')
+            return
+          }
+          if (!activateSession(session, currentOperation.generation, currentOperation.controller))
+            return
+          setScreen(session.view?.phase === 'waiting' ? 'online-lobby' : 'menu')
+        })
+        .catch((caught) => {
+          if (
+            isOnlineLifecycleCancellation(caught) ||
+            !sessionGuard.isCurrent(currentOperation.generation)
+          )
+            return
+          startupAbortRef.current = null
           setConnectionStatus('connected')
-          return
-        }
-        if (!activateSession(session, operation.generation, operation.controller)) return
-        setScreen(session.view?.phase === 'waiting' ? 'online-lobby' : 'menu')
-      })
-      .catch((caught) => {
-        if (
-          isOnlineLifecycleCancellation(caught) ||
-          !sessionGuardRef.current.isCurrent(operation.generation)
-        )
-          return
-        startupAbortRef.current = null
-        setConnectionStatus('connected')
-      })
+        })
+    }, 0)
+    return () => {
+      clearTimeout(startReconnect)
+      if (operation) {
+        sessionGuard.invalidate()
+        operation.controller.abort()
+        if (startupAbortRef.current === operation.controller) startupAbortRef.current = null
+      }
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current)
+      slowTimerRef.current = null
+      userOperationBusyRef.current = false
+      const session = activeSessionRef.current
+      activeSessionRef.current = null
+      if (session) void session.leave().catch(() => undefined)
+      audioRef.current?.dispose()
+    }
   }, [])
   useEffect(() => {
     if (!onlineSession || !isActiveSession(onlineSession)) return
@@ -308,7 +383,15 @@ export function App() {
       if (!isCurrent()) return
       const view = onlineSession.view
       if (!view || !onlineSession.source.ready || view.phase === 'waiting') return
-      setConfig(onlineSession.source.state.config)
+      const authoritativeConfig = onlineSession.source.state.config
+      setConfig((current) =>
+        current.mapId === authoritativeConfig.mapId &&
+        current.turnDurationSeconds === authoritativeConfig.turnDurationSeconds &&
+        current.playerNames[0] === authoritativeConfig.playerNames[0] &&
+        current.playerNames[1] === authoritativeConfig.playerNames[1]
+          ? current
+          : authoritativeConfig,
+      )
       setMatchMode('online')
       if (view.phase !== 'results') {
         setResult(null)
@@ -320,7 +403,12 @@ export function App() {
       if (!isCurrent()) return
       setRoomView(view)
       if (view.phase === 'waiting' && onlineSession.source.ready) setScreen('online-lobby')
-      if (view.phase === 'results' && view.result.available && onlineSession.source.ready)
+      if (
+        view.phase === 'results' &&
+        view.result.available &&
+        onlineSession.source.ready &&
+        screenRef.current !== 'match'
+      )
         setResult({
           config: onlineSession.source.state.config,
           winnerIndex: view.result.winnerSeat >= 0 ? view.result.winnerSeat : null,
@@ -336,11 +424,17 @@ export function App() {
       setConnectionStatus(status)
       if (status === 'failed' && message) setOnlineError(message)
     })
+    const unsubscribeQuality = onlineSession.subscribeQuality((quality, latency) => {
+      if (!isCurrent()) return
+      setConnectionQuality(quality)
+      setLatencyMs(latency)
+    })
     const unsubscribeSource = onlineSession.source.subscribeState(enterMatchWhenReady)
     enterMatchWhenReady()
     return () => {
       unsubscribeView()
       unsubscribeStatus()
+      unsubscribeQuality()
       unsubscribeSource()
     }
   }, [onlineSession])
@@ -366,8 +460,8 @@ export function App() {
             if (callbackIsCurrent()) setResult(nextResult)
           },
         },
-        visualPreferences.reducedMotion,
-        visualPreferences.aimGuide,
+        visualPreferences,
+        audioRef.current!,
       )
       gameRef.current = gameHost
       return () => {
@@ -427,8 +521,13 @@ export function App() {
     setScreen('menu')
   }
   const createOnlineRoom = async () => {
+    if (userOperationBusyRef.current) return
+    userOperationBusyRef.current = true
     const operation = beginOnlineOperation()
     setOnlineBusy(true)
+    setOnlineSlow(false)
+    const slowTimer = setTimeout(() => setOnlineSlow(true), 6000)
+    slowTimerRef.current = slowTimer
     setOnlineError(null)
     try {
       const next = validateMatchConfig({
@@ -457,21 +556,30 @@ export function App() {
         return
       setOnlineError(caught instanceof Error ? caught.message : 'The room could not be created.')
     } finally {
+      clearTimeout(slowTimer)
+      if (slowTimerRef.current === slowTimer) slowTimerRef.current = null
       if (sessionGuardRef.current.isCurrent(operation.generation)) {
         startupAbortRef.current = null
+        userOperationBusyRef.current = false
         setOnlineBusy(false)
+        setOnlineSlow(false)
       }
     }
   }
   const joinOnlineRoom = async () => {
+    if (userOperationBusyRef.current) return
     const code = normalizeRoomCode(roomCodeInput)
     setRoomCodeInput(code)
     if (!isRoomCode(code)) {
       setOnlineError('Enter a valid 6-character room code.')
       return
     }
+    userOperationBusyRef.current = true
     const operation = beginOnlineOperation()
     setOnlineBusy(true)
+    setOnlineSlow(false)
+    const slowTimer = setTimeout(() => setOnlineSlow(true), 6000)
+    slowTimerRef.current = slowTimer
     setOnlineError(null)
     try {
       const session = await OnlineRoomSession.join(
@@ -493,9 +601,13 @@ export function App() {
         return
       setOnlineError(caught instanceof Error ? caught.message : 'The room could not be joined.')
     } finally {
+      clearTimeout(slowTimer)
+      if (slowTimerRef.current === slowTimer) slowTimerRef.current = null
       if (sessionGuardRef.current.isCurrent(operation.generation)) {
         startupAbortRef.current = null
+        userOperationBusyRef.current = false
         setOnlineBusy(false)
+        setOnlineSlow(false)
       }
     }
   }
@@ -503,6 +615,7 @@ export function App() {
     sessionGuardRef.current.invalidate()
     startupAbortRef.current?.abort()
     startupAbortRef.current = null
+    userOperationBusyRef.current = false
     const session = activeSessionRef.current ?? onlineSession
     activeSessionRef.current = null
     setScreen(destination)
@@ -512,7 +625,12 @@ export function App() {
     setError(null)
     setOnlineError(null)
     setOnlineBusy(false)
+    setOnlineSlow(false)
+    if (slowTimerRef.current) clearTimeout(slowTimerRef.current)
+    slowTimerRef.current = null
     setConnectionStatus('connected')
+    setConnectionQuality('unknown')
+    setLatencyMs(null)
     setRoomView(null)
     setRoomCodeInput('')
     setRematchVoted(false)
@@ -661,6 +779,11 @@ export function App() {
             ))}
           </div>
           {onlineError && <p className="form-error">{onlineError}</p>}
+          {onlineSlow && (
+            <p className="online-wake-message">
+              Waking the game server. This can take up to a minute on the free host.
+            </p>
+          )}
           <div className="actions setup-actions">
             <button
               className="button-primary button-play"
@@ -671,10 +794,9 @@ export function App() {
             </button>
             <button
               className="button-quiet"
-              disabled={onlineBusy}
-              onClick={() => setScreen('online')}
+              onClick={() => (onlineBusy ? leaveOnline('online') : setScreen('online'))}
             >
-              Back
+              {onlineBusy ? 'Cancel' : 'Back'}
             </button>
           </div>
         </section>
@@ -711,12 +833,20 @@ export function App() {
             </label>
           </div>
           {onlineError && <p className="form-error">{onlineError}</p>}
+          {onlineSlow && (
+            <p className="online-wake-message">
+              Waking the game server. This can take up to a minute on the free host.
+            </p>
+          )}
           <div className="actions">
             <button disabled={onlineBusy} onClick={joinOnlineRoom}>
               {onlineBusy ? 'Joining...' : 'Join Room'}
             </button>
-            <button className="secondary" disabled={onlineBusy} onClick={() => setScreen('online')}>
-              Back
+            <button
+              className="secondary"
+              onClick={() => (onlineBusy ? leaveOnline('online') : setScreen('online'))}
+            >
+              {onlineBusy ? 'Cancel' : 'Back'}
             </button>
           </div>
         </section>
@@ -745,7 +875,13 @@ export function App() {
           </div>
           <div className="lobby-status-line">
             <span className={`status-dot ${connectionStatus}`} />
-            {connectionStatus === 'connected' ? 'Connected to server' : 'Reconnecting...'}
+            {connectionStatus === 'connected'
+              ? connectionQuality === 'poor'
+                ? 'Connected · high latency'
+                : 'Connected to server'
+              : connectionStatus === 'failed'
+                ? 'Connection lost'
+                : 'Reconnecting...'}
             <span>Compatible protocol {roomView.protocolVersion}</span>
           </div>
           <div className="lobby-seats">
@@ -966,6 +1102,12 @@ export function App() {
   return (
     <main
       className={`app-shell ${preferences.reducedMotion ? 'reduced-motion' : ''} ${preferences.highContrastHud ? 'high-contrast' : ''}`}
+      onPointerDownCapture={() => void audioRef.current?.unlock()}
+      onKeyDownCapture={() => void audioRef.current?.unlock()}
+      onClickCapture={(event) => {
+        if ((event.target as HTMLElement).closest('button, select'))
+          audioRef.current?.play('menu-select')
+      }}
     >
       <header className="brand">
         <p className="eyebrow">TURN-BASED ARTILLERY</p>
@@ -982,13 +1124,29 @@ export function App() {
               data-server-tick={roomView.simulationTick}
               data-match-generation={roomView.matchGeneration}
               data-active-seat={roomView.activePlayerSeat}
+              data-wind={roomView.wind}
+              data-event-sequence={roomView.eventSequence}
+              data-terrain-sequence={roomView.terrainSequence}
+              data-projectile-count={roomView.projectileCount}
               data-player-zero-x={roomView.players.find((player) => player.seat === 0)?.x ?? 0}
               data-player-zero-y={roomView.players.find((player) => player.seat === 0)?.y ?? 0}
               data-player-one-x={roomView.players.find((player) => player.seat === 1)?.x ?? 0}
               data-player-one-y={roomView.players.find((player) => player.seat === 1)?.y ?? 0}
+              data-connection-quality={connectionQuality}
+              data-latency-ms={latencyMs ?? ''}
             >
               <span className={`status-dot ${connectionStatus}`} />
-              Server tick {roomView.simulationTick} · room {roomView.roomCode}
+              {connectionStatus === 'failed'
+                ? 'Connection lost'
+                : connectionStatus === 'reconnecting'
+                  ? 'Reconnecting'
+                  : roomView.phase === 'reconnecting'
+                    ? 'Opponent reconnecting'
+                    : connectionQuality === 'poor'
+                      ? 'High latency'
+                      : connectionQuality === 'fair'
+                        ? 'Connected · fair'
+                        : 'Connected'}
             </output>
           )}
         </div>

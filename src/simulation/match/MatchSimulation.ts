@@ -8,6 +8,7 @@ import {
   POWER_MIN_PERCENT,
 } from '../../shared/constants'
 import type { Vector } from '../../shared/types'
+import { windForTurn } from '../wind/wind'
 import { TerrainMask } from '../../terrain/TerrainMask'
 import { explosionFalloff, knockbackVelocity } from '../damage/explosion'
 import { launchVelocity } from '../aim/aim'
@@ -64,6 +65,7 @@ export class MatchSimulation {
   ) {
     if (options.snapshot) {
       this.state = structuredClone(options.snapshot.state)
+      this.accumulator = options.snapshot.accumulatorSeconds
       this.terrain = reconstructTerrain(this.state.mapId, this.state.terrainOperations)
       return
     }
@@ -89,7 +91,7 @@ export class MatchSimulation {
       expiredTicks: 0,
       settlingTicks: 0,
       durationTicks: 0,
-      wind: 0,
+      wind: windForTurn(seed, 1),
       projectiles: [],
       activeAction: null,
       pendingExplosions: [],
@@ -203,6 +205,7 @@ export class MatchSimulation {
       player.velocity.y = -JUMP_VELOCITY
       player.velocity.x = player.moveDirection * JUMP_HORIZONTAL_SPEED
       player.grounded = false
+      this.emit({ type: 'player-jumped', playerId: player.id })
     } else if (command.type === 'select-weapon') {
       if (!WEAPON_ORDER.includes(command.weaponId)) return rejected('invalid-weapon')
       if (!canUseWeapon(player.inventory, command.weaponId)) return rejected('no-ammunition')
@@ -216,14 +219,22 @@ export class MatchSimulation {
       if (player.selectedWeapon !== 'teleporter') return rejected('invalid-weapon')
       if (!canUseWeapon(player.inventory, 'teleporter')) return rejected('no-ammunition')
       if (!this.isValidTeleport(command.destination, player.id)) return rejected('invalid-teleport')
-      this.beginAction(player, 'teleporter')
+      const actionId = this.beginAction(player, 'teleporter')
       player.inventory = consumeWeapon(player.inventory, 'teleporter')
+      const from = { ...player.position }
       const surface = this.terrain.surfaceY(command.destination.x, command.destination.y)
       player.position = {
         x: command.destination.x,
         y: (surface ?? command.destination.y + CHARACTER_RADIUS) - CHARACTER_RADIUS,
       }
       player.velocity = { x: 0, y: 0 }
+      this.emit({
+        type: 'teleported',
+        actionId,
+        playerId: player.id,
+        from,
+        to: { ...player.position },
+      })
       this.state.phase = 'settling'
       this.state.settlingTicks = 0
     } else return rejected('invalid-command')
@@ -247,7 +258,7 @@ export class MatchSimulation {
 
   private fire(player: SimPlayer, direction: Vector, power: number): void {
     const weapon = WEAPONS[player.selectedWeapon]
-    const actionId = this.beginAction(player, weapon.id)
+    const actionId = this.beginAction(player, weapon.id, direction)
     player.inventory = consumeWeapon(player.inventory, weapon.id)
     player.moveDirection = 0
     if (weapon.id === 'scatter-shot') {
@@ -263,16 +274,23 @@ export class MatchSimulation {
       this.projectileOrigin(player, direction),
       launchVelocity(direction, weapon.projectileSpeed, power),
       5,
-      weapon.id === 'timed-grenade' ? 3 * SIMULATION_HZ : 0,
+      weapon.id === 'timed-grenade' ? weapon.fuseSeconds * SIMULATION_HZ : 0,
     )
     this.state.projectiles.push(projectile)
     this.state.phase = 'projectile'
   }
 
-  private beginAction(player: SimPlayer, weaponId: WeaponId): string {
+  private beginAction(player: SimPlayer, weaponId: WeaponId, direction?: Vector): string {
     const id = `action-${this.state.nextActionId++}`
     this.state.activeAction = { id, playerId: player.id, weaponId }
-    this.emit({ type: 'weapon-fired', playerId: player.id, weaponId, actionId: id })
+    this.emit({
+      type: 'weapon-fired',
+      playerId: player.id,
+      weaponId,
+      actionId: id,
+      origin: { ...player.position },
+      ...(direction ? { direction: { ...direction } } : {}),
+    })
     return id
   }
 
@@ -297,7 +315,14 @@ export class MatchSimulation {
       radius,
       fuseTicks,
     }
-    this.emit({ type: 'projectile-spawned', projectileId: projectile.id, actionId })
+    this.emit({
+      type: 'projectile-spawned',
+      projectileId: projectile.id,
+      actionId,
+      weaponId,
+      kind,
+      position: { ...position },
+    })
     return projectile
   }
 
@@ -331,6 +356,7 @@ export class MatchSimulation {
         projectile,
         GRAVITY * weapon.gravityScale,
         FIXED_TICK_SECONDS,
+        this.state.wind * weapon.windSensitivity,
       )
       const impact = this.projectileCollision(projectile, next)
       if (!impact) {
@@ -341,10 +367,25 @@ export class MatchSimulation {
         nextProjectiles.push({
           ...projectile,
           position: { x: impact.x, y: impact.y - 4 },
-          velocity: { x: next.velocity.x * 0.45, y: -Math.abs(next.velocity.y) * 0.42 },
+          velocity: {
+            x: next.velocity.x * weapon.bounceHorizontalRetention,
+            y: -Math.abs(next.velocity.y) * weapon.bounceRestitution,
+          },
+        })
+        this.emit({
+          type: 'projectile-bounced',
+          projectileId: projectile.id,
+          weaponId: projectile.weaponId,
+          position: { ...impact },
         })
       } else if (projectile.weaponId === 'cluster-charge' && projectile.kind === 'primary') {
-        for (const angle of [-0.9, -0.45, 0, 0.45, 0.9])
+        this.emit({ type: 'cluster-split', actionId: projectile.actionId, position: { ...impact } })
+        const facing = Math.sign(projectile.velocity.x) || 1
+        for (let child = 0; child < weapon.clusterChildCount; child += 1) {
+          const angle =
+            weapon.clusterChildCount === 1
+              ? 0
+              : -0.9 + (child / (weapon.clusterChildCount - 1)) * 1.8
           nextProjectiles.push(
             this.spawnProjectile(
               projectile.actionId,
@@ -352,10 +393,14 @@ export class MatchSimulation {
               'cluster-charge',
               'cluster-child',
               impact,
-              { x: Math.cos(angle) * 230, y: -Math.sin(angle) * 230 - 160 },
+              {
+                x: Math.cos(angle) * weapon.clusterChildSpeed * facing,
+                y: -Math.sin(angle) * weapon.clusterChildSpeed - weapon.clusterChildLift,
+              },
               4,
             ),
           )
+        }
       } else this.explode(impact, weapon, projectile.actionId)
     }
     this.state.projectiles = nextProjectiles
@@ -393,15 +438,26 @@ export class MatchSimulation {
   }
 
   private fireScatter(shooter: SimPlayer, direction: Vector, weapon: WeaponDefinition): void {
-    for (let pellet = -3; pellet <= 3; pellet += 1) {
-      const angle = Math.atan2(direction.y, direction.x) + pellet * 0.055
+    const endpoints: Vector[] = []
+    const half = (weapon.pelletCount - 1) / 2
+    const actionId = this.state.activeAction!.id
+    for (let pellet = 0; pellet < weapon.pelletCount; pellet += 1) {
+      const angle =
+        Math.atan2(direction.y, direction.x) + (pellet - half) * weapon.pelletSpreadRadians
       const ray = { x: Math.cos(angle), y: Math.sin(angle) }
-      for (let distance = 8; distance <= 250; distance += 4) {
+      let endpoint = {
+        x: shooter.position.x + ray.x * weapon.pelletRange,
+        y: shooter.position.y + ray.y * weapon.pelletRange,
+      }
+      for (let distance = 8; distance <= weapon.pelletRange; distance += 4) {
         const point = {
           x: shooter.position.x + ray.x * distance,
           y: shooter.position.y + ray.y * distance,
         }
-        if (this.terrain.isSolid(point.x, point.y)) break
+        if (this.terrain.isSolid(point.x, point.y)) {
+          endpoint = point
+          break
+        }
         const target = this.state.players.find(
           (player) =>
             player.id !== shooter.id &&
@@ -409,16 +465,31 @@ export class MatchSimulation {
             Math.hypot(player.position.x - point.x, player.position.y - point.y) < player.radius,
         )
         if (!target) continue
-        const damage = weapon.baseDamage * (1 - distance / 300)
-        this.damagePlayer(target, damage)
+        endpoint = point
+        const damage = weapon.baseDamage * (1 - distance / (weapon.pelletRange + 60))
+        this.damagePlayer(target, damage, actionId, shooter.id)
         target.velocity.x += ray.x * weapon.knockbackForce
         target.velocity.y += ray.y * weapon.knockbackForce - 35
         break
       }
+      endpoints.push(endpoint)
     }
+    this.emit({
+      type: 'scatter-fired',
+      actionId,
+      origin: { ...shooter.position },
+      endpoints,
+    })
   }
 
   private explode(center: Vector, weapon: WeaponDefinition, actionId: string): void {
+    this.emit({
+      type: 'explosion-resolved',
+      actionId,
+      weaponId: weapon.id,
+      position: { ...center },
+      blastRadius: weapon.blastRadius,
+    })
     const operation: TerrainOperation = {
       sequence: this.state.nextTerrainSequence++,
       tick: this.state.tick,
@@ -437,7 +508,13 @@ export class MatchSimulation {
         0,
         Math.hypot(player.position.x - center.x, player.position.y - center.y) - player.radius,
       )
-      this.damagePlayer(player, explosionFalloff(weapon.baseDamage, weapon.blastRadius, distance))
+      const damage = weapon.id === 'cluster-charge' ? weapon.clusterChildDamage : weapon.baseDamage
+      this.damagePlayer(
+        player,
+        explosionFalloff(damage, weapon.blastRadius, distance),
+        actionId,
+        this.state.activeAction?.playerId ?? '',
+      )
       const knockback = knockbackVelocity(
         center,
         player.position,
@@ -449,11 +526,22 @@ export class MatchSimulation {
     }
   }
 
-  private damagePlayer(player: SimPlayer, amount: number): void {
+  private damagePlayer(
+    player: SimPlayer,
+    amount: number,
+    sourceActionId: string,
+    sourcePlayerId: string,
+  ): void {
     if (amount <= 0) return
     const previous = player.health
     player.health = Math.max(0, player.health - amount)
-    this.emit({ type: 'player-damaged', playerId: player.id, amount: previous - player.health })
+    this.emit({
+      type: 'player-damaged',
+      playerId: player.id,
+      amount: previous - player.health,
+      sourceActionId,
+      selfDamage: sourcePlayerId === player.id,
+    })
     if (player.health === 0 && player.alive) {
       player.alive = false
       this.emit({ type: 'player-died', playerId: player.id })
@@ -518,6 +606,7 @@ export class MatchSimulation {
   private beginNextTurn(): void {
     this.state.activePlayerIndex = this.state.activePlayerIndex === 0 ? 1 : 0
     this.state.turnNumber += 1
+    this.state.wind = windForTurn(this.state.seed, this.state.turnNumber)
     this.state.phase = 'input'
     this.state.timerRemainingTicks = this.state.config.turnDurationSeconds * SIMULATION_HZ
     this.state.expiredTicks = 0
@@ -528,7 +617,7 @@ export class MatchSimulation {
     })
     if (!canUseWeapon(this.activePlayer.inventory, this.activePlayer.selectedWeapon))
       this.activePlayer.selectedWeapon = 'basic-rocket'
-    this.emit({ type: 'turn-started', playerId: this.activePlayer.id })
+    this.emit({ type: 'turn-started', playerId: this.activePlayer.id, wind: this.state.wind })
   }
 
   private checkVictory(): void {
@@ -560,23 +649,30 @@ export class MatchSimulation {
   }
 
   isValidTeleport(target: Vector, playerId = this.activePlayer.id): boolean {
+    const weapon = WEAPONS.teleporter
     if (
       !finiteVector(target) ||
-      target.x < 20 ||
-      target.x > GAME_WIDTH - 20 ||
-      target.y < 20 ||
-      target.y > GAME_HEIGHT - 20
+      target.x < weapon.teleportEdgeMargin ||
+      target.x > GAME_WIDTH - weapon.teleportEdgeMargin ||
+      target.y < weapon.teleportEdgeMargin ||
+      target.y > GAME_HEIGHT - weapon.teleportEdgeMargin
     )
       return false
     if (this.terrain.isSolid(target.x, target.y) || this.terrain.isSolid(target.x, target.y + 14))
       return false
     const surface = this.terrain.surfaceY(target.x, target.y)
-    if (surface === null || surface - target.y > 24 || surface - target.y < 10) return false
+    if (
+      surface === null ||
+      surface - target.y > weapon.teleportSurfaceGap[1] ||
+      surface - target.y < weapon.teleportSurfaceGap[0]
+    )
+      return false
     return !this.state.players.some(
       (player) =>
         player.id !== playerId &&
         player.alive &&
-        Math.hypot(player.position.x - target.x, player.position.y - target.y) < player.radius * 2,
+        Math.hypot(player.position.x - target.x, player.position.y - target.y) <
+          weapon.teleportPlayerClearance,
     )
   }
 
@@ -607,7 +703,11 @@ export class MatchSimulation {
   }
 
   snapshot(): SerializedMatchState {
-    return { version: 1, state: structuredClone(this.state) }
+    return {
+      version: 2,
+      state: structuredClone(this.state),
+      accumulatorSeconds: this.accumulator,
+    }
   }
 }
 

@@ -12,6 +12,9 @@ export type Preferences = {
   cameraShake: boolean
   aimGuide: 'normal' | 'minimal'
   screenFlash: 'normal' | 'reduced' | 'off'
+  mute: boolean
+  masterVolume: number
+  soundEffectsVolume: number
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -24,6 +27,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   cameraShake: true,
   aimGuide: 'normal',
   screenFlash: 'normal',
+  mute: false,
+  masterVolume: 0.8,
+  soundEffectsVolume: 0.8,
 }
 
 const storageKey = `${BRAND.storageNamespace}:preferences`
@@ -56,6 +62,15 @@ export function loadPreferences(
         value.screenFlash === 'reduced' || value.screenFlash === 'off'
           ? value.screenFlash
           : 'normal',
+      mute: value.mute === true,
+      masterVolume:
+        typeof value.masterVolume === 'number'
+          ? Math.max(0, Math.min(1, value.masterVolume))
+          : DEFAULT_PREFERENCES.masterVolume,
+      soundEffectsVolume:
+        typeof value.soundEffectsVolume === 'number'
+          ? Math.max(0, Math.min(1, value.soundEffectsVolume))
+          : DEFAULT_PREFERENCES.soundEffectsVolume,
     }
   } catch {
     return DEFAULT_PREFERENCES

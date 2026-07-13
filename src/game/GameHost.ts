@@ -4,20 +4,23 @@ import { GAME_HEIGHT, GAME_WIDTH } from '../shared/constants'
 import type { GameEvents } from './types'
 import type { MatchSource } from './matchSource'
 import { once } from '../shared/once'
+import type { AudioDirector } from '../audio/AudioDirector'
+import type { PresentationPreferences } from './presentation'
 
 export type GameHost = {
   destroy: () => void
   pause: () => void
   resume: () => void
   restart: () => void
+  setPresentationPreferences: (preferences: PresentationPreferences) => void
 }
 
 export function createGame(
   parent: HTMLElement,
   source: MatchSource,
   events: GameEvents,
-  reducedMotion = false,
-  aimGuide: 'normal' | 'minimal' = 'normal',
+  preferences: PresentationPreferences,
+  audio: AudioDirector,
 ): GameHost {
   const game = new Phaser.Game({
     type: Phaser.AUTO,
@@ -31,7 +34,7 @@ export function createGame(
   })
   game.events.once(Phaser.Core.Events.READY, () => {
     game.scene.add('match', MatchScene, false)
-    game.scene.start('match', { source, events, reducedMotion, aimGuide })
+    game.scene.start('match', { source, events, preferences, audio })
   })
   const scene = () => game.scene.getScene('match') as MatchScene
   const destroy = once(() => {
@@ -43,5 +46,6 @@ export function createGame(
     pause: () => scene().setPaused(true),
     resume: () => scene().setPaused(false),
     restart: () => scene().restartMatch(),
+    setPresentationPreferences: (next) => scene().setPresentationPreferences(next),
   }
 }

@@ -34,6 +34,10 @@ export type OnlineRoomView = {
   simulationTick: number
   turnNumber: number
   activePlayerSeat: number
+  wind: number
+  eventSequence: number
+  terrainSequence: number
+  projectileCount: number
   protocolVersion: string
   mapRegistryVersion: string
   weaponRegistryVersion: string
@@ -43,8 +47,9 @@ export type OnlineRoomView = {
 
 type SchemaMap<T> = { values(): IterableIterator<T> }
 
-type RawRoomState = Omit<OnlineRoomView, 'players' | 'result'> & {
+type RawRoomState = Omit<OnlineRoomView, 'players' | 'result' | 'projectileCount'> & {
   players: SchemaMap<OnlinePlayerView>
+  projectiles: SchemaMap<unknown>
   result: OnlineRoomResultView
 }
 
@@ -60,6 +65,10 @@ export function roomViewFromSchema(state: RawRoomState): OnlineRoomView {
     simulationTick: state.simulationTick,
     turnNumber: state.turnNumber,
     activePlayerSeat: state.activePlayerSeat,
+    wind: state.wind,
+    eventSequence: state.eventSequence,
+    terrainSequence: state.terrainSequence,
+    projectileCount: [...state.projectiles.values()].length,
     protocolVersion: state.protocolVersion,
     mapRegistryVersion: state.mapRegistryVersion,
     weaponRegistryVersion: state.weaponRegistryVersion,

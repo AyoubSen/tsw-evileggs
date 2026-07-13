@@ -7,6 +7,11 @@ import { PrivateMatchRoom } from './rooms/PrivateMatchRoom'
 import { roomCodeRegistry } from './roomCodeRegistry'
 
 const origins = allowedWebOrigins()
+export const HEALTH_RESPONSE = {
+  status: 'ok',
+  service: 'mossfire-server',
+  protocolVersion: 1,
+} as const
 
 export const server = defineServer({
   rooms: {
@@ -19,7 +24,7 @@ export const server = defineServer({
   }),
   express: (app) => {
     app.use(cors({ origin: origins, methods: ['GET'], maxAge: 3600 }))
-    app.get('/health', (_request, response) => response.json({ ok: true }))
+    app.get('/health', (_request, response) => response.json(HEALTH_RESPONSE))
     app.get('/api/private-rooms/:code', (request, response) => {
       const code = normalizeRoomCode(request.params.code)
       if (!isRoomCode(code)) {

@@ -80,6 +80,7 @@ export type MatchState = {
 }
 
 export type SerializedMatchState = {
-  version: 1
+  version: 2
   state: MatchState
+  accumulatorSeconds: number
 }

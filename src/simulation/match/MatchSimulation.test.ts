@@ -209,10 +209,20 @@ describe('terrain, snapshots, and replay', () => {
     fireDown(simulation)
     simulation.step(20)
     const payload = serializeMatchState(simulation.state)
-    expect(deserializeMatchState(payload).version).toBe(1)
+    expect(deserializeMatchState(payload).version).toBe(2)
     const restored = restoreMatchSimulation(payload)
     expect(matchStateChecksum(restored.state)).toBe(matchStateChecksum(simulation.state))
     expect([...restored.getTerrain().cells]).toEqual([...simulation.getTerrain().cells])
+  })
+
+  it('preserves partial fixed-step time when restoring a live snapshot', () => {
+    const simulation = new MatchSimulation(config)
+    simulation.advance(1 / 120)
+    const restored = new MatchSimulation(undefined, { snapshot: simulation.snapshot() })
+    simulation.advance(1 / 120)
+    restored.advance(1 / 120)
+    expect(restored.state.tick).toBe(simulation.state.tick)
+    expect(matchStateChecksum(restored.state)).toBe(matchStateChecksum(simulation.state))
   })
 
   it('replays deterministically without Phaser and changes checksum when a command changes', () => {
