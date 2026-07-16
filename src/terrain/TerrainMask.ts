@@ -1,3 +1,9 @@
+import {
+  TERRAIN_MATERIAL,
+  isDestructibleMaterial,
+  type TerrainMaterialId,
+} from './materials'
+
 export class TerrainMask {
   readonly cells: Uint8Array
 
@@ -5,23 +11,32 @@ export class TerrainMask {
     readonly width: number,
     readonly height: number,
     readonly scale = 2,
+    sourceCells?: Uint8Array,
   ) {
-    this.cells = new Uint8Array(width * height)
+    this.cells = sourceCells ? new Uint8Array(sourceCells) : new Uint8Array(width * height)
+    if (this.cells.length !== width * height) throw new Error('Terrain cell count is invalid.')
   }
 
-  fillBelow(surface: (x: number) => number): void {
+  fillBelow(
+    surface: (x: number) => number,
+    material: Exclude<TerrainMaterialId, 0> = TERRAIN_MATERIAL.soil,
+  ): void {
     for (let x = 0; x < this.width; x += 1) {
       const yStart = Math.max(0, Math.floor(surface(x * this.scale) / this.scale))
-      for (let y = yStart; y < this.height; y += 1) this.cells[y * this.width + x] = 1
+      for (let y = yStart; y < this.height; y += 1) this.cells[y * this.width + x] = material
     }
   }
 
-  isSolid(worldX: number, worldY: number): boolean {
+  materialAt(worldX: number, worldY: number): TerrainMaterialId {
     const x = Math.floor(worldX / this.scale)
     const y = Math.floor(worldY / this.scale)
-    return (
-      x >= 0 && x < this.width && y >= 0 && y < this.height && this.cells[y * this.width + x] === 1
-    )
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height)
+      return TERRAIN_MATERIAL.empty
+    return this.cells[y * this.width + x] as TerrainMaterialId
+  }
+
+  isSolid(worldX: number, worldY: number): boolean {
+    return this.materialAt(worldX, worldY) !== TERRAIN_MATERIAL.empty
   }
 
   removeCircle(worldX: number, worldY: number, radius: number): void {
@@ -37,7 +52,10 @@ export class TerrainMask {
       for (let x = minX; x <= maxX; x += 1) {
         const dx = x + 0.5 - centerX
         const dy = y + 0.5 - centerY
-        if (dx * dx + dy * dy <= squaredRadius) this.cells[y * this.width + x] = 0
+        const index = y * this.width + x
+        const material = this.cells[index] as TerrainMaterialId
+        if (dx * dx + dy * dy <= squaredRadius && isDestructibleMaterial(material))
+          this.cells[index] = TERRAIN_MATERIAL.empty
       }
     }
   }
@@ -47,7 +65,7 @@ export class TerrainMask {
     if (x < 0 || x >= this.width) return null
     const start = Math.max(0, Math.floor(fromWorldY / this.scale))
     for (let y = start; y < this.height; y += 1) {
-      if (this.cells[y * this.width + x] === 1) return y * this.scale
+      if (this.cells[y * this.width + x] !== TERRAIN_MATERIAL.empty) return y * this.scale
     }
     return null
   }

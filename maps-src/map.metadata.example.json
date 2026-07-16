@@ -1,0 +1,26 @@
+{
+  "id": "example-map",
+  "revision": 1,
+  "mode": "2v2",
+  "displayName": "Example Map",
+  "description": "Replace this with an original map description.",
+  "label": "External source",
+  "cellSize": 2,
+  "spawns": [
+    { "x": 180, "y": 320, "teamId": 0, "teamSlot": 0, "facing": 1 },
+    { "x": 1260, "y": 320, "teamId": 1, "teamSlot": 0, "facing": -1 },
+    { "x": 420, "y": 460, "teamId": 0, "teamSlot": 1, "facing": 1 },
+    { "x": 1020, "y": 460, "teamId": 1, "teamSlot": 1, "facing": -1 }
+  ],
+  "theme": {
+    "sky": "#9EDCE5",
+    "sun": "#FFEDB1",
+    "backHill": "#78B996",
+    "terrain": "#9A673E",
+    "surface": "#437C53",
+    "dust": "#A88D69",
+    "brick": "#A8543D",
+    "stone": "#77736C",
+    "steel": "#394C55"
+  }
+}

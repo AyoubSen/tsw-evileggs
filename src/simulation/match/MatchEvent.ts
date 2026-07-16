@@ -2,10 +2,13 @@ import type { LocalMatchConfig } from '../../match/config'
 import type { WeaponId } from '../../weapons/registry'
 import type { SimProjectile, TerrainOperation } from './MatchState'
 import type { Vector } from '../../shared/types'
+import type { TeamId } from '../../maps/registry'
 
 export type SimulationMatchResult = {
   config: LocalMatchConfig
   winnerIndex: number | null
+  winnerTeamId: TeamId | null
+  winnerPlayerIndices: number[]
   remainingHealth: number
   turnsTaken: number
   durationSeconds: number

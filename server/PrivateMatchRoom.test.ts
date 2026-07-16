@@ -12,6 +12,7 @@ import { roomCodeRegistry } from './roomCodeRegistry'
 
 const createOptions = {
   playerName: 'Host',
+  mode: '1v1' as const,
   mapId: 'rolling-hills' as const,
   turnDurationSeconds: 30 as const,
   compatibility: CURRENT_COMPATIBILITY,
@@ -31,7 +32,7 @@ const waitFor = async (condition: () => boolean, timeoutMs = 3000): Promise<void
 const internals = (room: PrivateMatchRoom) =>
   room as unknown as {
     updateRoom(deltaMs: number): void
-    finishByForfeit(winnerSeat: 0 | 1): void
+    finishByForfeit(winnerTeamId: 0 | 1): void
     reconnectGraceSeconds: number
     simulation: MatchSimulation | null
   }

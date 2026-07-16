@@ -1,10 +1,12 @@
-import type { MapId } from '../maps/registry'
+import type { MapId, MatchMode, TeamId } from '../maps/registry'
 import type { RoomPhase } from './protocol'
 
 export type OnlinePlayerView = {
   playerId: string
   sessionId: string
-  seat: 0 | 1
+  seat: number
+  teamId: TeamId
+  teamSlot: number
   name: string
   connected: boolean
   ready: boolean
@@ -17,6 +19,7 @@ export type OnlinePlayerView = {
 export type OnlineRoomResultView = {
   available: boolean
   winnerSeat: number
+  winnerTeamId: number
   reason: string
   remainingHealth: number
   turnsTaken: number
@@ -26,6 +29,8 @@ export type OnlineRoomResultView = {
 export type OnlineRoomView = {
   roomCode: string
   phase: RoomPhase
+  mode: Extract<MatchMode, '1v1' | '2v2'>
+  capacity: number
   mapId: MapId
   turnDurationSeconds: 20 | 30 | 45
   countdownRemainingMs: number
@@ -57,6 +62,8 @@ export function roomViewFromSchema(state: RawRoomState): OnlineRoomView {
   return {
     roomCode: state.roomCode,
     phase: state.phase,
+    mode: state.mode === '2v2' ? '2v2' : '1v1',
+    capacity: Number(state.capacity) || 2,
     mapId: state.mapId,
     turnDurationSeconds: state.turnDurationSeconds,
     countdownRemainingMs: state.countdownRemainingMs,
@@ -77,6 +84,13 @@ export function roomViewFromSchema(state: RawRoomState): OnlineRoomView {
         playerId: player.playerId,
         sessionId: player.sessionId,
         seat: player.seat,
+        teamId:
+          player.teamId === 0 || player.teamId === 1
+            ? player.teamId
+            : ((player.seat % 2) as TeamId),
+        teamSlot: Number.isSafeInteger(player.teamSlot)
+          ? player.teamSlot
+          : Math.floor(player.seat / 2),
         name: player.name,
         connected: player.connected,
         ready: player.ready,
@@ -89,6 +103,10 @@ export function roomViewFromSchema(state: RawRoomState): OnlineRoomView {
     result: {
       available: state.result.available,
       winnerSeat: state.result.winnerSeat,
+      winnerTeamId:
+        state.result.winnerTeamId === 0 || state.result.winnerTeamId === 1
+          ? state.result.winnerTeamId
+          : -1,
       reason: state.result.reason,
       remainingHealth: state.result.remainingHealth,
       turnsTaken: state.result.turnsTaken,

@@ -11,6 +11,7 @@ import {
 import { replayChecksum, replayMatch, type MatchReplay } from '../replay/replay'
 
 const config = {
+  mode: '1v1' as const,
   playerNames: ['Lumen', 'Morrow'] as const,
   mapId: 'rolling-hills' as const,
   turnDurationSeconds: 30 as const,
@@ -209,7 +210,7 @@ describe('terrain, snapshots, and replay', () => {
     fireDown(simulation)
     simulation.step(20)
     const payload = serializeMatchState(simulation.state)
-    expect(deserializeMatchState(payload).version).toBe(2)
+    expect(deserializeMatchState(payload).version).toBe(4)
     const restored = restoreMatchSimulation(payload)
     expect(matchStateChecksum(restored.state)).toBe(matchStateChecksum(simulation.state))
     expect([...restored.getTerrain().cells]).toEqual([...simulation.getTerrain().cells])

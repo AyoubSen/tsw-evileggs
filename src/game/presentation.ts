@@ -4,6 +4,7 @@ export type PresentationPreferences = {
   reducedMotion: boolean
   highContrastHud: boolean
   cameraShake: boolean
+  cameraMode: 'fit' | 'follow'
   aimGuide: 'normal' | 'minimal'
   screenFlash: 'normal' | 'reduced' | 'off'
 }

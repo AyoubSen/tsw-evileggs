@@ -19,6 +19,7 @@ class FakeRoom {
     result: {
       available: false,
       winnerSeat: -1,
+      winnerTeamId: -1,
       remainingHealth: 0,
       turnsTaken: 0,
       durationSeconds: 0,
@@ -214,6 +215,7 @@ describe('OnlineMatchSource synchronization', () => {
     room.state.result = {
       available: true,
       winnerSeat: 0,
+      winnerTeamId: 0,
       remainingHealth: 72,
       turnsTaken: 4,
       durationSeconds: 18,

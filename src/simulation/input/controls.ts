@@ -56,16 +56,18 @@ export function dragAim(
   pointer: Vector,
   minimumPower: number,
   maximumPower: number,
+  pixelsPerWorldUnit = 1,
 ): DragAim | null {
   const pull = getPullVector(origin, pointer)
   const rawDistance = Math.hypot(pull.x, pull.y)
+  const screenDistance = rawDistance * pixelsPerWorldUnit
   const direction = getFiringDirectionFromPull(pull)
-  const power = getPowerFromPullDistance(rawDistance, minimumPower, maximumPower)
+  const power = getPowerFromPullDistance(screenDistance, minimumPower, maximumPower)
   if (!direction || power === null) return null
   return {
     direction,
     power,
-    distance: Math.min(rawDistance, DRAG_MAX_DISTANCE),
+    distance: Math.min(screenDistance, DRAG_MAX_DISTANCE) / pixelsPerWorldUnit,
     worldAngle: (Math.atan2(-direction.y, direction.x) * 180) / Math.PI,
   }
 }

@@ -1,6 +1,6 @@
 # Mossfire Skirmish Product Roadmap
 
-**Last reviewed:** 2026-07-13
+**Last reviewed:** 2026-07-16
 
 ## Purpose
 
@@ -17,17 +17,17 @@ The following summary is based on active source and tests, not only earlier docu
 | Completed   | Application and rendering    | React and Vite own the application shell; Phaser owns gameplay input and presentation. Local and online matches share the same scene through match-source abstractions.                                                                                                                                                              |
 | Completed   | Authoritative simulation     | Framework-independent TypeScript simulation owns fixed 60 Hz stepping, turn phases, timers, movement, jumping, health, ammunition, projectiles, damage, falling, victory, and draws. Commands and events define the authority boundary.                                                                                              |
 | Completed   | Core artillery play          | Pull-back mouse aiming, movement, jumping, deterministic per-turn wind, destructible terrain, and five functional weapons are implemented: Basic Rocket, Timed Grenade, Scatter Shot, Cluster Charge, and Teleporter.                                                                                                                |
-| Completed   | Current maps                 | Four selectable maps have deterministic terrain profiles and spawn points. They are distinct layouts at a small fixed `960 x 540` world size, but mostly share presentation and mechanics; mechanically distinct map objects and materials are not implemented.                                                                      |
-| Completed   | Local play                   | Local hot-seat 1v1 supports names, map selection, 20/30/45-second turns, pause, results, and rematches.                                                                                                                                                                                                                              |
-| Completed   | Private online play          | Colyseus hosts server-authoritative private 1v1 rooms with six-character room codes, two-player capacity, a ready lobby, countdowns, validated intent commands, rate limits, synchronized state/effects, buffered interpolation, connection quality feedback, and cold-start feedback.                                               |
-| Completed   | Recovery and lifecycle       | Tab-scoped refresh recovery, a reconnect grace period, authoritative pause/resume, forfeit handling, snapshots, sequence-gap recovery, and two-player rematch voting are implemented. Room codes and active rooms remain single-process and in-memory.                                                                               |
+| In progress | Current maps                 | Seven selectable maps resolve through versioned documents with explicit dimensions, revisions, themes, material grids, and `x`/`y` team spawns. Ruined Foundry is the first multi-level 2v2 structure map with destructible brick and indestructible stone/steel. Full-map and action-following cameras are implemented; typed special objects are not. |
+| In progress | Local play                   | Local hot-seat 1v1 and 2v2 support names, mode-filtered maps, 20/30/45-second turns, pause, results, and rematches. Local 2v2 has alternating team turns, eliminated-player skipping, team victory, friendly fire, individual ammunition, four-player HUD presentation, and one dedicated map.                                           |
+| In progress | Private online play          | Colyseus hosts server-authoritative private 1v1 and 2v2 rooms with mode-specific capacity, fixed balanced teams, all-player readiness, countdowns, validated intent commands, rate limits, synchronized state/effects, buffered interpolation, connection quality feedback, and cold-start feedback. The new four-client path is pending user playtesting. |
+| In progress | Recovery and lifecycle       | Tab-scoped refresh recovery, a reconnect grace period, authoritative all-player pause/resume, team forfeit on a member leaving, snapshots, sequence-gap recovery, and unanimous mode-specific rematch voting are implemented. Four-player lifecycle behavior is pending user playtesting. Room codes and active rooms remain process-local. |
 | Completed   | Preferences and presentation | Local preferences remember names, map, turn duration, audio settings, reduced motion, contrast, screen flash, camera shake, and aim-guide density. Synthesized audio and procedural visual effects are implemented. Controls and aim state are not fully customizable or remembered per player.                                      |
 | Completed   | Automated coverage           | Vitest suites cover simulation, protocol, server lifecycle, synchronization, interpolation, audio safety, serialization, and internal replay checksums. A Playwright two-browser private-room smoke test exists. Coverage is meaningful but not exhaustive.                                                                          |
 | In progress | Production maturity          | The code supports separate frontend/server endpoints, strict production origin configuration, health checks, and deployment-oriented cold-start handling. Vercel frontend and Render server deployment are reported as operational project context, but provider manifests and deployment history are not stored in this repository. |
 | Planned     | Replay product               | Snapshot serialization, deterministic command replay helpers, and checksums exist as internal/test foundations. Match recording, a durable replay format, viewer, playback controls, and sharing do not.                                                                                                                             |
-| Planned     | Product expansion            | Accounts, database persistence, chat, teams, spectators, custom maps, map mechanics/materials, invite links, broader custom rules, profiles, statistics, cosmetic ownership, and public discovery are not implemented.                                                                                                               |
+| Planned     | Product expansion            | Accounts, database persistence, chat, online teams, spectators, custom maps, advanced map objects, invite links, broader custom rules, profiles, statistics, cosmetic ownership, and public discovery are not implemented.                                                                                                             |
 
-Current architectural constraints matter to future work: the world dimensions are global constants; map definitions are procedural surface functions rather than versioned data; terrain is a binary occupancy mask with subtraction operations; rooms have exactly two seats; player state assumes two individuals; the camera uses the fixed game view; and room lookup is process-local. Existing architecture details remain documented in [README.md](README.md).
+Current architectural constraints matter to future work: existing profile maps are adapted into the new document format at startup rather than stored as external files; terrain materials and multi-level collision exist but typed special objects do not; online 2v2 uses fixed seats and pauses everyone for any disconnect; camera modes support variable worlds but do not yet provide manual overview panning; and room lookup is process-local. Existing architecture details remain documented in [README.md](README.md).
 
 ## Product Principles
 
@@ -124,7 +124,7 @@ Player model customization includes modular original body parts or character com
 
 ### 4. Advanced Map Architecture
 
-**Status:** Planned; NOW / NEXT candidate
+**Status:** In progress; active NOW / NEXT milestone
 
 **Purpose:** Replace fixed procedural surface assumptions with reusable, deterministic, data-driven world dimensions, materials, objects, and boundary rules.
 
@@ -138,7 +138,7 @@ Player model customization includes modular original body parts or character com
 
 Mechanics include destructible and indestructible terrain; reflective walls that bounce projectiles; horizontal wraparound boundaries where projectiles exiting one side return from the other; paired portals; one-way projectile barriers; low-friction and high-bounce surfaces; and explicit material rules. Moving platforms are allowed only if deterministic and server-authoritative. Environmental hazards follow only after a generic mechanic system exists. Map-specific wind rules are allowed only when clearly communicated to players.
 
-**Suggested sub-milestones:** 4A establishes variable dimensions, camera/zoom, pointer transforms, and performance measurements. 4B establishes the versioned material/object model with destructible and indestructible regions. 4C adds reflective, wraparound, portal, and one-way projectile behavior through that generic model. 4D hardens snapshots, reconnect, interpolation, validation, and registry migration before official maps depend on the architecture.
+**Suggested sub-milestones:** 4A establishes variable dimensions, camera/zoom, pointer transforms, and performance measurements. Variable dimensions, camera-aware input, fixed-screen HUD rendering, full-map/action-following modes, and larger maps are implemented; manual overview controls and performance measurements remain. 4B establishes the versioned material/object model with destructible and indestructible regions. Versioned row-RLE map documents, external source compilation, explicit vertical spawns, material terrain, and local multi-level collision are implemented; typed objects remain. 4C adds reflective, wraparound, portal, and one-way projectile behavior through that generic model. 4D hardens snapshots, reconnect, interpolation, validation, and registry migration before custom maps depend on the architecture.
 
 **Explicitly out of scope:** A user-facing editor, uploaded maps, executable map scripts, one-off map checks embedded in simulation control flow, teams, broad environmental hazard catalogs, and public map discovery.
 
@@ -240,7 +240,7 @@ Keep room codes. Add a shareable room URL that launches the game and pre-fills o
 
 ### 9. 2v2 Team Play
 
-**Status:** Later; major cross-system milestone
+**Status:** In progress; local and online vertical slices implemented, four-client playtesting pending
 
 **Purpose:** Expand private play to four friends without treating teams as a simple room-capacity change.
 
@@ -250,13 +250,13 @@ Keep room codes. Add a shareable room URL that launches the game and pre-fills o
 
 **Dependencies:** Larger team-compatible official maps and camera support; explicit team/spawn data; stable custom room configuration; and clear player identity presentation. Accounts are not required.
 
-**Broad scope:** Four-player rooms; team assignment; alternating team turn order; skipping eliminated players; team victory and draw conditions; team-readable names/colors/indicators; spawn zones; HUD redesign; friendly-fire rule; an explicit individual-versus-shared ammunition model; disconnect/reconnect rules; teammate leave/forfeit policy; ready and rematch voting rules; spectator behavior for eliminated players; room-code/invite compatibility; and bandwidth/snapshot review.
+**Broad scope:** Local four-player hot-seat, mode-specific four-player online rooms, fixed balanced team assignment, alternating team turns, eliminated-player skipping, team victory/draw, team-readable names/colors/indicators, explicit team spawns, four-seat lobby/HUD, enabled friendly fire, individual ammunition, all-player reconnect pause, team forfeit on leave, all-player readiness, and unanimous rematches are implemented. Remaining work is four-client playtesting, bandwidth/snapshot observation, and a later spectator policy for eliminated players.
 
 **Explicitly out of scope:** 3v3, public team matchmaking, clans, ranking, AI substitutes, and assumptions that current 1v1 maps are automatically safe for four players.
 
 **Major risks:** Turn-order edge cases, oversized state patches, confusing camera/HUD, unreadable teams, match abandonment, unfair spawns, long waits between turns, friendly-fire griefing, and combinatorial lifecycle tests.
 
-**Unresolved design decisions:** Is friendly fire enabled by default? Does ammunition belong to each player or the whole team? Does one teammate leaving forfeit the team? Must every connected player approve a rematch? Can dead players chat or spectate freely? Who assigns teams, and may teams be uneven?
+**Unresolved design decisions:** Current rules establish enabled friendly fire, individual ammunition, fixed even teams, `A1, B1, A2, B2` rotation, team forfeit when a member leaves, and unanimous rematches. Eliminated-player spectator controls and whether a later lobby permits consensual team swapping remain unresolved.
 
 **Completion indicators:** Four clients can complete, reconnect to, forfeit, and rematch a 2v2 game on validated team maps; turns alternate by documented rules and skip eliminated players; victory/draw rules are deterministic; lobby/HUD clearly show teams and active rules; lifecycle decisions are implemented consistently; and measured snapshots remain within an accepted budget.
 

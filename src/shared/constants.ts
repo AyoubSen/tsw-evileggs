@@ -1,5 +1,6 @@
-export const GAME_WIDTH = 960
-export const GAME_HEIGHT = 540
+export const VIEWPORT_WIDTH = 960
+export const VIEWPORT_HEIGHT = 540
+export const MAX_WORLD_COORDINATE = 8192
 export const FIXED_STEP_SECONDS = 1 / 60
 export const GRAVITY = 700
 export const AIM_MIN_ELEVATION = 8

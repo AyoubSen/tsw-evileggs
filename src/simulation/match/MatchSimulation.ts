@@ -1,12 +1,12 @@
-import { getMap, createMapTerrain } from '../../maps/registry'
-import { validateMatchConfig, type LocalMatchConfig } from '../../match/config'
 import {
-  GAME_HEIGHT,
-  GAME_WIDTH,
-  GRAVITY,
-  POWER_MAX_PERCENT,
-  POWER_MIN_PERCENT,
-} from '../../shared/constants'
+  getMap,
+  createMapTerrain,
+  type MapDefinition,
+  type SpawnDefinition,
+  type TeamId,
+} from '../../maps/registry'
+import { validateMatchConfig, type LocalMatchConfig } from '../../match/config'
+import { GRAVITY, POWER_MAX_PERCENT, POWER_MIN_PERCENT } from '../../shared/constants'
 import type { Vector } from '../../shared/types'
 import { windForTurn } from '../wind/wind'
 import { TerrainMask } from '../../terrain/TerrainMask'
@@ -34,12 +34,13 @@ import {
   type TerrainOperation,
 } from './MatchState'
 
-const CHARACTER_RADIUS = 15
-const TERRAIN_SCALE = 2
+const CHARACTER_RADIUS = 14
 const MOVE_SPEED = 105
 const MAX_STEP_UP = 12
 const JUMP_VELOCITY = 310
-const JUMP_HORIZONTAL_SPEED = 105
+const AIR_ACCELERATION = 260
+const AIR_MAX_SPEED = 85
+const JUMP_HORIZONTAL_SPEED = AIR_MAX_SPEED
 const SETTLE_TICKS = Math.ceil(0.45 * SIMULATION_HZ)
 const EXPIRED_TICKS = Math.ceil(0.7 * SIMULATION_HZ)
 const MAX_ACCUMULATED_SECONDS = 0.25
@@ -55,6 +56,7 @@ const finiteVector = (value: unknown): value is Vector =>
 
 export class MatchSimulation {
   private terrain: TerrainMask
+  private map: MapDefinition
   private events: MatchEvent[] = []
   private accumulator = 0
   readonly state: MatchState
@@ -66,26 +68,45 @@ export class MatchSimulation {
     if (options.snapshot) {
       this.state = structuredClone(options.snapshot.state)
       this.accumulator = options.snapshot.accumulatorSeconds
+      this.map = getMap(this.state.mapId)
+      if (
+        this.map.id !== this.state.mapId ||
+        this.map.revision !== this.state.mapRevision ||
+        this.map.width !== this.state.worldWidth ||
+        this.map.height !== this.state.worldHeight ||
+        this.map.mode !== this.state.config.mode ||
+        this.map.spawnPoints.length !== this.state.players.length
+      )
+        throw new Error('Match snapshot map does not match the installed map revision.')
       this.terrain = reconstructTerrain(this.state.mapId, this.state.terrainOperations)
       return
     }
     const validated = validateMatchConfig(config)
     const map = getMap(validated.mapId)
-    this.terrain = createMapTerrain(map, TERRAIN_SCALE)
+    this.map = map
+    this.terrain = createMapTerrain(map)
     const seed = (options.seed ?? 1) >>> 0 || 1
+    const players = map.spawnPoints.map((spawn, index) =>
+      this.createPlayer(`player-${index + 1}`, validated.playerNames[index], spawn),
+    )
+    const activePlayerIndex = players.findIndex(
+      (player) => player.teamId === 0 && player.teamSlot === 0,
+    )
+    const teamZeroPlayers = players.filter((player) => player.teamId === 0)
     this.state = {
       matchId: options.matchId ?? `local-${seed}`,
       seed,
       tick: 0,
       config: validated,
       mapId: validated.mapId,
+      mapRevision: map.revision,
+      worldWidth: map.width,
+      worldHeight: map.height,
       phase: 'input',
       paused: false,
-      players: [
-        this.createPlayer('player-1', validated.playerNames[0], map.spawnPoints[0]),
-        this.createPlayer('player-2', validated.playerNames[1], map.spawnPoints[1]),
-      ],
-      activePlayerIndex: 0,
+      players,
+      activePlayerIndex: Math.max(0, activePlayerIndex),
+      teamTurnCursors: [teamZeroPlayers.length > 1 ? 1 : 0, 0],
       turnNumber: 1,
       timerRemainingTicks: validated.turnDurationSeconds * SIMULATION_HZ,
       expiredTicks: 0,
@@ -97,6 +118,7 @@ export class MatchSimulation {
       pendingExplosions: [],
       terrainOperations: [],
       winnerPlayerId: null,
+      winnerTeamId: null,
       isDraw: false,
       nextProjectileId: 1,
       nextActionId: 1,
@@ -106,15 +128,17 @@ export class MatchSimulation {
     }
   }
 
-  private createPlayer(id: string, name: string, x: number): SimPlayer {
-    const surface = this.terrain.surfaceY(x) ?? GAME_HEIGHT
+  private createPlayer(id: string, name: string, spawn: SpawnDefinition): SimPlayer {
     return {
       id,
       name,
-      position: { x, y: surface - CHARACTER_RADIUS },
+      position: { x: spawn.x, y: spawn.y - CHARACTER_RADIUS },
       velocity: { x: 0, y: 0 },
       health: 100,
       radius: CHARACTER_RADIUS,
+      teamId: spawn.teamId,
+      teamSlot: spawn.teamSlot,
+      facing: spawn.facing,
       alive: true,
       grounded: true,
       moveDirection: 0,
@@ -195,6 +219,7 @@ export class MatchSimulation {
       return rejected('match-not-accepting-input')
     if (command.type === 'move') {
       if (![-1, 0, 1].includes(command.direction)) return rejected('invalid-command')
+      if (command.direction !== 0) player.facing = command.direction
       player.moveDirection = command.pressed
         ? command.direction
         : player.moveDirection === command.direction
@@ -328,14 +353,26 @@ export class MatchSimulation {
 
   private advanceMovementIntent(): void {
     const player = this.activePlayer
-    if (player.moveDirection === 0 || !player.grounded || !player.alive) return
+    if (player.moveDirection === 0 || !player.alive) return
+    if (!player.grounded) {
+      player.velocity.x = clamp(
+        player.velocity.x + player.moveDirection * AIR_ACCELERATION * FIXED_TICK_SECONDS,
+        -AIR_MAX_SPEED,
+        AIR_MAX_SPEED,
+      )
+      return
+    }
     const distance = MOVE_SPEED * FIXED_TICK_SECONDS
     const candidateX = clamp(
       player.position.x + player.moveDirection * distance,
       player.radius,
-      GAME_WIDTH - player.radius,
+      this.state.worldWidth - player.radius,
     )
-    const surface = this.terrain.surfaceY(candidateX, 0)
+    if (this.playerHitsWall(player, candidateX)) return
+    const surface = this.terrain.surfaceY(
+      candidateX,
+      Math.max(0, player.position.y - player.radius + 1),
+    )
     const foot = player.position.y + player.radius
     if (surface === null || foot - surface > MAX_STEP_UP) return
     player.position.x = candidateX
@@ -552,12 +589,16 @@ export class MatchSimulation {
     for (const player of this.state.players) {
       if (!player.alive) continue
       player.velocity.y += GRAVITY * FIXED_TICK_SECONDS
-      player.position.x = clamp(
+      const candidateX = clamp(
         player.position.x + player.velocity.x * FIXED_TICK_SECONDS,
         player.radius,
-        GAME_WIDTH - player.radius,
+        this.state.worldWidth - player.radius,
       )
-      player.position.y += player.velocity.y * FIXED_TICK_SECONDS
+      if (!this.playerHitsWall(player, candidateX)) player.position.x = candidateX
+      else player.velocity.x = 0
+      const candidateY = player.position.y + player.velocity.y * FIXED_TICK_SECONDS
+      if (player.velocity.y < 0 && this.playerHitsCeiling(player, candidateY)) player.velocity.y = 0
+      else player.position.y = candidateY
       player.velocity.x *= Math.pow(0.12, FIXED_TICK_SECONDS)
       const surface = this.terrain.surfaceY(
         player.position.x,
@@ -572,12 +613,30 @@ export class MatchSimulation {
         player.velocity.y = 0
         player.grounded = true
       } else player.grounded = false
-      if (player.position.y > GAME_HEIGHT + 65) {
+      if (player.position.y > this.state.worldHeight + 65) {
         player.health = 0
         player.alive = false
         this.emit({ type: 'player-died', playerId: player.id })
       }
     }
+  }
+
+  private playerHitsWall(player: SimPlayer, candidateX: number): boolean {
+    const side = candidateX + Math.sign(candidateX - player.position.x) * player.radius * 0.9
+    return (
+      this.terrain.isSolid(side, player.position.y - player.radius * 0.55) ||
+      this.terrain.isSolid(side, player.position.y) ||
+      this.terrain.isSolid(side, player.position.y + player.radius * 0.45)
+    )
+  }
+
+  private playerHitsCeiling(player: SimPlayer, candidateY: number): boolean {
+    const head = candidateY - player.radius
+    return (
+      this.terrain.isSolid(player.position.x, head) ||
+      this.terrain.isSolid(player.position.x - player.radius * 0.55, head) ||
+      this.terrain.isSolid(player.position.x + player.radius * 0.55, head)
+    )
   }
 
   private advanceSettling(): void {
@@ -604,7 +663,21 @@ export class MatchSimulation {
   }
 
   private beginNextTurn(): void {
-    this.state.activePlayerIndex = this.state.activePlayerIndex === 0 ? 1 : 0
+    const targetTeam = (this.activePlayer.teamId === 0 ? 1 : 0) as TeamId
+    const teamPlayers = this.state.players
+      .map((player, index) => ({ player, index }))
+      .filter(({ player }) => player.teamId === targetTeam)
+    const start = this.state.teamTurnCursors[targetTeam] % teamPlayers.length
+    let next = teamPlayers[start]
+    for (let offset = 0; offset < teamPlayers.length; offset += 1) {
+      const candidate = teamPlayers[(start + offset) % teamPlayers.length]
+      if (!candidate.player.alive) continue
+      next = candidate
+      this.state.teamTurnCursors[targetTeam] =
+        (start + offset + 1) % teamPlayers.length
+      break
+    }
+    this.state.activePlayerIndex = next.index
     this.state.turnNumber += 1
     this.state.wind = windForTurn(this.state.seed, this.state.turnNumber)
     this.state.phase = 'input'
@@ -623,14 +696,16 @@ export class MatchSimulation {
   private checkVictory(): void {
     if (this.state.phase === 'victory') return
     const alive = this.state.players.filter((player) => player.alive)
-    if (alive.length > 1) return
+    const aliveTeams = [...new Set(alive.map((player) => player.teamId))]
+    if (aliveTeams.length > 1) return
     this.state.phase = 'victory'
     this.state.timerRemainingTicks = 0
     this.state.players.forEach((player) => {
       player.moveDirection = 0
     })
     this.state.winnerPlayerId = alive[0]?.id ?? null
-    this.state.isDraw = alive.length === 0
+    this.state.winnerTeamId = aliveTeams[0] ?? null
+    this.state.isDraw = aliveTeams.length === 0
     this.emit({ type: 'match-ended', result: this.getResult() })
   }
 
@@ -638,11 +713,27 @@ export class MatchSimulation {
     const winnerIndex = this.state.winnerPlayerId
       ? this.state.players.findIndex((player) => player.id === this.state.winnerPlayerId)
       : null
-    const winner = winnerIndex === null ? null : this.state.players[winnerIndex]
+    const winnerTeamId = this.state.winnerTeamId
+    const winnerPlayerIndices =
+      winnerTeamId === null
+        ? []
+        : this.state.players
+            .map((player, index) => ({ player, index }))
+            .filter(({ player }) => player.teamId === winnerTeamId)
+            .map(({ index }) => index)
     return {
       config: this.state.config,
       winnerIndex,
-      remainingHealth: winner ? Math.ceil(winner.health) : 0,
+      winnerTeamId,
+      winnerPlayerIndices,
+      remainingHealth:
+        winnerTeamId === null
+          ? 0
+          : Math.ceil(
+              this.state.players
+                .filter((player) => player.teamId === winnerTeamId && player.alive)
+                .reduce((total, player) => total + player.health, 0),
+            ),
       turnsTaken: this.state.turnNumber,
       durationSeconds: Math.floor(this.state.durationTicks / SIMULATION_HZ),
     }
@@ -653,9 +744,9 @@ export class MatchSimulation {
     if (
       !finiteVector(target) ||
       target.x < weapon.teleportEdgeMargin ||
-      target.x > GAME_WIDTH - weapon.teleportEdgeMargin ||
+      target.x > this.state.worldWidth - weapon.teleportEdgeMargin ||
       target.y < weapon.teleportEdgeMargin ||
-      target.y > GAME_HEIGHT - weapon.teleportEdgeMargin
+      target.y > this.state.worldHeight - weapon.teleportEdgeMargin
     )
       return false
     if (this.terrain.isSolid(target.x, target.y) || this.terrain.isSolid(target.x, target.y + 14))
@@ -683,7 +774,12 @@ export class MatchSimulation {
     }
   }
   private outOfBounds(point: Vector): boolean {
-    return point.x < 0 || point.x > GAME_WIDTH || point.y < 0 || point.y > GAME_HEIGHT
+    return (
+      point.x < 0 ||
+      point.x > this.state.worldWidth ||
+      point.y < 0 ||
+      point.y > this.state.worldHeight
+    )
   }
 
   private emit(event: MatchEventInput): void {
@@ -704,7 +800,7 @@ export class MatchSimulation {
 
   snapshot(): SerializedMatchState {
     return {
-      version: 2,
+      version: 4,
       state: structuredClone(this.state),
       accumulatorSeconds: this.accumulator,
     }
@@ -715,7 +811,7 @@ export function reconstructTerrain(
   mapId: string,
   operations: readonly TerrainOperation[],
 ): TerrainMask {
-  const terrain = createMapTerrain(getMap(mapId), TERRAIN_SCALE)
+  const terrain = createMapTerrain(getMap(mapId))
   for (const operation of [...operations].sort((left, right) => left.sequence - right.sequence))
     terrain.removeCircle(operation.x, operation.y, operation.radius)
   return terrain

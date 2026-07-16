@@ -194,11 +194,14 @@ export class OnlineRoomSession {
     signal?: AbortSignal,
   ): Promise<OnlineRoomSession> {
     try {
+      if (config.mode !== '1v1' && config.mode !== '2v2')
+        throw new Error('That match mode is not available for private online rooms.')
       throwIfOnlineStartupAborted(signal)
       await waitForGameServer(signal)
       const client = new Client(runtimeNetworkConfig().colyseusUrl)
       const options: CreateRoomOptions = {
         playerName,
+        mode: config.mode,
         mapId: config.mapId,
         turnDurationSeconds: config.turnDurationSeconds,
         compatibility: CURRENT_COMPATIBILITY,
@@ -281,7 +284,7 @@ export class OnlineRoomSession {
     return this.disposed
   }
 
-  get localSeat(): 0 | 1 | null {
+  get localSeat(): number | null {
     return (
       this.currentView?.players.find((player) => player.sessionId === this.room.sessionId)?.seat ??
       null

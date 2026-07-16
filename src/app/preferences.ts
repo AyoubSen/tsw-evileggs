@@ -1,15 +1,17 @@
 import { BRAND } from './branding'
 import { DEFAULT_PLAYER_NAMES, validateMatchConfig, type TurnDuration } from '../match/config'
-import { getMap, type MapId } from '../maps/registry'
+import { getMap, type MapId, type MatchMode } from '../maps/registry'
 
 export type Preferences = {
   version: 1
-  playerNames: [string, string]
+  playerNames: string[]
+  lastMode: MatchMode
   lastMapId: MapId
   turnDurationSeconds: TurnDuration
   reducedMotion: boolean
   highContrastHud: boolean
   cameraShake: boolean
+  cameraMode: 'fit' | 'follow'
   aimGuide: 'normal' | 'minimal'
   screenFlash: 'normal' | 'reduced' | 'off'
   mute: boolean
@@ -20,11 +22,13 @@ export type Preferences = {
 export const DEFAULT_PREFERENCES: Preferences = {
   version: 1,
   playerNames: [...DEFAULT_PLAYER_NAMES],
+  lastMode: '1v1',
   lastMapId: 'rolling-hills',
   turnDurationSeconds: 30,
   reducedMotion: false,
   highContrastHud: false,
   cameraShake: true,
+  cameraMode: 'fit',
   aimGuide: 'normal',
   screenFlash: 'normal',
   mute: false,
@@ -44,19 +48,26 @@ export function loadPreferences(
     if (!parsed || typeof parsed !== 'object' || (parsed as { version?: unknown }).version !== 1)
       return DEFAULT_PREFERENCES
     const value = parsed as Partial<Preferences>
+    const playerNames = DEFAULT_PLAYER_NAMES.map((fallback, index) => {
+      const name = value.playerNames?.[index]
+      return typeof name === 'string' && name.trim() ? name.trim().slice(0, 18) : fallback
+    })
     const config = validateMatchConfig({
-      playerNames: value.playerNames,
+      mode: value.lastMode,
+      playerNames,
       mapId: value.lastMapId,
       turnDurationSeconds: value.turnDurationSeconds,
     })
     return {
       ...DEFAULT_PREFERENCES,
       ...config,
-      playerNames: [...config.playerNames],
+      playerNames,
+      lastMode: config.mode,
       lastMapId: getMap(config.mapId).id,
       reducedMotion: value.reducedMotion === true,
       highContrastHud: value.highContrastHud === true,
       cameraShake: value.cameraShake !== false,
+      cameraMode: value.cameraMode === 'follow' ? 'follow' : 'fit',
       aimGuide: value.aimGuide === 'minimal' ? 'minimal' : 'normal',
       screenFlash:
         value.screenFlash === 'reduced' || value.screenFlash === 'off'

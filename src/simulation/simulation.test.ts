@@ -229,17 +229,16 @@ describe('weapons', () => {
 })
 
 describe('maps', () => {
-  it('registers four distinct maps with safe supported spawns and fallback lookup', () => {
-    expect(MAP_ORDER).toHaveLength(4)
-    expect(new Set(MAP_ORDER).size).toBe(4)
+  it('registers seven distinct maps with safe supported spawns and fallback lookup', () => {
+    expect(MAP_ORDER).toHaveLength(7)
+    expect(new Set(MAP_ORDER).size).toBe(7)
     for (const id of MAP_ORDER) {
       const map = MAPS[id]
       expect(map.displayName.length).toBeGreaterThan(0)
-      expect(map.spawnPoints).toHaveLength(2)
+      expect(map.spawnPoints).toHaveLength(map.mode === '2v2' ? 4 : 2)
       expect(hasSafeSpawns(map)).toBe(true)
       const terrain = createMapTerrain(map)
-      expect(terrain.surfaceY(map.spawnPoints[0])).not.toBeNull()
-      expect(terrain.surfaceY(map.spawnPoints[1])).not.toBeNull()
+      for (const spawn of map.spawnPoints) expect(terrain.surfaceY(spawn.x)).not.toBeNull()
     }
     expect(getMap('missing-map').id).toBe('rolling-hills')
   })

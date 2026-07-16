@@ -1,5 +1,5 @@
 import type { LocalMatchConfig } from '../../match/config'
-import type { MapId } from '../../maps/registry'
+import type { MapId, TeamId } from '../../maps/registry'
 import type { Vector } from '../../shared/types'
 import type { WeaponId, WeaponInventory } from '../../weapons/registry'
 
@@ -15,6 +15,9 @@ export type SimPlayer = {
   velocity: Vector
   health: number
   radius: number
+  teamId: TeamId
+  teamSlot: number
+  facing: -1 | 1
   alive: boolean
   grounded: boolean
   moveDirection: -1 | 0 | 1
@@ -56,10 +59,14 @@ export type MatchState = {
   tick: number
   config: LocalMatchConfig
   mapId: MapId
+  mapRevision: number
+  worldWidth: number
+  worldHeight: number
   phase: MatchPhase
   paused: boolean
-  players: [SimPlayer, SimPlayer]
-  activePlayerIndex: 0 | 1
+  players: SimPlayer[]
+  activePlayerIndex: number
+  teamTurnCursors: [number, number]
   turnNumber: number
   timerRemainingTicks: number
   expiredTicks: number
@@ -71,6 +78,7 @@ export type MatchState = {
   pendingExplosions: []
   terrainOperations: TerrainOperation[]
   winnerPlayerId: string | null
+  winnerTeamId: TeamId | null
   isDraw: boolean
   nextProjectileId: number
   nextActionId: number
@@ -80,7 +88,7 @@ export type MatchState = {
 }
 
 export type SerializedMatchState = {
-  version: 2
+  version: 4
   state: MatchState
   accumulatorSeconds: number
 }

@@ -1,6 +1,6 @@
 import Phaser from 'phaser'
 import { MatchScene } from './scenes/MatchScene'
-import { GAME_HEIGHT, GAME_WIDTH } from '../shared/constants'
+import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from '../shared/constants'
 import type { GameEvents } from './types'
 import type { MatchSource } from './matchSource'
 import { once } from '../shared/once'
@@ -25,8 +25,8 @@ export function createGame(
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent,
-    width: GAME_WIDTH,
-    height: GAME_HEIGHT,
+    width: VIEWPORT_WIDTH,
+    height: VIEWPORT_HEIGHT,
     backgroundColor: '#10172a',
     scene: [],
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },

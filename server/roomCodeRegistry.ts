@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto'
 import { normalizeRoomCode, ROOM_CODE_LENGTH, type RoomPhase } from '../src/network/protocol'
+import type { MatchMode } from '../src/maps/registry'
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
@@ -8,13 +9,19 @@ export type RoomCodeEntry = {
   roomId: string
   phase: RoomPhase
   connectedPlayers: number
+  capacity: number
+  mode: Extract<MatchMode, '1v1' | '2v2'>
   createdAt: number
 }
 
 export class RoomCodeRegistry {
   private readonly entries = new Map<string, RoomCodeEntry>()
 
-  register(roomId: string): RoomCodeEntry {
+  register(
+    roomId: string,
+    capacity = 2,
+    mode: Extract<MatchMode, '1v1' | '2v2'> = '1v1',
+  ): RoomCodeEntry {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       let code = ''
       for (let index = 0; index < ROOM_CODE_LENGTH; index += 1)
@@ -25,6 +32,8 @@ export class RoomCodeRegistry {
         roomId,
         phase: 'waiting' as const,
         connectedPlayers: 0,
+        capacity,
+        mode,
         createdAt: Date.now(),
       }
       this.entries.set(code, entry)

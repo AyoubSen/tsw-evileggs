@@ -1,6 +1,12 @@
 import { randomInt, randomUUID } from 'node:crypto'
 import { ErrorCode, Room, ServerError, type Client, type Messages } from '@colyseus/core'
-import { sanitizePlayerName, type LocalMatchConfig } from '../../src/match/config'
+import {
+  DEFAULT_PLAYER_NAMES,
+  PLAYER_COUNT_BY_MODE,
+  sanitizePlayerName,
+  type LocalMatchConfig,
+} from '../../src/match/config'
+import type { MatchMode, TeamId } from '../../src/maps/registry'
 import {
   CURRENT_COMPATIBILITY,
   MAX_NETWORK_MESSAGE_BYTES,
@@ -39,11 +45,13 @@ type RoomMetadata = {
   code: string
   phase: string
   connectedPlayers: number
+  capacity: number
+  mode: Extract<MatchMode, '1v1' | '2v2'>
 }
 
 type ClientData = {
   playerId: string
-  seat: 0 | 1
+  seat: number
   commandWindowStartedAt: number
   commandCount: number
   movementWindowStartedAt: number
@@ -53,7 +61,7 @@ type ClientData = {
 type QueuedCommand = {
   receivedOrder: number
   playerId: string
-  seat: 0 | 1
+  seat: number
   commandId: number
   expectedTurn: number
   matchGeneration: number
@@ -66,7 +74,7 @@ export class PrivateMatchRoom extends Room<{
   metadata: RoomMetadata
 }> {
   state = new PrivateMatchState()
-  maxClients = 2
+  maxClients = 4
   patchRate = 50
   maxMessagesPerSecond = 40
   autoDispose = true
@@ -101,16 +109,26 @@ export class PrivateMatchRoom extends Room<{
     if (incompatibility)
       throw new ServerError(ErrorCode.AUTH_FAILED, `Incompatible game version: ${incompatibility}`)
 
-    const entry = roomCodeRegistry.register(this.roomId)
+    const capacity = PLAYER_COUNT_BY_MODE[parsed.data.mode]
+    this.maxClients = capacity
+    const entry = roomCodeRegistry.register(this.roomId, capacity, parsed.data.mode)
     this.roomCode = entry.code
     this.state.roomCode = entry.code
+    this.state.mode = parsed.data.mode
+    this.state.capacity = capacity
     this.state.mapId = parsed.data.mapId
     this.state.turnDurationSeconds = parsed.data.turnDurationSeconds
     this.state.protocolVersion = CURRENT_COMPATIBILITY.protocol
     this.state.mapRegistryVersion = CURRENT_COMPATIBILITY.maps
     this.state.weaponRegistryVersion = CURRENT_COMPATIBILITY.weapons
-    this.metadata = { code: entry.code, phase: 'waiting', connectedPlayers: 0 }
-    await this.setMatchmaking({ private: true, metadata: this.metadata, maxClients: 2 })
+    this.metadata = {
+      code: entry.code,
+      phase: 'waiting',
+      connectedPlayers: 0,
+      capacity,
+      mode: parsed.data.mode,
+    }
+    await this.setMatchmaking({ private: true, metadata: this.metadata, maxClients: capacity })
     this.setSimulationInterval((deltaMs) => this.updateRoom(deltaMs), 1000 / 60)
     roomLog('room-created', { roomId: this.roomId, roomCode: this.roomCode })
   }
@@ -125,7 +143,7 @@ export class PrivateMatchRoom extends Room<{
       throw new ServerError(ErrorCode.AUTH_FAILED, `Incompatible game version: ${incompatibility}`)
     if (this.state.phase !== 'waiting')
       throw new ServerError(ErrorCode.APPLICATION_ERROR, 'This match has already started.')
-    if (this.state.players.size >= 2)
+    if (this.state.players.size >= this.state.capacity)
       throw new ServerError(ErrorCode.APPLICATION_ERROR, 'This private room is already full.')
     return true
   }
@@ -142,7 +160,12 @@ export class PrivateMatchRoom extends Room<{
     const player = new RoomPlayerState()
     player.playerId = playerId
     player.seat = seat
-    player.name = sanitizePlayerName(playerName, seat === 0 ? 'Lumen' : 'Morrow')
+    player.teamId = seat % 2
+    player.teamSlot = Math.floor(seat / 2)
+    player.name = sanitizePlayerName(
+      playerName,
+      DEFAULT_PLAYER_NAMES[seat] ?? `Player ${seat + 1}`,
+    )
     player.sessionId = client.sessionId
     this.state.players.set(playerId, player)
     client.userData = {
@@ -167,7 +190,7 @@ export class PrivateMatchRoom extends Room<{
     if (!player) return
     player.connected = false
     player.ready = false
-    this.clearHeldInput(player.seat as 0 | 1)
+    this.clearHeldInput(player.seat)
     if (this.state.phase === 'playing' || this.state.phase === 'starting') {
       this.simulation?.setPaused(true)
       this.state.phase = 'reconnecting'
@@ -203,14 +226,13 @@ export class PrivateMatchRoom extends Room<{
   onLeave(client: Client, code?: number): void {
     const player = this.playerFor(client)
     if (!player) return
-    this.clearHeldInput(player.seat as 0 | 1)
+    this.clearHeldInput(player.seat)
     player.connected = false
     const activeMatch = ['starting', 'playing', 'reconnecting'].includes(this.state.phase)
     if (activeMatch && this.simulation) {
       if (!this.matchHasBegun) this.cancelPendingStart(player.playerId)
       else {
-        const opponent = this.playerAtSeat(player.seat === 0 ? 1 : 0)
-        if (opponent?.connected) this.finishByForfeit(opponent.seat as 0 | 1)
+        this.finishByForfeit((player.teamId === 0 ? 1 : 0) as TeamId)
         this.state.players.delete(player.playerId)
       }
     } else {
@@ -279,11 +301,13 @@ export class PrivateMatchRoom extends Room<{
 
   private beginMatch(): void {
     if (this.state.phase !== 'waiting' && this.state.phase !== 'results') return
-    const first = this.playerAtSeat(0)
-    const second = this.playerAtSeat(1)
-    if (!first || !second || !first.connected || !second.connected) return
+    const players = Array.from({ length: this.state.capacity }, (_, seat) =>
+      this.playerAtSeat(seat),
+    )
+    if (players.some((player) => !player?.connected)) return
     const config: LocalMatchConfig = {
-      playerNames: [first.name, second.name],
+      mode: this.state.mode as LocalMatchConfig['mode'],
+      playerNames: players.map((player) => player!.name),
       mapId: this.state.mapId as LocalMatchConfig['mapId'],
       turnDurationSeconds: this.state
         .turnDurationSeconds as LocalMatchConfig['turnDurationSeconds'],
@@ -354,7 +378,7 @@ export class PrivateMatchRoom extends Room<{
     this.commandQueue.push({
       receivedOrder: ++this.receivedOrder,
       playerId: player.playerId,
-      seat: player.seat as 0 | 1,
+      seat: player.seat,
       commandId: message.commandId,
       expectedTurn: message.expectedTurn,
       matchGeneration: message.matchGeneration,
@@ -482,13 +506,15 @@ export class PrivateMatchRoom extends Room<{
     this.enterResults(this.simulation.getResult(), 'normal')
   }
 
-  private finishByForfeit(winnerSeat: 0 | 1): void {
+  private finishByForfeit(winnerTeamId: TeamId): void {
     if (!this.simulation || this.state.phase === 'results') return
     const state = this.simulation.state
+    const winnerIndex = state.players.findIndex((player) => player.teamId === winnerTeamId)
     state.phase = 'victory'
     state.paused = true
     state.timerRemainingTicks = 0
-    state.winnerPlayerId = state.players[winnerSeat].id
+    state.winnerPlayerId = state.players[winnerIndex]?.id ?? null
+    state.winnerTeamId = winnerTeamId
     state.isDraw = false
     this.clearAllHeldInput()
     this.enterResults(this.simulation.getResult(), 'forfeit')
@@ -501,6 +527,7 @@ export class PrivateMatchRoom extends Room<{
     this.state.reconnectRemainingMs = 0
     this.state.result.available = true
     this.state.result.winnerSeat = result.winnerIndex ?? -1
+    this.state.result.winnerTeamId = result.winnerTeamId ?? -1
     this.state.result.reason = reason
     this.state.result.remainingHealth = result.remainingHealth
     this.state.result.turnsTaken = result.turnsTaken
@@ -526,7 +553,7 @@ export class PrivateMatchRoom extends Room<{
     player.wantsRematch = wantsRematch
     const players = [...this.state.players.values()]
     if (
-      players.length === 2 &&
+      players.length === this.state.capacity &&
       players.every((candidate) => candidate.connected && candidate.wantsRematch)
     ) {
       roomLog('rematch-starting', { roomCode: this.roomCode })
@@ -605,9 +632,9 @@ export class PrivateMatchRoom extends Room<{
     return [...this.state.players.values()].find((player) => player.seat === seat)
   }
 
-  private availableSeat(): 0 | 1 | null {
-    if (!this.playerAtSeat(0)) return 0
-    if (!this.playerAtSeat(1)) return 1
+  private availableSeat(): number | null {
+    for (let seat = 0; seat < this.state.capacity; seat += 1)
+      if (!this.playerAtSeat(seat)) return seat
     return null
   }
 
@@ -616,15 +643,21 @@ export class PrivateMatchRoom extends Room<{
   }
 
   private allPlayersConnected(): boolean {
-    return this.state.players.size === 2 && this.connectedPlayerCount() === 2
+    return (
+      this.state.players.size === this.state.capacity &&
+      this.connectedPlayerCount() === this.state.capacity
+    )
   }
 
   private canStartMatch(): boolean {
     const players = [...this.state.players.values()]
-    return players.length === 2 && players.every((player) => player.connected && player.ready)
+    return (
+      players.length === this.state.capacity &&
+      players.every((player) => player.connected && player.ready)
+    )
   }
 
-  private clearHeldInput(seat: 0 | 1): void {
+  private clearHeldInput(seat: number): void {
     if (!this.simulation) return
     this.simulation.state.players[seat].moveDirection = 0
     this.commandQueue = this.commandQueue.filter((command) => command.seat !== seat)

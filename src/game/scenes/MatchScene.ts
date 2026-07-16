@@ -18,14 +18,16 @@ import {
   DEFAULT_AIM_ELEVATION,
   DEFAULT_POWER_PERCENT,
   FIXED_STEP_SECONDS,
-  GAME_HEIGHT,
-  GAME_WIDTH,
   GRAVITY,
   POWER_MAX_PERCENT,
   POWER_MIN_PERCENT,
+  VIEWPORT_HEIGHT,
+  VIEWPORT_WIDTH,
 } from '../../shared/constants'
 import type { Vector } from '../../shared/types'
 import { getMap } from '../../maps/registry'
+import type { TerrainMask } from '../../terrain/TerrainMask'
+import { TERRAIN_MATERIAL, type TerrainMaterialId } from '../../terrain/materials'
 import { WEAPON_ORDER, WEAPONS } from '../../weapons/registry'
 import type { GameEvents } from '../types'
 import type { MatchSource } from '../matchSource'
@@ -50,6 +52,9 @@ type DamageEffect = {
 }
 type TraceEffect = { origin: Vector; endpoints: Vector[]; age: number }
 type Reaction = { hurtUntil?: number; firedUntil?: number; defeatedAt?: number }
+const ACTOR_VISUAL_SCALE = 0.9
+const ACTOR_COLORS = [0x2863b7, 0xed7090, 0x57b89e, 0xf39a55]
+const TEAM_COLORS = [0x17447f, 0xaa392b]
 
 export class MatchScene extends Phaser.Scene {
   private source!: MatchSource
@@ -58,6 +63,7 @@ export class MatchScene extends Phaser.Scene {
     reducedMotion: false,
     highContrastHud: false,
     cameraShake: true,
+    cameraMode: 'fit',
     aimGuide: 'normal',
     screenFlash: 'normal',
   }
@@ -67,12 +73,13 @@ export class MatchScene extends Phaser.Scene {
   private actorGraphics!: Phaser.GameObjects.Graphics
   private overlayGraphics!: Phaser.GameObjects.Graphics
   private hudGraphics!: Phaser.GameObjects.Graphics
-  private leftHud!: Phaser.GameObjects.Text
-  private rightHud!: Phaser.GameObjects.Text
+  private uiCamera!: Phaser.Cameras.Scene2D.Camera
+  private playerHudTexts: Phaser.GameObjects.Text[] = []
   private bottomHud!: Phaser.GameObjects.Text
   private timerText!: Phaser.GameObjects.Text
   private windText!: Phaser.GameObjects.Text
   private bannerText!: Phaser.GameObjects.Text
+  private cameraModeText!: Phaser.GameObjects.Text
   private canvas!: HTMLCanvasElement
   private pressedCodes = new Set<string>()
   private dragging = false
@@ -89,7 +96,7 @@ export class MatchScene extends Phaser.Scene {
   private damageEffects: DamageEffect[] = []
   private traceEffects: TraceEffect[] = []
   private reactions = new Map<string, Reaction>()
-  private displayedHealth: [number, number] = [100, 100]
+  private displayedHealth: number[] = []
   private pendingResult: SimulationMatchResult | null = null
   private resultDelay = 0
   private bannerOverride = ''
@@ -98,6 +105,11 @@ export class MatchScene extends Phaser.Scene {
   private warnedGrenades = new Set<string>()
   private lastExplosionAudioAt = -1
   private lastShakeAt = -1
+  private renderedTerrainMatchId = ''
+  private renderedTerrainOperationCount = -1
+  private renderedTerrain: TerrainMask | null = null
+  private actionFocus: Vector | null = null
+  private actionFocusUntil = 0
 
   constructor() {
     super('match')
@@ -127,11 +139,10 @@ export class MatchScene extends Phaser.Scene {
       color: '#fff8df',
       fontStyle: 'bold',
     }
-    this.leftHud = this.add.text(0, 0, '', hudStyle)
-    this.rightHud = this.add.text(0, 0, '', hudStyle)
+    this.playerHudTexts = Array.from({ length: 4 }, () => this.add.text(0, 0, '', hudStyle))
     this.bottomHud = this.add.text(0, 0, '', hudStyle)
     this.timerText = this.add
-      .text(GAME_WIDTH / 2, 17, '', {
+      .text(VIEWPORT_WIDTH / 2, 17, '', {
         ...hudStyle,
         fontSize: '17px',
         stroke: '#473b31',
@@ -139,7 +150,7 @@ export class MatchScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0)
     this.windText = this.add
-      .text(GAME_WIDTH / 2, 59, '', {
+      .text(VIEWPORT_WIDTH / 2, 59, '', {
         ...hudStyle,
         fontSize: '12px',
         color: '#473b31',
@@ -148,7 +159,7 @@ export class MatchScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0)
     this.bannerText = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 18, '', {
+      .text(VIEWPORT_WIDTH / 2, VIEWPORT_HEIGHT / 2 - 18, '', {
         ...hudStyle,
         fontSize: '25px',
         align: 'center',
@@ -156,6 +167,33 @@ export class MatchScene extends Phaser.Scene {
         strokeThickness: 5,
       })
       .setOrigin(0.5)
+    this.cameraModeText = this.add
+      .text(VIEWPORT_WIDTH / 2, 88, '', {
+        ...hudStyle,
+        fontSize: '11px',
+        color: '#fff8df',
+        backgroundColor: '#473b31cc',
+        padding: { x: 7, y: 3 },
+      })
+      .setOrigin(0.5, 0)
+    this.uiCamera = this.cameras.add(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT)
+    const worldObjects = [
+      this.backgroundGraphics,
+      this.terrainGraphics,
+      this.actorGraphics,
+      this.overlayGraphics,
+    ]
+    const hudObjects = [
+      this.hudGraphics,
+      ...this.playerHudTexts,
+      this.bottomHud,
+      this.timerText,
+      this.windText,
+      this.bannerText,
+      this.cameraModeText,
+    ]
+    this.uiCamera.ignore(worldObjects)
+    this.cameras.main.ignore(hudObjects)
     this.installInput()
     this.resetPresentation()
     this.canvas.focus()
@@ -167,6 +205,7 @@ export class MatchScene extends Phaser.Scene {
     if (this.source.state.matchId !== this.lastMatchId) this.resetPresentation()
     if (this.introDuration > 0) this.introDuration = Math.max(0, this.introDuration - delta)
     this.source.update(delta)
+    this.updateWorldCamera(delta)
     this.turnBannerDuration = Math.max(0, this.turnBannerDuration - delta)
     this.burstEffects.forEach((effect) => (effect.age += delta))
     this.damageEffects.forEach((effect) => {
@@ -233,12 +272,15 @@ export class MatchScene extends Phaser.Scene {
     this.resultDelay = 0
     this.eventGuard.reset()
     this.lastMatchId = this.source.state.matchId
-    this.displayedHealth = [
-      this.source.state.players[0].health,
-      this.source.state.players[1].health,
-    ]
+    this.displayedHealth = this.source.state.players.map((player) => player.health)
     this.lastTimerSecond = -1
     this.warnedGrenades.clear()
+    this.renderedTerrainMatchId = ''
+    this.renderedTerrainOperationCount = -1
+    this.renderedTerrain = null
+    this.actionFocus = null
+    this.actionFocusUntil = 0
+    this.configureWorldCamera()
     this.canvas?.setAttribute('data-explosion-count', '0')
     this.canvas?.setAttribute('data-damage-count', '0')
     this.canvas?.setAttribute('data-effect-count', '0')
@@ -296,6 +338,14 @@ export class MatchScene extends Phaser.Scene {
     if (this.introDuration > 0 && event.code === 'Enter') {
       event.preventDefault()
       this.introDuration = 0
+      return
+    }
+    if (event.code === 'KeyC' && !event.repeat) {
+      event.preventDefault()
+      const cameraMode = this.preferences.cameraMode === 'fit' ? 'follow' : 'fit'
+      this.preferences = { ...this.preferences, cameraMode }
+      this.eventsFromHost?.onCameraModeChange?.(cameraMode)
+      this.clearDrag()
       return
     }
     const acceptedCodes = [
@@ -359,15 +409,24 @@ export class MatchScene extends Phaser.Scene {
     const pointer = this.pointerWorldPoint(event)
     if (this.selectedWeapon().aimMode === 'target-position') {
       const surface = this.source.getTerrain().surfaceY(pointer.x)
-      this.teleportTarget = surface === null ? pointer : { x: pointer.x, y: surface - 15 }
+      this.teleportTarget =
+        surface === null ? pointer : { x: pointer.x, y: surface - this.source.activePlayer.radius }
       event.preventDefault()
       return
     }
     if (!this.dragging || !this.dragStart) return
     if (
-      Math.hypot(pointer.x - this.dragStart.x, pointer.y - this.dragStart.y) >= DRAG_START_DISTANCE
+      Math.hypot(pointer.x - this.dragStart.x, pointer.y - this.dragStart.y) *
+        this.cameras.main.zoom >=
+      DRAG_START_DISTANCE
     )
-      this.dragPreview = dragAim(this.aimOrigin(), pointer, POWER_MIN_PERCENT, POWER_MAX_PERCENT)
+      this.dragPreview = dragAim(
+        this.aimOrigin(),
+        pointer,
+        POWER_MIN_PERCENT,
+        POWER_MAX_PERCENT,
+        this.cameras.main.zoom,
+      )
     event.preventDefault()
   }
 
@@ -383,8 +442,10 @@ export class MatchScene extends Phaser.Scene {
   private activateWeapon(): void {
     if (this.selectedWeapon().id === 'teleporter') {
       if (this.teleportTarget) this.send({ type: 'teleport', destination: this.teleportTarget })
-    } else
-      this.send({ type: 'fire', aimDirection: this.shotAim.direction, power: this.shotAim.power })
+    } else {
+      const aim = this.dragPreview ?? this.shotAim
+      this.send({ type: 'fire', aimDirection: aim.direction, power: aim.power })
+    }
   }
 
   private clearDrag(pointerId = this.activePointerId ?? undefined): void {
@@ -397,13 +458,14 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private pointerWorldPoint(event: PointerEvent): Vector {
-    return canvasPointToWorld(
+    const viewportPoint = canvasPointToWorld(
       event.clientX,
       event.clientY,
       this.canvas.getBoundingClientRect(),
-      GAME_WIDTH,
-      GAME_HEIGHT,
+      VIEWPORT_WIDTH,
+      VIEWPORT_HEIGHT,
     )
+    return this.cameras.main.getWorldPoint(viewportPoint.x, viewportPoint.y)
   }
 
   private selectedWeapon() {
@@ -422,14 +484,58 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private defaultAim(): DragAim {
-    const facing = this.source?.state.activePlayerIndex === 1 ? -1 : 1
+    const facing = this.source?.activePlayer?.facing ?? 1
     const radians = (DEFAULT_AIM_ELEVATION * Math.PI) / 180
     return {
       direction: { x: Math.cos(radians) * facing, y: -Math.sin(radians) },
       power: DEFAULT_POWER_PERCENT,
-      distance: 112,
+      distance: 112 / (this.cameras?.main?.zoom || 1),
       worldAngle: facing === 1 ? DEFAULT_AIM_ELEVATION : 180 - DEFAULT_AIM_ELEVATION,
     }
+  }
+
+  private configureWorldCamera(): void {
+    if (!this.source || !this.cameras?.main) return
+    const { worldWidth, worldHeight } = this.source.state
+    const camera = this.cameras.main
+    camera.setBounds(0, 0, worldWidth, worldHeight)
+    camera.setZoom(this.fitCameraZoom())
+    camera.centerOn(worldWidth / 2, worldHeight / 2)
+  }
+
+  private fitCameraZoom(): number {
+    const { worldWidth, worldHeight } = this.source.state
+    return Math.min(VIEWPORT_WIDTH / worldWidth, VIEWPORT_HEIGHT / worldHeight)
+  }
+
+  private updateWorldCamera(delta: number): void {
+    const state = this.source.state
+    const camera = this.cameras.main
+    const fitZoom = this.fitCameraZoom()
+    const showingOverview = this.preferences.cameraMode === 'fit' || this.introDuration > 0
+    const targetZoom = showingOverview ? fitZoom : Math.min(1, fitZoom * 1.32)
+    const focus = showingOverview
+      ? { x: state.worldWidth / 2, y: state.worldHeight / 2 }
+      : (state.projectiles[0]?.position ??
+        (this.visualTime < this.actionFocusUntil ? this.actionFocus : null) ??
+        this.source.activePlayer.position)
+    const easing = this.preferences.reducedMotion ? 1 : 1 - Math.exp(-delta * 6)
+    const zoom = Phaser.Math.Linear(camera.zoom, targetZoom, easing)
+    camera.setZoom(zoom)
+    const visibleWidth = VIEWPORT_WIDTH / zoom
+    const visibleHeight = VIEWPORT_HEIGHT / zoom
+    const targetScrollX = Phaser.Math.Clamp(
+      focus.x - visibleWidth / 2,
+      0,
+      Math.max(0, state.worldWidth - visibleWidth),
+    )
+    const targetScrollY = Phaser.Math.Clamp(
+      focus.y - visibleHeight / 2,
+      0,
+      Math.max(0, state.worldHeight - visibleHeight),
+    )
+    camera.scrollX = Phaser.Math.Linear(camera.scrollX, targetScrollX, easing)
+    camera.scrollY = Phaser.Math.Linear(camera.scrollY, targetScrollY, easing)
   }
 
   private render(): void {
@@ -443,43 +549,79 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private renderBackdrop(): void {
-    this.backgroundGraphics.clear().fillStyle(0x9edce5).fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT)
-    this.backgroundGraphics.fillStyle(0xffedb1, 0.7).fillCircle(GAME_WIDTH - 110, 105, 46)
+    const map = getMap(this.source.state.mapId)
+    const { width, height, theme } = map
+    this.backgroundGraphics.clear().fillStyle(theme.sky).fillRect(0, 0, width, height)
+    this.backgroundGraphics.fillStyle(theme.sun, 0.72).fillCircle(width - width * 0.11, height * 0.19, 46)
     this.backgroundGraphics
-      .fillStyle(0x78b996, 0.45)
-      .fillEllipse(170, 340, 430, 155)
-      .fillEllipse(775, 330, 470, 165)
+      .fillStyle(theme.backHill, 0.45)
+      .fillEllipse(width * 0.18, height * 0.63, width * 0.45, height * 0.29)
+      .fillEllipse(width * 0.81, height * 0.61, width * 0.49, height * 0.31)
     this.backgroundGraphics
       .fillStyle(0xffffff, 0.62)
-      .fillEllipse(135, 112, 115, 20)
-      .fillEllipse(655, 145, 145, 25)
+      .fillEllipse(width * 0.14, height * 0.21, 115, 20)
+      .fillEllipse(width * 0.68, height * 0.27, 145, 25)
   }
 
   private renderTerrain(): void {
+    const state = this.source.state
     const terrain = this.source.getTerrain()
-    this.terrainGraphics.clear().fillStyle(0x9a673e)
+    if (
+      this.renderedTerrainMatchId === state.matchId &&
+      this.renderedTerrainOperationCount === state.terrainOperations.length &&
+      this.renderedTerrain === terrain
+    )
+      return
+    this.renderedTerrainMatchId = state.matchId
+    this.renderedTerrainOperationCount = state.terrainOperations.length
+    this.renderedTerrain = terrain
+    const map = getMap(state.mapId)
+    this.terrainGraphics.clear()
     for (let x = 0; x < terrain.width; x += 1) {
-      let start = -1
+      let start = 0
+      let material = TERRAIN_MATERIAL.empty as TerrainMaterialId
       for (let y = 0; y <= terrain.height; y += 1) {
-        const solid = y < terrain.height && terrain.cells[y * terrain.width + x] === 1
-        if (solid && start === -1) start = y
-        if (!solid && start !== -1) {
-          this.terrainGraphics.fillRect(
-            x * terrain.scale,
-            start * terrain.scale,
-            terrain.scale,
-            (y - start) * terrain.scale,
-          )
-          start = -1
+        const next =
+          y < terrain.height
+            ? (terrain.cells[y * terrain.width + x] as TerrainMaterialId)
+            : TERRAIN_MATERIAL.empty
+        if (next !== material) {
+          if (material !== TERRAIN_MATERIAL.empty)
+            this.terrainGraphics
+              .fillStyle(this.terrainMaterialColor(material))
+              .fillRect(
+                x * terrain.scale,
+                start * terrain.scale,
+                terrain.scale,
+                (y - start) * terrain.scale,
+              )
+          material = next
+          start = y
         }
       }
     }
-    this.terrainGraphics.lineStyle(3, 0x437c53, 0.95)
-    for (let x = 0; x < GAME_WIDTH; x += 3) {
-      const y = terrain.surfaceY(x)
-      const next = terrain.surfaceY(x + 3)
-      if (y !== null && next !== null) this.terrainGraphics.lineBetween(x, y - 1, x + 3, next - 1)
-    }
+    for (let y = 0; y < terrain.height; y += 1)
+      for (let x = 0; x < terrain.width; x += 1) {
+        const material = terrain.cells[y * terrain.width + x] as TerrainMaterialId
+        const above = y === 0 ? TERRAIN_MATERIAL.empty : terrain.cells[(y - 1) * terrain.width + x]
+        if (material !== TERRAIN_MATERIAL.empty && above === TERRAIN_MATERIAL.empty)
+          this.terrainGraphics
+            .fillStyle(
+              material === TERRAIN_MATERIAL.soil
+                ? map.theme.surface
+                : this.terrainMaterialColor(material),
+              0.95,
+            )
+            .fillRect(x * terrain.scale, y * terrain.scale - 1, terrain.scale, 2)
+      }
+  }
+
+  private terrainMaterialColor(material: TerrainMaterialId): number {
+    const theme = getMap(this.source.state.mapId).theme
+    if (material === TERRAIN_MATERIAL.brick) return theme.brick
+    if (material === TERRAIN_MATERIAL.stone) return theme.stone
+    if (material === TERRAIN_MATERIAL.steel) return theme.steel
+    return theme.terrain
   }
 
   private renderActors(): void {
@@ -492,7 +634,7 @@ export class MatchScene extends Phaser.Scene {
         index === this.source.state.activePlayerIndex
           ? Math.sign((this.dragPreview ?? this.shotAim).direction.x)
           : 0
-      const facing = player.moveDirection || aimingFacing || (index === 0 ? 1 : -1)
+      const facing = player.moveDirection || aimingFacing || player.facing
       const bob =
         !this.preferences.reducedMotion && player.grounded
           ? Math.sin(this.visualTime * (moving ? 11 : 3) + index) * (moving ? 2.5 : 1.25)
@@ -502,34 +644,69 @@ export class MatchScene extends Phaser.Scene {
       const fired = (reaction?.firedUntil ?? 0) > this.visualTime
       const defeated = !player.alive
       const victory =
-        this.source.state.phase === 'victory' && this.source.state.winnerPlayerId === player.id
+        player.alive &&
+        this.source.state.phase === 'victory' &&
+        this.source.state.winnerTeamId === player.teamId
       const victoryBob =
         victory && !this.preferences.reducedMotion
           ? -Math.abs(Math.sin(this.visualTime * 7)) * 7
           : 0
       const y = player.position.y + bob + victoryBob + (fired ? 2 : 0)
-      const shadowY = this.source.getTerrain().surfaceY(x) ?? y + player.radius
-      this.actorGraphics.fillStyle(0x473b31, 0.7).fillEllipse(x + 3, shadowY + 8, 32, 9)
+      const scale = ACTOR_VISUAL_SCALE
+      const shadowY =
+        this.source
+          .getTerrain()
+          .surfaceY(x, Math.max(0, player.position.y - player.radius + 1)) ?? y + player.radius
       this.actorGraphics
-        .fillStyle(hurt ? 0xffffff : index === 0 ? 0x2863b7 : 0xed7090)
-        .fillRoundedRect(x - 17, y - (defeated ? 4 : 13), 34, defeated ? 16 : 31, 12)
-      this.actorGraphics.fillStyle(0xfff6d8).fillEllipse(x + facing * 3, y - 3, 22, 15)
+        .fillStyle(0x473b31, 0.7)
+        .fillEllipse(x + 3 * scale, shadowY + 7 * scale, 32 * scale, 9 * scale)
+      this.actorGraphics
+        .fillStyle(hurt ? 0xffffff : ACTOR_COLORS[index] ?? ACTOR_COLORS[index % 4])
+        .fillRoundedRect(
+          x - 17 * scale,
+          y - (defeated ? 4 : 13) * scale,
+          34 * scale,
+          (defeated ? 16 : 31) * scale,
+          12 * scale,
+        )
+      this.actorGraphics
+        .fillStyle(0xfff6d8)
+        .fillEllipse(x + facing * 3 * scale, y - 3 * scale, 22 * scale, 15 * scale)
       this.actorGraphics
         .fillStyle(0x24313a)
-        .fillCircle(x + facing * 7, y - 4, 2.8)
-        .fillCircle(x + facing, y - 4, 2.8)
+        .fillCircle(x + facing * 7 * scale, y - 4 * scale, 2.8 * scale)
+        .fillCircle(x + facing * scale, y - 4 * scale, 2.8 * scale)
       this.actorGraphics
-        .lineStyle(2, 0x24313a)
-        .lineBetween(x + facing * 2, y + 5, x + facing * (hurt ? 5 : 8), y + (hurt ? 8 : 5))
+        .lineStyle(2 * scale, 0x24313a)
+        .lineBetween(
+          x + facing * 2 * scale,
+          y + 5 * scale,
+          x + facing * (hurt ? 5 : 8) * scale,
+          y + (hurt ? 8 : 5) * scale,
+        )
       this.actorGraphics
-        .fillStyle(index === 0 ? 0xf7bd3f : 0xed7090)
-        .fillTriangle(x - 13 * facing, y - 13, x - 4 * facing, y - 25, x - 3 * facing, y - 11)
+        .fillStyle(ACTOR_COLORS[index] ?? ACTOR_COLORS[index % 4])
+        .fillTriangle(
+          x - 13 * facing * scale,
+          y - 13 * scale,
+          x - 4 * facing * scale,
+          y - 25 * scale,
+          x - 3 * facing * scale,
+          y - 11 * scale,
+        )
+      this.actorGraphics
+        .lineStyle(2.5, TEAM_COLORS[player.teamId])
+        .strokeRoundedRect(x - 17 * scale, y - 13 * scale, 34 * scale, 31 * scale, 12 * scale)
+      for (let marker = 0; marker <= player.teamSlot; marker += 1)
+        this.actorGraphics
+          .fillStyle(0xfff6d8)
+          .fillCircle(x - player.teamSlot * 3 + marker * 6, y + 13 * scale, 1.8)
       if (
         !defeated &&
         this.source.state.phase === 'input' &&
         index === this.source.state.activePlayerIndex
       )
-        this.actorGraphics.lineStyle(3, 0xf7bd3f).strokeCircle(x, y, player.radius + 7)
+        this.actorGraphics.lineStyle(3, 0xf7bd3f).strokeCircle(x, y, player.radius + 6)
     })
   }
 
@@ -593,8 +770,8 @@ export class MatchScene extends Phaser.Scene {
     const color = valid ? 0xffd75b : 0xe65d3d
     const endpoint = { x: origin.x + direction.x * distance, y: origin.y + direction.y * distance }
     const maximum = {
-      x: origin.x + direction.x * DRAG_MAX_DISTANCE,
-      y: origin.y + direction.y * DRAG_MAX_DISTANCE,
+      x: origin.x + direction.x * (DRAG_MAX_DISTANCE / this.cameras.main.zoom),
+      y: origin.y + direction.y * (DRAG_MAX_DISTANCE / this.cameras.main.zoom),
     }
     this.overlayGraphics
       .lineStyle(2, color, 0.25)
@@ -652,38 +829,47 @@ export class MatchScene extends Phaser.Scene {
     const valid = this.source.isValidTeleport(this.teleportTarget)
     this.overlayGraphics
       .lineStyle(3, valid ? 0x57b89e : 0xe65d3d)
-      .strokeCircle(this.teleportTarget.x, this.teleportTarget.y, 15)
+      .strokeCircle(
+        this.teleportTarget.x,
+        this.teleportTarget.y,
+        this.source.activePlayer.radius / this.cameras.main.zoom,
+      )
   }
 
   private renderHud(): void {
     const state = this.source.state
-    const left = state.players[0]
-    const right = state.players[1]
     this.hudGraphics.clear().fillStyle(0x473b31, 0.88)
     this.hudGraphics
-      .fillRoundedRect(12, 10, 225, 46, 10)
-      .fillRoundedRect(GAME_WIDTH - 237, 10, 225, 46, 10)
-      .fillRoundedRect(GAME_WIDTH / 2 - 64, 9, 128, 47, 18)
-      .fillRoundedRect(15, GAME_HEIGHT - 72, GAME_WIDTH - 30, 57, 14)
-    this.hudGraphics
-      .fillStyle(this.preferences.highContrastHud ? 0x72e58d : 0x5bbf72)
-      .fillRoundedRect(32, 40, 150 * (this.displayedHealth[0] / 100), 6, 3)
-      .fillRoundedRect(GAME_WIDTH - 182, 40, 150 * (this.displayedHealth[1] / 100), 6, 3)
+      .fillRoundedRect(VIEWPORT_WIDTH / 2 - 64, 9, 128, 47, 18)
+      .fillRoundedRect(15, VIEWPORT_HEIGHT - 72, VIEWPORT_WIDTH - 30, 57, 14)
+    state.players.forEach((player, index) => {
+      const cardX = player.teamId === 0 ? 12 : VIEWPORT_WIDTH - 237
+      const cardY = 10 + player.teamSlot * 52
+      this.hudGraphics.fillStyle(0x473b31, 0.88).fillRoundedRect(cardX, cardY, 225, 46, 10)
+      this.hudGraphics
+        .fillStyle(this.preferences.highContrastHud ? 0x72e58d : ACTOR_COLORS[index])
+        .fillRoundedRect(
+          player.teamId === 0 ? cardX + 20 : cardX + 55,
+          cardY + 30,
+          150 * ((this.displayedHealth[index] ?? player.health) / 100),
+          6,
+          3,
+        )
+      const text = this.playerHudTexts[index]
+      if (text)
+        text
+          .setVisible(true)
+          .setPosition(player.teamId === 0 ? cardX + 15 : cardX + 210, cardY + 7)
+          .setOrigin(player.teamId === 0 ? 0 : 1, 0)
+          .setText(
+            `${state.activePlayerIndex === index ? '◆ ' : ''}${player.name} · ${Math.ceil(player.health)}`,
+          )
+    })
+    for (let index = state.players.length; index < this.playerHudTexts.length; index += 1)
+      this.playerHudTexts[index].setVisible(false)
     this.hudGraphics
       .fillStyle(this.source.timerRemainingSeconds <= 5 ? 0xe65d3d : 0xf7bd3f)
-      .fillCircle(GAME_WIDTH / 2, 31, 18)
-    this.leftHud
-      .setPosition(27, 17)
-      .setOrigin(0)
-      .setText(
-        `${state.activePlayerIndex === 0 ? '◆ ' : ''}${left.name}\n${Math.ceil(left.health)} health`,
-      )
-    this.rightHud
-      .setPosition(GAME_WIDTH - 27, 17)
-      .setOrigin(1, 0)
-      .setText(
-        `${state.activePlayerIndex === 1 ? '◆ ' : ''}${right.name}\n${Math.ceil(right.health)} health`,
-      )
+      .fillCircle(VIEWPORT_WIDTH / 2, 31, 18)
     this.canvas.setAttribute('data-wind', String(state.wind))
     this.canvas.setAttribute(
       'data-effect-count',
@@ -700,21 +886,21 @@ export class MatchScene extends Phaser.Scene {
           ? 'Short-range spread · Space to fire'
           : `Power ${Math.round((this.dragPreview ?? this.shotAim).power)}% · drag backward · Space to fire`
     this.bottomHud
-      .setPosition(31, GAME_HEIGHT - 64)
+      .setPosition(31, VIEWPORT_HEIGHT - 64)
       .setOrigin(0)
       .setText(`${weapons}\n${this.selectedWeapon().displayName} · ${hint}`)
     if (this.introDuration > 0) {
       const countdown = this.introDuration > 0.6 ? Math.ceil(this.introDuration / 0.6) : 'Begin'
       this.bannerText
         .setText(
-          `${getMap(state.config.mapId).displayName}\n${left.name} vs ${right.name}\n${countdown}`,
+          `${getMap(state.config.mapId).displayName}\n${state.config.mode === '2v2' ? 'Team Comet vs Team Ember' : `${state.players[0].name} vs ${state.players[1].name}`}\n${countdown}`,
         )
         .setVisible(true)
     } else if (this.turnBannerDuration > 0)
       this.bannerText
         .setText(
           this.bannerOverride ||
-            `${this.source.activePlayer.name}'s Turn\n${this.windLabel(state.wind)}`,
+            `${this.source.activePlayer.name}'s Turn\n${state.config.mode === '2v2' ? `Team ${this.source.activePlayer.teamId === 0 ? 'Comet' : 'Ember'} · ` : ''}${this.windLabel(state.wind)}`,
         )
         .setVisible(true)
     else this.bannerText.setVisible(false)
@@ -723,6 +909,10 @@ export class MatchScene extends Phaser.Scene {
       remaining <= 5 && state.phase === 'input' ? `! ${remaining}s !` : `${remaining}s`,
     )
     this.windText.setText(`${this.windLabel(state.wind)} · Turn ${state.turnNumber}`)
+    this.cameraModeText.setText(
+      `${this.preferences.cameraMode === 'fit' ? 'Fit map' : 'Follow action'} · C to switch`,
+    )
+    this.canvas.setAttribute('data-camera-mode', this.preferences.cameraMode)
   }
 
   private consumeMatchEvent(event: MatchEvent): void {
@@ -769,6 +959,8 @@ export class MatchScene extends Phaser.Scene {
         this.traceEffects.push({ origin: event.origin, endpoints: event.endpoints, age: 0 })
         return
       case 'explosion-resolved':
+        this.actionFocus = { ...event.position }
+        this.actionFocusUntil = this.visualTime + (this.preferences.reducedMotion ? 0 : 0.65)
         this.addBurst(
           'explosion',
           event.position,
@@ -784,6 +976,8 @@ export class MatchScene extends Phaser.Scene {
         this.incrementCanvasCounter('data-explosion-count')
         return
       case 'teleported':
+        this.actionFocus = { ...event.to }
+        this.actionFocusUntil = this.visualTime + (this.preferences.reducedMotion ? 0 : 0.5)
         this.addBurst('teleport', event.from, 28, event.sequence)
         this.addBurst('teleport', event.to, 34, event.sequence + 1)
         return
@@ -813,6 +1007,7 @@ export class MatchScene extends Phaser.Scene {
           })
           .setOrigin(0.5)
           .setDepth(20)
+        this.uiCamera.ignore(label)
         this.damageEffects.push({
           playerId: event.playerId,
           amount: event.amount,
@@ -908,12 +1103,7 @@ export class MatchScene extends Phaser.Scene {
         }
         const smokeCount =
           effect.weaponId === 'timed-grenade' ? 4 : effect.weaponId === 'cluster-charge' ? 1 : 3
-        const dustColor =
-          this.source.state.mapId === 'crater-basin'
-            ? 0xb77c5b
-            : this.source.state.mapId === 'twin-peaks'
-              ? 0xc4a273
-              : 0xa88d69
+        const dustColor = getMap(this.source.state.mapId).theme.dust
         for (let puff = 0; puff < smokeCount; puff += 1) {
           const angle = effect.seed * 0.31 + puff * 2.2
           this.overlayGraphics
@@ -955,10 +1145,10 @@ export class MatchScene extends Phaser.Scene {
 
   private updateHealthPresentation(delta: number): void {
     this.source.state.players.forEach((player, index) => {
-      if (this.preferences.reducedMotion) this.displayedHealth[index as 0 | 1] = player.health
+      if (this.preferences.reducedMotion) this.displayedHealth[index] = player.health
       else {
-        const current = this.displayedHealth[index as 0 | 1]
-        this.displayedHealth[index as 0 | 1] =
+        const current = this.displayedHealth[index] ?? player.health
+        this.displayedHealth[index] =
           Math.abs(current - player.health) < 0.1
             ? player.health
             : current + (player.health - current) * Math.min(1, delta * 9)

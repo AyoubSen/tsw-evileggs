@@ -8,7 +8,6 @@ import { SIMULATION_HZ } from '../simulation/match/MatchState'
 import { matchStateChecksum } from '../simulation/serialization/matchSerialization'
 import type { TerrainMask } from '../terrain/TerrainMask'
 import type { Vector } from '../shared/types'
-import { GAME_HEIGHT, GAME_WIDTH } from '../shared/constants'
 import { NETWORK_MESSAGE_TYPE, type FullSnapshotMessage, type ServerRoomMessage } from './protocol'
 import { INTERPOLATION_SNAP_THRESHOLD, samplePosition, type PositionSample } from './interpolation'
 
@@ -21,7 +20,9 @@ type PendingCommand = {
 type SchemaPlayer = {
   playerId: string
   sessionId: string
-  seat: 0 | 1
+  seat: number
+  teamId: 0 | 1
+  teamSlot: number
   x: number
   y: number
   velocityX: number
@@ -30,6 +31,7 @@ type SchemaPlayer = {
   alive: boolean
   grounded: boolean
   moveDirection: -1 | 0 | 1
+  facing: -1 | 1
   selectedWeapon: MatchState['players'][number]['selectedWeapon']
   basicRocketAmmo: number
   timedGrenadeAmmo: number
@@ -64,6 +66,7 @@ type OnlineSchemaState = {
   result: {
     available: boolean
     winnerSeat: number
+    winnerTeamId: number
     remainingHealth: number
     turnsTaken: number
     durationSeconds: number
@@ -123,7 +126,7 @@ export class OnlineMatchSource implements MatchSource {
     return this.state.timerRemainingTicks / SIMULATION_HZ
   }
 
-  get localSeat(): 0 | 1 | null {
+  get localSeat(): number | null {
     const state = this.room.state as unknown as OnlineSchemaState
     if (!state?.players) return null
     const player = [...state.players.values()].find(
@@ -195,9 +198,17 @@ export class OnlineMatchSource implements MatchSource {
   isValidTeleport(target: Vector): boolean {
     if (!this.snapshotState || !this.terrain) return false
     if (!Number.isFinite(target.x) || !Number.isFinite(target.y)) return false
-    if (target.x < 20 || target.x > GAME_WIDTH - 20 || target.y < 20 || target.y > GAME_HEIGHT - 20)
+    if (
+      target.x < 20 ||
+      target.x > this.state.worldWidth - 20 ||
+      target.y < 20 ||
+      target.y > this.state.worldHeight - 20
+    )
       return false
-    if (this.terrain.isSolid(target.x, target.y) || this.terrain.isSolid(target.x, target.y + 14))
+    if (
+      this.terrain.isSolid(target.x, target.y) ||
+      this.terrain.isSolid(target.x, target.y + this.activePlayer.radius)
+    )
       return false
     const surface = this.terrain.surfaceY(target.x, target.y)
     if (surface === null || surface - target.y > 24 || surface - target.y < 10) return false
@@ -295,7 +306,7 @@ export class OnlineMatchSource implements MatchSource {
 
   private applySnapshot(message: FullSnapshotMessage): void {
     if (this.disposed) return
-    if (message.snapshot.version !== 2 || !message.snapshot.state) return
+    if (message.snapshot.version !== 4 || !message.snapshot.state) return
     if (message.matchGeneration < this.matchGeneration) return
     if (matchStateChecksum(message.snapshot.state) !== message.checksum) {
       this.requestSnapshot()
@@ -326,7 +337,7 @@ export class OnlineMatchSource implements MatchSource {
     const state = this.snapshotState
     state.tick = schema.simulationTick
     state.turnNumber = schema.turnNumber
-    state.activePlayerIndex = schema.activePlayerSeat as 0 | 1
+    state.activePlayerIndex = schema.activePlayerSeat
     state.phase = schema.matchPhase
     state.paused = schema.phase !== 'playing'
     state.timerRemainingTicks = schema.timerRemainingTicks
@@ -352,6 +363,9 @@ export class OnlineMatchSource implements MatchSource {
       player.alive = projected.alive
       player.grounded = projected.grounded
       player.moveDirection = projected.moveDirection
+      if (projected.facing === -1 || projected.facing === 1) player.facing = projected.facing
+      if (projected.teamId === 0 || projected.teamId === 1) player.teamId = projected.teamId
+      if (Number.isSafeInteger(projected.teamSlot)) player.teamSlot = projected.teamSlot
       player.selectedWeapon = projected.selectedWeapon
       player.inventory = {
         'basic-rocket': ammo(projected.basicRocketAmmo),
@@ -401,11 +415,19 @@ export class OnlineMatchSource implements MatchSource {
       if (!ids.has(id)) this.projectileSamples.delete(id)
     if (schema.result.available) {
       const winnerSeat = schema.result.winnerSeat
+      const winnerTeamId = schema.result.winnerTeamId ?? state.players[winnerSeat]?.teamId ?? -1
       state.winnerPlayerId = winnerSeat >= 0 ? (state.players[winnerSeat]?.id ?? null) : null
+      state.winnerTeamId = winnerTeamId === 0 || winnerTeamId === 1 ? winnerTeamId : null
       state.isDraw = winnerSeat < 0
+      const winnerPlayerIndices = state.players
+        .map((player, index) => ({ player, index }))
+        .filter(({ player }) => player.teamId === state.winnerTeamId)
+        .map(({ index }) => index)
       this.queueResult({
         config: state.config,
         winnerIndex: winnerSeat >= 0 ? winnerSeat : null,
+        winnerTeamId: state.winnerTeamId,
+        winnerPlayerIndices,
         remainingHealth: schema.result.remainingHealth,
         turnsTaken: schema.result.turnsTaken,
         durationSeconds: schema.result.durationSeconds,

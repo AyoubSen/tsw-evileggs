@@ -18,7 +18,7 @@ export interface MatchSource {
   readonly state: MatchState
   readonly activePlayer: SimPlayer
   readonly timerRemainingSeconds: number
-  readonly localSeat: 0 | 1 | null
+  readonly localSeat: number | null
   readonly online: boolean
   update(deltaSeconds: number): void
   sendCommand(command: MatchCommandInput): Promise<MatchSourceCommandResult>

@@ -1,16 +1,22 @@
 import { z } from 'zod'
-import { MAP_ORDER, MAP_REGISTRY_VERSION, type MapId } from '../maps/registry'
+import {
+  MAP_REGISTRY_VERSION,
+  getMap,
+  mapIdsForMode,
+  type MapId,
+  type MatchMode,
+} from '../maps/registry'
 import { TURN_DURATIONS, type TurnDuration } from '../match/config'
-import { POWER_MAX_PERCENT, POWER_MIN_PERCENT, GAME_HEIGHT, GAME_WIDTH } from '../shared/constants'
+import { MAX_WORLD_COORDINATE, POWER_MAX_PERCENT, POWER_MIN_PERCENT } from '../shared/constants'
 import type { MatchCommandInput, CommandRejection } from '../simulation/match/MatchCommand'
 import type { MatchEvent, SimulationMatchResult } from '../simulation/match/MatchEvent'
 import type { SerializedMatchState } from '../simulation/match/MatchState'
 import { WEAPON_ORDER, WEAPON_REGISTRY_VERSION } from '../weapons/registry'
 
 export const PRIVATE_MATCH_ROOM = 'private_match'
-export const PROTOCOL_VERSION = 'private-room-2'
-export const SIMULATION_SNAPSHOT_VERSION = 2
-export const CLIENT_BUILD_VERSION = '0.5.0'
+export const PROTOCOL_VERSION = 'private-room-3'
+export const SIMULATION_SNAPSHOT_VERSION = 4
+export const CLIENT_BUILD_VERSION = '0.9.0'
 export const ROOM_CODE_LENGTH = 6
 export const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/
 export const NETWORK_MESSAGE_TYPE = 'room'
@@ -98,6 +104,7 @@ export type ServerRoomMessage =
 
 export type CreateRoomOptions = {
   playerName: string
+  mode: Extract<MatchMode, '1v1' | '2v2'>
   mapId: MapId
   turnDurationSeconds: TurnDuration
   compatibility: CompatibilityVersions
@@ -107,6 +114,11 @@ export type JoinRoomOptions = {
   playerName: string
   compatibility: CompatibilityVersions
 }
+
+const ONLINE_MAP_ORDER = [...mapIdsForMode('1v1'), ...mapIdsForMode('2v2')] as [
+  MapId,
+  ...MapId[],
+]
 
 const compatibilitySchema = z
   .object({
@@ -121,11 +133,16 @@ const compatibilitySchema = z
 export const createRoomOptionsSchema = z
   .object({
     playerName: z.string().max(64),
-    mapId: z.enum(MAP_ORDER as [MapId, ...MapId[]]),
+    mode: z.enum(['1v1', '2v2']),
+    mapId: z.enum(ONLINE_MAP_ORDER),
     turnDurationSeconds: z.union(TURN_DURATIONS.map((value) => z.literal(value))),
     compatibility: compatibilitySchema,
   })
   .strict()
+  .refine((value) => getMap(value.mapId).mode === value.mode, {
+    message: 'Selected map does not support the requested room mode.',
+    path: ['mapId'],
+  })
 
 export const joinRoomOptionsSchema = z
   .object({
@@ -163,7 +180,11 @@ const matchCommandSchema = z.discriminatedUnion('type', [
     .object({
       type: z.literal('teleport'),
       destination: vectorSchema.refine(
-        (value) => value.x >= 0 && value.x <= GAME_WIDTH && value.y >= 0 && value.y <= GAME_HEIGHT,
+        (value) =>
+          value.x >= 0 &&
+          value.x <= MAX_WORLD_COORDINATE &&
+          value.y >= 0 &&
+          value.y <= MAX_WORLD_COORDINATE,
         { message: 'Teleport target is outside the map' },
       ),
     })

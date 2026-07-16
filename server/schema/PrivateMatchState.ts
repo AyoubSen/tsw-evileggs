@@ -4,6 +4,8 @@ import type { MatchState, SimPlayer, SimProjectile } from '../../src/simulation/
 export const RoomPlayerState = schema({
   playerId: { type: 'string', default: '' },
   seat: { type: 'uint8', default: 0 },
+  teamId: { type: 'uint8', default: 0 },
+  teamSlot: { type: 'uint8', default: 0 },
   name: { type: 'string', default: '' },
   sessionId: { type: 'string', default: '' },
   connected: { type: 'boolean', default: true },
@@ -18,6 +20,7 @@ export const RoomPlayerState = schema({
   alive: { type: 'boolean', default: true },
   grounded: { type: 'boolean', default: true },
   moveDirection: { type: 'int8', default: 0 },
+  facing: { type: 'int8', default: 1 },
   selectedWeapon: { type: 'string', default: 'basic-rocket' },
   basicRocketAmmo: { type: 'int16', default: -1 },
   timedGrenadeAmmo: { type: 'int16', default: 3 },
@@ -45,6 +48,7 @@ export type ProjectileState = SchemaType<typeof ProjectileState>
 export const MatchResultState = schema({
   available: { type: 'boolean', default: false },
   winnerSeat: { type: 'int8', default: -1 },
+  winnerTeamId: { type: 'int8', default: -1 },
   reason: { type: 'string', default: '' },
   remainingHealth: { type: 'uint16', default: 0 },
   turnsTaken: { type: 'uint32', default: 0 },
@@ -55,6 +59,8 @@ export type MatchResultState = SchemaType<typeof MatchResultState>
 export const PrivateMatchState = schema({
   roomCode: { type: 'string', default: '' },
   phase: { type: 'string', default: 'waiting' },
+  mode: { type: 'string', default: '1v1' },
+  capacity: { type: 'uint8', default: 2 },
   mapId: { type: 'string', default: 'rolling-hills' },
   turnDurationSeconds: { type: 'uint8', default: 30 },
   protocolVersion: { type: 'string', default: '' },
@@ -88,6 +94,9 @@ function projectPlayer(target: RoomPlayerState, source: SimPlayer): void {
   target.alive = source.alive
   target.grounded = source.grounded
   target.moveDirection = source.moveDirection
+  target.facing = source.facing
+  target.teamId = source.teamId
+  target.teamSlot = source.teamSlot
   target.selectedWeapon = source.selectedWeapon
   target.basicRocketAmmo = ammo(source.inventory['basic-rocket'])
   target.timedGrenadeAmmo = ammo(source.inventory['timed-grenade'])

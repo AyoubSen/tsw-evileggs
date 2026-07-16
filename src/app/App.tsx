@@ -1,7 +1,15 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { BRAND } from './branding'
 import { loadPreferences, savePreferences, type Preferences } from './preferences'
-import { MAP_ORDER, MAPS, getMap, type MapId } from '../maps/registry'
+import {
+  MAPS,
+  defaultMapForMode,
+  getMap,
+  mapSurfaceY,
+  mapIdsForMode,
+  type MapId,
+  type MatchMode as GameMode,
+} from '../maps/registry'
 import { validateMatchConfig, type LocalMatchConfig, type TurnDuration } from '../match/config'
 import { createGame, type GameHost } from '../game/GameHost'
 import { LocalMatchSource } from '../game/LocalMatchSource'
@@ -27,16 +35,9 @@ type Screen =
   | 'credits'
   | 'match'
 type PausePanel = 'main' | 'how-to' | 'settings' | 'confirm-restart' | 'confirm-menu'
-type MatchMode = 'local' | 'online'
+type SessionMode = 'local' | 'online'
 
-const MAP_LABELS: Record<MapId, string> = {
-  'rolling-hills': 'Open lanes',
-  'twin-peaks': 'High ground',
-  'broken-crossing': 'Risky footing',
-  'crater-basin': 'Close quarters',
-}
-
-function ToyAvatar({ player }: { player: 1 | 2 }) {
+function ToyAvatar({ player }: { player: 1 | 2 | 3 | 4 }) {
   return (
     <span className={`toy-avatar toy-avatar-${player}`} aria-hidden="true">
       <i />
@@ -68,8 +69,8 @@ function HeroDiorama() {
 function MapPreview({ mapId }: { mapId: MapId }) {
   const map = MAPS[mapId]
   const points = Array.from({ length: 33 }, (_, index) => {
-    const x = (index / 32) * 960
-    return `${index * 5},${Math.round((map.surfaceAt(x) / 540) * 62)}`
+    const x = (index / 32) * map.width
+    return `${index * 5},${Math.round(((mapSurfaceY(map, x) ?? map.height) / map.height) * 62)}`
   }).join(' ')
   return (
     <svg className="map-preview" viewBox="0 0 160 70" aria-hidden="true">
@@ -148,6 +149,18 @@ function Settings({
           onChange={(event) => update({ cameraShake: event.target.checked })}
         />{' '}
         Camera shake
+      </label>
+      <label>
+        Camera view
+        <select
+          value={preferences.cameraMode}
+          onChange={(event) =>
+            update({ cameraMode: event.target.value as Preferences['cameraMode'] })
+          }
+        >
+          <option value="fit">Fit entire map</option>
+          <option value="follow">Follow the action</option>
+        </select>
       </label>
       <label>
         Aim guide
@@ -257,7 +270,7 @@ export function App() {
   const [pausePanel, setPausePanel] = useState<PausePanel>('main')
   const [result, setResult] = useState<MatchResult | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [matchMode, setMatchMode] = useState<MatchMode>('local')
+  const [matchMode, setMatchMode] = useState<SessionMode>('local')
   const [onlineSession, setOnlineSession] = useState<OnlineRoomSession | null>(null)
   const [roomView, setRoomView] = useState<OnlineRoomView | null>(null)
   const [roomCodeInput, setRoomCodeInput] = useState('')
@@ -288,6 +301,7 @@ export function App() {
     reducedMotion: preferences.reducedMotion,
     highContrastHud: preferences.highContrastHud,
     cameraShake: preferences.cameraShake,
+    cameraMode: preferences.cameraMode,
     aimGuide: preferences.aimGuide,
     screenFlash: preferences.screenFlash,
   }))
@@ -404,6 +418,7 @@ export function App() {
       const authoritativeConfig = onlineSession.source.state.config
       setConfig((current) =>
         current.mapId === authoritativeConfig.mapId &&
+        current.mode === authoritativeConfig.mode &&
         current.turnDurationSeconds === authoritativeConfig.turnDurationSeconds &&
         current.playerNames[0] === authoritativeConfig.playerNames[0] &&
         current.playerNames[1] === authoritativeConfig.playerNames[1]
@@ -430,6 +445,17 @@ export function App() {
         setResult({
           config: onlineSession.source.state.config,
           winnerIndex: view.result.winnerSeat >= 0 ? view.result.winnerSeat : null,
+          winnerTeamId:
+            view.result.winnerTeamId === 0 || view.result.winnerTeamId === 1
+              ? view.result.winnerTeamId
+              : null,
+          winnerPlayerIndices:
+            view.result.winnerTeamId === 0 || view.result.winnerTeamId === 1
+              ? onlineSession.source.state.players
+                  .map((player, index) => ({ player, index }))
+                  .filter(({ player }) => player.teamId === view.result.winnerTeamId)
+                  .map(({ index }) => index)
+              : [],
           remainingHealth: view.result.remainingHealth,
           turnsTaken: view.result.turnsTaken,
           durationSeconds: view.result.durationSeconds,
@@ -477,6 +503,10 @@ export function App() {
           onResult: (nextResult) => {
             if (callbackIsCurrent()) setResult(nextResult)
           },
+          onCameraModeChange: (cameraMode) => {
+            if (callbackIsCurrent())
+              setPreferences((current) => ({ ...current, cameraMode }))
+          },
         },
         visualPreferences,
         audioRef.current!,
@@ -512,6 +542,7 @@ export function App() {
     setMatchMode('local')
     setConfig(
       validateMatchConfig({
+        mode: preferences.lastMode,
         playerNames: preferences.playerNames,
         mapId: preferences.lastMapId,
         turnDurationSeconds: preferences.turnDurationSeconds,
@@ -524,7 +555,10 @@ export function App() {
     setConfig(next)
     setPreferences({
       ...preferences,
-      playerNames: [...next.playerNames],
+      playerNames: preferences.playerNames.map(
+        (name, index) => next.playerNames[index] ?? name,
+      ),
+      lastMode: next.mode,
       lastMapId: next.mapId,
       turnDurationSeconds: next.turnDurationSeconds,
     })
@@ -550,7 +584,9 @@ export function App() {
     try {
       const next = validateMatchConfig({
         ...config,
-        playerNames: [config.playerNames[0], 'Opponent'],
+        playerNames: config.playerNames.map((name, index) =>
+          index === 0 ? name : `Player ${index + 1}`,
+        ),
       })
       const session = await OnlineRoomSession.create(
         next.playerNames[0],
@@ -560,7 +596,10 @@ export function App() {
       if (!activateSession(session, operation.generation, operation.controller)) return
       setPreferences({
         ...preferences,
-        playerNames: [next.playerNames[0], preferences.playerNames[1]],
+        playerNames: preferences.playerNames.map((name, index) =>
+          index === 0 ? next.playerNames[0] : name,
+        ),
+        lastMode: next.mode,
         lastMapId: next.mapId,
         turnDurationSeconds: next.turnDurationSeconds,
       })
@@ -608,7 +647,9 @@ export function App() {
       if (!activateSession(session, operation.generation, operation.controller)) return
       setPreferences({
         ...preferences,
-        playerNames: [config.playerNames[0], preferences.playerNames[1]],
+        playerNames: preferences.playerNames.map((name, index) =>
+          index === 0 ? config.playerNames[0] : name,
+        ),
       })
       setScreen('online-lobby')
     } catch (caught) {
@@ -656,6 +697,25 @@ export function App() {
     if (session) void session.leave().catch(() => undefined)
   }
   const chooseMap = (mapId: MapId) => setConfig({ ...config, mapId })
+  const chooseGameMode = (mode: GameMode) => {
+    const playerNames = preferences.playerNames.map(
+      (name, index) => config.playerNames[index] ?? name,
+    )
+    setPreferences({ ...preferences, playerNames })
+    setConfig(
+      validateMatchConfig({
+        ...config,
+        mode,
+        mapId: defaultMapForMode(mode).id,
+        playerNames,
+      }),
+    )
+  }
+  const updatePlayerName = (index: number, name: string) => {
+    const playerNames = [...config.playerNames]
+    playerNames[index] = name
+    setConfig({ ...config, playerNames })
+  }
   const content = () => {
     if (screen === 'menu')
       return (
@@ -702,7 +762,7 @@ export function App() {
     if (screen === 'online')
       return (
         <section className="panel online-panel">
-          <p className="eyebrow">PRIVATE 1V1 ROOMS</p>
+          <p className="eyebrow">PRIVATE 1V1 AND 2V2 ROOMS</p>
           <h2>Meet across the table</h2>
           <p>Create a six-character invite or join a friend. No account or public matchmaking.</p>
           <div className="online-choice-grid">
@@ -712,8 +772,12 @@ export function App() {
                 setOnlineError(null)
                 setConfig(
                   validateMatchConfig({
-                    playerNames: [preferences.playerNames[0], 'Opponent'],
-                    mapId: preferences.lastMapId,
+                    mode: preferences.lastMode === '2v2' ? '2v2' : '1v1',
+                    playerNames: preferences.playerNames,
+                    mapId:
+                      getMap(preferences.lastMapId).mode === preferences.lastMode
+                        ? preferences.lastMapId
+                        : defaultMapForMode(preferences.lastMode).id,
                     turnDurationSeconds: preferences.turnDurationSeconds,
                   }),
                 )
@@ -729,8 +793,12 @@ export function App() {
                 setOnlineError(null)
                 setConfig(
                   validateMatchConfig({
+                    mode: '1v1',
                     playerNames: [preferences.playerNames[0], 'Opponent'],
-                    mapId: preferences.lastMapId,
+                    mapId:
+                      getMap(preferences.lastMapId).mode === '1v1'
+                        ? preferences.lastMapId
+                        : defaultMapForMode('1v1').id,
                     turnDurationSeconds: preferences.turnDurationSeconds,
                   }),
                 )
@@ -754,15 +822,25 @@ export function App() {
             <h2>Pack the invite</h2>
             <p>Your server owns the match. You only choose where and how long each turn lasts.</p>
           </header>
+          <div className="mode-picker" aria-label="Online match mode">
+            {(['1v1', '2v2'] as const).map((mode) => (
+              <button
+                key={mode}
+                className={config.mode === mode ? 'selected' : ''}
+                onClick={() => chooseGameMode(mode)}
+              >
+                <strong>{mode}</strong>
+                <span>{mode === '1v1' ? 'Two-player room' : 'Four-player teams'}</span>
+              </button>
+            ))}
+          </div>
           <div className="online-form-row">
             <label>
               <span>Your player name</span>
               <input
                 maxLength={18}
                 value={config.playerNames[0]}
-                onChange={(event) =>
-                  setConfig({ ...config, playerNames: [event.target.value, 'Opponent'] })
-                }
+                onChange={(event) => updatePlayerName(0, event.target.value)}
               />
             </label>
             <label>
@@ -783,7 +861,7 @@ export function App() {
             </label>
           </div>
           <div className="map-cards online-map-cards">
-            {MAP_ORDER.map((id) => (
+            {mapIdsForMode(config.mode).map((id) => (
               <button
                 key={id}
                 className={`map-card ${config.mapId === id ? 'selected' : ''}`}
@@ -791,7 +869,7 @@ export function App() {
               >
                 <MapPreview mapId={id} />
                 <strong>{MAPS[id].displayName}</strong>
-                <em>{MAP_LABELS[id]}</em>
+                <em>{MAPS[id].label}</em>
                 <span>{MAPS[id].description}</span>
               </button>
             ))}
@@ -903,13 +981,21 @@ export function App() {
             <span>Compatible protocol {roomView.protocolVersion}</span>
           </div>
           <div className="lobby-seats">
-            {[0, 1].map((seat) => {
+            {Array.from({ length: roomView.capacity }, (_, seat) => seat).map((seat) => {
               const player = roomView.players.find((candidate) => candidate.seat === seat)
+              const teamId = seat % 2
+              const teamSlot = Math.floor(seat / 2)
               return (
-                <article className={`lobby-seat seat-${seat + 1}`} key={seat}>
-                  <ToyAvatar player={seat === 0 ? 1 : 2} />
+                <article
+                  className={`lobby-seat seat-${seat + 1} team-${teamId}`}
+                  key={seat}
+                >
+                  <ToyAvatar player={(seat + 1) as 1 | 2 | 3 | 4} />
                   <div>
-                    <span>{seat === 0 ? 'Host · Player 1' : 'Guest · Player 2'}</span>
+                    <span>
+                      {seat === 0 ? 'Host · ' : ''}Team {teamId === 0 ? 'Comet' : 'Ember'} ·
+                      Player {teamSlot + 1}
+                    </span>
                     <strong>{player?.name ?? 'Waiting for player...'}</strong>
                     <em>
                       {!player
@@ -927,6 +1013,10 @@ export function App() {
           </div>
           <div className="lobby-rules">
             <div>
+              <span>Mode</span>
+              <strong>{roomView.mode}</strong>
+            </div>
+            <div>
               <span>Battlefield</span>
               <strong>{getMap(roomView.mapId).displayName}</strong>
             </div>
@@ -936,13 +1026,13 @@ export function App() {
             </div>
             <div>
               <span>Start rule</span>
-              <strong>Both players ready</strong>
+              <strong>All {roomView.capacity} players ready</strong>
             </div>
           </div>
           <p className="lobby-note">
-            {roomView.players.length < 2
-              ? 'Share the code. The match stays here until a second player arrives.'
-              : 'The server starts a short countdown as soon as both players are ready.'}
+            {roomView.players.length < roomView.capacity
+              ? `Share the code. ${roomView.capacity - roomView.players.length} open ${roomView.capacity - roomView.players.length === 1 ? 'seat remains' : 'seats remain'}.`
+              : `The server starts a short countdown as soon as all ${roomView.capacity} players are ready.`}
           </p>
           {connectionStatus === 'failed' && onlineError && (
             <ConnectionTroubleshooting message={onlineError} />
@@ -981,40 +1071,42 @@ export function App() {
             <h2>Set the tabletop</h2>
             <p>Choose your contenders, then pick a place worth wrecking.</p>
           </header>
-          <div className="contender-row">
-            <div className="contender contender-one">
-              <ToyAvatar player={1} />
-              <label>
-                <span>Player one · comet crew</span>
-                <input
-                  maxLength={18}
-                  value={config.playerNames[0]}
-                  onChange={(event) =>
-                    setConfig({
-                      ...config,
-                      playerNames: [event.target.value, config.playerNames[1]],
-                    })
-                  }
-                />
-              </label>
-            </div>
-            <div className="versus-badge">VS</div>
-            <div className="contender contender-two">
-              <ToyAvatar player={2} />
-              <label>
-                <span>Player two · ember crew</span>
-                <input
-                  maxLength={18}
-                  value={config.playerNames[1]}
-                  onChange={(event) =>
-                    setConfig({
-                      ...config,
-                      playerNames: [config.playerNames[0], event.target.value],
-                    })
-                  }
-                />
-              </label>
-            </div>
+          <div className="mode-picker" aria-label="Local match mode">
+            {(['1v1', '2v2'] as const).map((mode) => (
+              <button
+                key={mode}
+                className={config.mode === mode ? 'selected' : ''}
+                onClick={() => chooseGameMode(mode)}
+              >
+                <strong>{mode}</strong>
+                <span>{mode === '1v1' ? 'Classic duel' : 'Four-player teams'}</span>
+              </button>
+            ))}
+          </div>
+          <div className="team-roster-grid">
+            {[0, 1].map((teamId) => (
+              <section key={teamId} className={`team-roster team-${teamId}`}>
+                <header>
+                  <span>Team {teamId === 0 ? 'Comet' : 'Ember'}</span>
+                  <strong>{teamId === 0 ? '◆' : '●'}</strong>
+                </header>
+                {config.playerNames.map((name, index) =>
+                  index % 2 === teamId ? (
+                    <div className="contender" key={index}>
+                      <ToyAvatar player={(index + 1) as 1 | 2 | 3 | 4} />
+                      <label>
+                        <span>Player {Math.floor(index / 2) + 1}</span>
+                        <input
+                          maxLength={18}
+                          value={name}
+                          onChange={(event) => updatePlayerName(index, event.target.value)}
+                        />
+                      </label>
+                    </div>
+                  ) : null,
+                )}
+              </section>
+            ))}
           </div>
           <div className="setup-controls">
             <label>
@@ -1034,7 +1126,9 @@ export function App() {
               </select>
             </label>
             <span className="setup-tip">
-              Both players share the same keyboard and mouse. Take turns passing the device.
+              {config.playerNames.length} players share the keyboard and mouse. Turns alternate
+              between Team Comet and Team Ember. Friendly fire is on and ammunition belongs to
+              each player.
             </span>
           </div>
           <div className="battlefield-picker">
@@ -1044,7 +1138,7 @@ export function App() {
                 <h3>Choose an arena</h3>
               </div>
               <div className="map-cards">
-                {MAP_ORDER.map((id) => (
+                {mapIdsForMode(config.mode).map((id) => (
                   <button
                     key={id}
                     className={`map-card ${config.mapId === id ? 'selected' : ''}`}
@@ -1052,7 +1146,7 @@ export function App() {
                   >
                     <MapPreview mapId={id} />
                     <strong>{MAPS[id].displayName}</strong>
-                    <em>{MAP_LABELS[id]}</em>
+                    <em>{MAPS[id].label}</em>
                     <span>{MAPS[id].description}</span>
                   </button>
                 ))}
@@ -1060,7 +1154,10 @@ export function App() {
             </div>
             <button
               className="button-quiet"
-              onClick={() => chooseMap(MAP_ORDER[Math.floor(Math.random() * MAP_ORDER.length)])}
+              onClick={() => {
+                const maps = mapIdsForMode(config.mode)
+                chooseMap(maps[Math.floor(Math.random() * maps.length)])
+              }}
             >
               Random map
             </button>
@@ -1122,7 +1219,7 @@ export function App() {
   }
   return (
     <main
-      className={`app-shell ${preferences.reducedMotion ? 'reduced-motion' : ''} ${preferences.highContrastHud ? 'high-contrast' : ''}`}
+      className={`app-shell ${screen === 'match' ? 'match-active' : ''} ${preferences.reducedMotion ? 'reduced-motion' : ''} ${preferences.highContrastHud ? 'high-contrast' : ''}`}
       onPointerDownCapture={() => void audioRef.current?.unlock()}
       onKeyDownCapture={() => void audioRef.current?.unlock()}
       onClickCapture={(event) => {
@@ -1153,6 +1250,10 @@ export function App() {
               data-player-zero-y={roomView.players.find((player) => player.seat === 0)?.y ?? 0}
               data-player-one-x={roomView.players.find((player) => player.seat === 1)?.x ?? 0}
               data-player-one-y={roomView.players.find((player) => player.seat === 1)?.y ?? 0}
+              data-player-two-x={roomView.players.find((player) => player.seat === 2)?.x ?? 0}
+              data-player-two-y={roomView.players.find((player) => player.seat === 2)?.y ?? 0}
+              data-player-three-x={roomView.players.find((player) => player.seat === 3)?.x ?? 0}
+              data-player-three-y={roomView.players.find((player) => player.seat === 3)?.y ?? 0}
               data-connection-quality={connectionQuality}
               data-latency-ms={latencyMs ?? ''}
             >
@@ -1162,7 +1263,7 @@ export function App() {
                 : connectionStatus === 'reconnecting'
                   ? 'Reconnecting'
                   : roomView.phase === 'reconnecting'
-                    ? 'Opponent reconnecting'
+                    ? 'Player reconnecting'
                     : connectionQuality === 'poor'
                       ? 'High latency'
                       : connectionQuality === 'fair'
@@ -1221,30 +1322,36 @@ export function App() {
             {pausePanel === 'confirm-restart' && (
               <>
                 <p>Restart this match? Current progress will be lost.</p>
-                <button
-                  onClick={() => {
-                    gameRef.current?.restart()
-                    setPaused(false)
-                  }}
-                >
-                  Restart
-                </button>
-                <button className="secondary" onClick={() => setPausePanel('main')}>
-                  Cancel
-                </button>
+                <div className="actions pause-confirm-actions">
+                  <button
+                    onClick={() => {
+                      gameRef.current?.restart()
+                      setPaused(false)
+                    }}
+                  >
+                    Restart
+                  </button>
+                  <button className="secondary" onClick={() => setPausePanel('main')}>
+                    Cancel
+                  </button>
+                </div>
               </>
             )}
             {pausePanel === 'confirm-menu' && (
               <>
                 <p>Return to the main menu and discard this match?</p>
-                <button
-                  onClick={() => (matchMode === 'online' ? void leaveOnline('menu') : leaveMatch())}
-                >
-                  Return to menu
-                </button>
-                <button className="secondary" onClick={() => setPausePanel('main')}>
-                  Cancel
-                </button>
+                <div className="actions pause-confirm-actions">
+                  <button
+                    onClick={() =>
+                      matchMode === 'online' ? void leaveOnline('menu') : leaveMatch()
+                    }
+                  >
+                    Return to menu
+                  </button>
+                  <button className="secondary" onClick={() => setPausePanel('main')}>
+                    Cancel
+                  </button>
+                </div>
               </>
             )}
           </section>
@@ -1254,11 +1361,19 @@ export function App() {
         <div className="modal">
           <section className="panel results">
             <p className="eyebrow">MATCH COMPLETE</p>
-            {result.winnerIndex !== null && <ToyAvatar player={result.winnerIndex === 0 ? 1 : 2} />}
+            {result.winnerPlayerIndices.length > 0 && (
+              <div className="winning-team">
+                {result.winnerPlayerIndices.map((index) => (
+                  <ToyAvatar key={index} player={(index + 1) as 1 | 2 | 3 | 4} />
+                ))}
+              </div>
+            )}
             <h2>
               {result.winnerIndex === null
                 ? 'Draw'
-                : `${result.config.playerNames[result.winnerIndex]} wins`}
+                : result.config.mode === '2v2'
+                  ? `Team ${result.winnerTeamId === 0 ? 'Comet' : 'Ember'} wins`
+                  : `${result.config.playerNames[result.winnerIndex]} wins`}
             </h2>
             <p>
               {getMap(result.config.mapId).displayName} · {result.remainingHealth} health remaining
@@ -1290,8 +1405,8 @@ export function App() {
               <>
                 <p className="rematch-status">
                   {rematchVoted
-                    ? 'Rematch requested. Waiting for the other player.'
-                    : 'A rematch starts only when both players vote yes.'}
+                    ? 'Rematch requested. Waiting for every player.'
+                    : `A rematch starts only when all ${result.config.playerNames.length} players vote yes.`}
                 </p>
                 <div className="actions">
                   <button
@@ -1330,7 +1445,7 @@ export function App() {
                   ? 'Connection ended'
                   : connectionStatus === 'reconnecting'
                     ? 'Reconnecting...'
-                    : 'Opponent reconnecting'}
+                    : 'Player reconnecting'}
               </h2>
               {connectionStatus === 'failed' && onlineError ? (
                 <ConnectionTroubleshooting message={onlineError} />

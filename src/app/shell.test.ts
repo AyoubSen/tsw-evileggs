@@ -49,7 +49,7 @@ describe('preferences', () => {
   it('saves only versioned preferences and tolerates unavailable storage', () => {
     const storage = memoryStorage()
     savePreferences({ ...DEFAULT_PREFERENCES, playerNames: ['Ash', 'Birch'] }, storage)
-    expect(loadPreferences(storage).playerNames).toEqual(['Ash', 'Birch'])
+    expect(loadPreferences(storage).playerNames).toEqual(['Ash', 'Birch', 'Nova', 'Bramble'])
     expect(() => savePreferences(DEFAULT_PREFERENCES, undefined)).not.toThrow()
   })
 

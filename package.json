@@ -16,6 +16,7 @@
     "test:simulation": "vitest run src/simulation",
     "test:server": "vitest run server src/network",
     "test:browser": "playwright test",
+    "map:compile": "tsx scripts/compile-map.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
