@@ -5,10 +5,10 @@ import {
   createShapeMapDocument,
   mapSurfaceY,
   resolveMapDocument,
+  type MapDocument,
   type MapTheme,
   type MatchMode,
   type ResolvedMap,
-  type SpawnDefinition,
   type TeamId,
 } from './mapDocument'
 
@@ -20,8 +20,9 @@ export type MapId =
   | 'sunken-garden'
   | 'canopy-rift'
   | 'ruined-foundry'
+  | 'custom-draft'
 export const MAP_REGISTRY_VERSION = 'maps-4'
-export type MapDefinition = ResolvedMap
+export type MapDefinition = Omit<ResolvedMap, 'id'> & { id: MapId }
 export type { MapDocument, MapTheme, MatchMode, SpawnDefinition, TeamId } from './mapDocument'
 
 const CLASSIC_WIDTH = 960
@@ -38,6 +39,8 @@ const DEFAULT_THEME: MapTheme = {
   steel: 0x394c55,
 }
 
+const registeredMap = (map: ResolvedMap): MapDefinition => map as MapDefinition
+
 const heightMap = (source: {
   id: MapId
   revision?: number
@@ -52,16 +55,16 @@ const heightMap = (source: {
   theme?: MapTheme
   surfaceAt: (x: number) => number
 }) =>
-  resolveMapDocument(
+  registeredMap(resolveMapDocument(
     createHeightFieldDocument({
       ...source,
       revision: source.revision ?? 1,
       terrainScale: 2,
       theme: source.theme ?? DEFAULT_THEME,
     }),
-  )
+  ))
 
-const maps: Record<MapId, ResolvedMap> = {
+const maps: Record<MapId, MapDefinition> = {
   'rolling-hills': heightMap({
     id: 'rolling-hills',
     mode: '1v1',
@@ -173,7 +176,7 @@ const maps: Record<MapId, ResolvedMap> = {
       32 * Math.exp(-((x - 1020) ** 2) / 15000) -
       45 * Math.exp(-((x - 1250) ** 2) / 18000),
   }),
-  'ruined-foundry': resolveMapDocument(
+  'ruined-foundry': registeredMap(resolveMapDocument(
     createShapeMapDocument({
       id: 'ruined-foundry',
       revision: 1,
@@ -222,7 +225,28 @@ const maps: Record<MapId, ResolvedMap> = {
         { x: 880, y: 538, width: 14, height: 112, material: TERRAIN_MATERIAL.steel },
       ],
     }),
-  ),
+  )),
+  'custom-draft': registeredMap(resolveMapDocument(
+    createShapeMapDocument({
+      id: 'custom-draft',
+      revision: 1,
+      mode: '1v1',
+      displayName: 'Custom Draft',
+      description: 'Session-only map editor draft.',
+      label: 'Editor draft',
+      width: 960,
+      height: 540,
+      terrainScale: 2,
+      theme: DEFAULT_THEME,
+      spawns: [
+        { x: 180, y: 380, teamId: 0, teamSlot: 0, facing: 1 },
+        { x: 780, y: 380, teamId: 1, teamSlot: 0, facing: -1 },
+      ],
+      rectangles: [
+        { x: 0, y: 380, width: 960, height: 160, material: TERRAIN_MATERIAL.soil },
+      ],
+    }),
+  )),
 }
 
 export const MAP_ORDER: MapId[] = [
@@ -246,6 +270,14 @@ export function defaultMapForMode(mode: MatchMode): MapDefinition {
 
 export function getMap(id: string | undefined): MapDefinition {
   return id && id in MAPS ? MAPS[id as MapId] : MAPS['rolling-hills']
+}
+
+export function setCustomDraftMap(document: MapDocument): MapDefinition {
+  if (document.mode !== '1v1' && document.mode !== '2v2')
+    throw new Error('The editor currently supports only 1v1 and 2v2 maps.')
+  const map = registeredMap(resolveMapDocument({ ...document, id: 'custom-draft' }))
+  maps['custom-draft'] = map
+  return map
 }
 
 export function isMapId(value: unknown): value is MapId {

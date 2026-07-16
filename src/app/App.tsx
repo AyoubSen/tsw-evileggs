@@ -1,12 +1,15 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { BRAND } from './branding'
 import { loadPreferences, savePreferences, type Preferences } from './preferences'
+import { MapEditor } from './MapEditor'
 import {
   MAPS,
   defaultMapForMode,
   getMap,
   mapSurfaceY,
   mapIdsForMode,
+  setCustomDraftMap,
+  type MapDocument,
   type MapId,
   type MatchMode as GameMode,
 } from '../maps/registry'
@@ -33,6 +36,7 @@ type Screen =
   | 'how-to'
   | 'settings'
   | 'credits'
+  | 'editor'
   | 'match'
 type PausePanel = 'main' | 'how-to' | 'settings' | 'confirm-restart' | 'confirm-menu'
 type SessionMode = 'local' | 'online'
@@ -271,6 +275,7 @@ export function App() {
   const [result, setResult] = useState<MatchResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [matchMode, setMatchMode] = useState<SessionMode>('local')
+  const [editorTestActive, setEditorTestActive] = useState(false)
   const [onlineSession, setOnlineSession] = useState<OnlineRoomSession | null>(null)
   const [roomView, setRoomView] = useState<OnlineRoomView | null>(null)
   const [roomCodeInput, setRoomCodeInput] = useState('')
@@ -340,6 +345,7 @@ export function App() {
     setOnlineSession(session)
     setRoomView(session.view)
     setMatchMode('online')
+    setEditorTestActive(false)
     setConnectionStatus('connected')
     return true
   }
@@ -540,6 +546,7 @@ export function App() {
   const updatePreferences = (value: Preferences) => setPreferences(value)
   const openSetup = () => {
     setMatchMode('local')
+    setEditorTestActive(false)
     setConfig(
       validateMatchConfig({
         mode: preferences.lastMode,
@@ -565,12 +572,32 @@ export function App() {
     setResult(null)
     setError(null)
     setMatchMode('local')
+    setEditorTestActive(false)
     setScreen('match')
   }
-  const leaveMatch = () => {
+  const testEditorMap = (document: MapDocument) => {
+    setCustomDraftMap(document)
+    setConfig(
+      validateMatchConfig({
+        mode: document.mode,
+        playerNames: preferences.playerNames,
+        mapId: 'custom-draft',
+        turnDurationSeconds: preferences.turnDurationSeconds,
+      }),
+    )
     setPaused(false)
     setResult(null)
-    setScreen('menu')
+    setError(null)
+    setMatchMode('local')
+    setEditorTestActive(true)
+    setScreen('match')
+  }
+  const leaveMatch = (destination: 'menu' | 'editor' = editorTestActive ? 'editor' : 'menu') => {
+    setPaused(false)
+    setResult(null)
+    setError(null)
+    if (destination === 'menu') setEditorTestActive(false)
+    setScreen(destination)
   }
   const createOnlineRoom = async () => {
     if (userOperationBusyRef.current) return
@@ -679,6 +706,7 @@ export function App() {
     activeSessionRef.current = null
     setScreen(destination)
     setMatchMode('local')
+    setEditorTestActive(false)
     setPaused(false)
     setResult(null)
     setError(null)
@@ -743,6 +771,15 @@ export function App() {
               >
                 Play Online <span>›</span>
               </button>
+              <button
+                className="button-quiet button-play button-editor"
+                onClick={() => {
+                  setEditorTestActive(false)
+                  setScreen('editor')
+                }}
+              >
+                Build a Map <span>›</span>
+              </button>
               <div className="menu-links">
                 <button className="button-quiet" onClick={() => setScreen('how-to')}>
                   How to Play
@@ -758,6 +795,16 @@ export function App() {
           </div>
           <HeroDiorama />
         </section>
+      )
+    if (screen === 'editor')
+      return (
+        <MapEditor
+          onBack={() => {
+            setEditorTestActive(false)
+            setScreen('menu')
+          }}
+          onTestPlay={testEditorMap}
+        />
       )
     if (screen === 'online')
       return (
@@ -1219,7 +1266,7 @@ export function App() {
   }
   return (
     <main
-      className={`app-shell ${screen === 'match' ? 'match-active' : ''} ${preferences.reducedMotion ? 'reduced-motion' : ''} ${preferences.highContrastHud ? 'high-contrast' : ''}`}
+      className={`app-shell ${screen === 'match' ? 'match-active' : ''} ${screen === 'editor' ? 'editor-active' : ''} ${preferences.reducedMotion ? 'reduced-motion' : ''} ${preferences.highContrastHud ? 'high-contrast' : ''}`}
       onPointerDownCapture={() => void audioRef.current?.unlock()}
       onKeyDownCapture={() => void audioRef.current?.unlock()}
       onClickCapture={(event) => {
@@ -1284,7 +1331,7 @@ export function App() {
             <button
               onClick={() => (matchMode === 'online' ? void leaveOnline('menu') : leaveMatch())}
             >
-              Return to menu
+              {editorTestActive ? 'Return to editor' : 'Return to menu'}
             </button>
           </section>
         </div>
@@ -1304,7 +1351,9 @@ export function App() {
                 )}
                 <button onClick={() => setPausePanel('how-to')}>How to Play</button>
                 <button onClick={() => setPausePanel('settings')}>Settings</button>
-                <button onClick={() => setPausePanel('confirm-menu')}>Return to Main Menu</button>
+                <button onClick={() => setPausePanel('confirm-menu')}>
+                  {editorTestActive ? 'Return to Map Editor' : 'Return to Main Menu'}
+                </button>
               </div>
             )}
             {pausePanel === 'how-to' && (
@@ -1339,14 +1388,18 @@ export function App() {
             )}
             {pausePanel === 'confirm-menu' && (
               <>
-                <p>Return to the main menu and discard this match?</p>
+                <p>
+                  {editorTestActive
+                    ? 'Return to the map editor and discard this test match?'
+                    : 'Return to the main menu and discard this match?'}
+                </p>
                 <div className="actions pause-confirm-actions">
                   <button
                     onClick={() =>
                       matchMode === 'online' ? void leaveOnline('menu') : leaveMatch()
                     }
                   >
-                    Return to menu
+                    {editorTestActive ? 'Return to editor' : 'Return to menu'}
                   </button>
                   <button className="secondary" onClick={() => setPausePanel('main')}>
                     Cancel
@@ -1384,10 +1437,10 @@ export function App() {
                 <button
                   onClick={() => {
                     setResult(null)
-                    setScreen('setup')
+                    setScreen(editorTestActive ? 'editor' : 'setup')
                   }}
                 >
-                  Change Map / Setup
+                  {editorTestActive ? 'Back to Editor' : 'Change Map / Setup'}
                 </button>
                 <button
                   onClick={() => {
@@ -1397,7 +1450,7 @@ export function App() {
                 >
                   Rematch
                 </button>
-                <button className="secondary" onClick={leaveMatch}>
+                <button className="secondary" onClick={() => leaveMatch('menu')}>
                   Main Menu
                 </button>
               </div>
