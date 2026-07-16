@@ -6,6 +6,7 @@ import type { ServerRoomMessage } from '../src/network/protocol'
 import { matchStateChecksum } from '../src/simulation/serialization/matchSerialization'
 import type { MatchSimulation } from '../src/simulation/match/MatchSimulation'
 import { windForTurn } from '../src/simulation/wind/wind'
+import { WEAPON_ORDER } from '../src/weapons/registry'
 import { HEALTH_RESPONSE, server } from './app.config'
 import { PrivateMatchRoom } from './rooms/PrivateMatchRoom'
 import { roomCodeRegistry } from './roomCodeRegistry'
@@ -246,7 +247,10 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
       commandId: 2,
       expectedTurn: 1,
       matchGeneration: 1,
-      command: { type: 'fire', aimDirection: { x: 1, y: 0 }, power: 50, damage: 999 },
+      command: {
+        type: 'activate-weapon',
+        activation: { kind: 'directional', aimDirection: { x: 1, y: 0 }, power: 50, damage: 999 },
+      },
     })
     await waitFor(
       () =>
@@ -266,7 +270,10 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
       commandId: 1,
       expectedTurn: 1,
       matchGeneration: 1,
-      command: { type: 'fire', aimDirection: { x: 1, y: 0 }, power: 50 },
+      command: {
+        type: 'activate-weapon',
+        activation: { kind: 'directional', aimDirection: { x: 1, y: 0 }, power: 50 },
+      },
     })
     internals(room).updateRoom(20)
     await waitFor(() =>
@@ -277,7 +284,12 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
     )
     expect(room.state.projectiles.size).toBeGreaterThan(0)
     expect(room.state.eventSequence).toBeGreaterThan(0)
-    expect(playersBySeat(room)[0].basicRocketAmmo).toBe(-1)
+    expect(playersBySeat(room)[0].ammunition.get('basic-rocket')).toBe(-1)
+    expect([...playersBySeat(room)[0].ammunition.keys()]).toEqual(WEAPON_ORDER)
+    expect(playersBySeat(room)[0]).toMatchObject({
+      frozenTurnsRemaining: 0,
+      frozenAppliedTurn: 0,
+    })
   })
 
   it('clears held movement and restores the same seat after automatic reconnection', async () => {
@@ -331,6 +343,8 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
     expect(playersBySeat(room).map((player) => player.playerId)).toEqual(playerIds)
     expect(room.state).toMatchObject({ simulationTick: 0, terrainSequence: 0, eventSequence: 0 })
     expect(room.state.projectiles.size).toBe(0)
+    expect(room.state.mines.size).toBe(0)
+    expect(room.state.beacons.size).toBe(0)
     const rematch = internals(room).simulation!
     expect(rematch.state.wind).toBe(windForTurn(rematch.state.seed, 1))
     expect(rematch.state.seed).not.toBe(firstSeed)

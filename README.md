@@ -2,7 +2,7 @@
 
 An original browser artillery game with local hot-seat and private online 1v1, 2v2, and 3v3 play. It takes broad inspiration from the readable, turn-based projectile play found in classic artillery games, but is not a remake or clone of any existing game. The characters, maps, UI, naming, and code are original placeholder work.
 
-Mossfire Skirmish is an original turn-based artillery game with destructible terrain, timed turns, movement, pull-back aiming, five weapons, and selectable maps.
+Mossfire Skirmish is an original turn-based artillery game with destructible terrain, timed turns, movement, direct drag aiming, fifteen weapons, and selectable maps.
 
 See the canonical [product roadmap](ROADMAP.md) for verified status, priorities, and major feature dependencies.
 
@@ -34,9 +34,10 @@ pnpm format:check
 - `Q` or `A`: move the active character left.
 - `D`: move the active character right.
 - `Z` or `W`: make one modest tactical jump. Release the key before jumping again.
-- Primary mouse drag: pull backward from the firing direction and choose power from pull distance. Releasing locks the aim; it does not fire.
-- `1`–`5`: select Basic Rocket, Timed Grenade, Scatter Shot, Cluster Charge, or Teleporter.
-- `Space`: activate the selected weapon on the active player's turn.
+- Primary mouse drag: point in the firing direction and choose power from drag distance. Releasing locks the aim; it does not fire. Each player's exact aim and power return on their next turn.
+- Click a weapon in the bottom dock to select it.
+- `[` / `]`: cycle through available weapons; this remains usable as the arsenal grows.
+- `Space`: activate the selected weapon on the active player's turn. Press it a second time while a Fork Rocket is in flight to split that rocket once.
 - `R`: open the pause menu during a legal input turn.
 - `C`: switch between the full-map view and the action-following camera.
 
@@ -57,35 +58,45 @@ Use the main menu to start a local match or create/join a private online room. E
 - **Lantern Vault (3v3, 1920 x 1080)**: cavern galleries climb through three broad ceiling shafts.
 - **Fossil Wake (3v3, 2048 x 1152)**: permanent fossil ribs rise through a destructible basin and broken scaffolds.
 
-The movement aliases use physical browser keyboard codes, so both AZERTY and QWERTY layouts work without configuration. Ballistic weapons use world-space pull-back aiming. Teleporter instead points at a safe map destination. Local and online team modes alternate Team Comet and Team Ember players, skip eliminated players, keep ammunition per player, and enable friendly fire. Online seats are assigned `A1, B1, A2, B2` for 2v2 and `A1, B1, A2, B2, A3, B3` for 3v3; every player must ready and unanimously approve rematches. Each input turn lasts 20, 30, or 45 seconds. Rocket is unlimited; Grenade and Scatter have 3 uses; Cluster and Teleporter have 2.
+The movement aliases use physical browser keyboard codes, so both AZERTY and QWERTY layouts work without configuration. Directional weapons use world-space forward aiming and remember each player's last exact aim, Deployable Mine activates at the player, and Teleporter resolves the pointer to a fixed canonical supported surface target. Local and online team modes alternate Team Comet and Team Ember players, skip eliminated players, keep ammunition per player, and enable friendly fire. Online seats are assigned `A1, B1, A2, B2` for 2v2 and `A1, B1, A2, B2, A3, B3` for 3v3; every player must ready and unanimously approve rematches. Each input turn lasts 20, 30, or 45 seconds. Basic Rocket and Pocket Knife are unlimited; Precision Cannon, High-Arc Mortar, Timed Grenade, Scatter Shot, Deployable Mine, and Old Shoe have 3 uses; Cluster Charge, Terrain-Boring Drill, Bomb Beacon, Fork Rocket, Cryo Shot, and Teleporter have 2; Siege Bazooka has 1.
 
 ## Arsenal
 
 - **Basic Rocket**: variable-power ballistic explosion; unlimited ammunition.
+- **Precision Cannon**: fast, low-drift variable-power shell with focused damage and a tight blast; 3 uses.
+- **High-Arc Mortar**: slower variable-power heavy shell with strong gravity and a broad blast; 3 uses.
 - **Timed Grenade**: variable-power bouncing projectile with a 3-second fuse; 3 uses.
 - **Scatter Shot**: deterministic seven-pellet short-range burst; 3 uses.
 - **Cluster Charge**: variable-power parent charge that releases five child explosives; 2 uses.
-- **Teleporter**: moves the player to a valid supported target without damage; 2 uses.
+- **Terrain-Boring Drill**: variable-power projectile that carves multiple ordered terrain cuts before exploding; 2 uses.
+- **Deployable Mine**: persistent authoritative proximity trap that arms for later turns and ignores allies; 3 uses.
+- **Pocket Knife**: unlimited close-range strike that cannot pass through terrain.
+- **Bomb Beacon**: launches a marker that waits 1.5 seconds before releasing a three-bomb overhead barrage; terrain and structures can block the descending bombs; 2 uses.
+- **Fork Rocket**: variable-power rocket that splits once into two child rockets when `Space` is pressed again during flight; 2 uses.
+- **Old Shoe**: low-damage variable-power projectile with unusually strong knockback; 3 uses.
+- **Siege Bazooka**: one colossal variable-power rocket with the arsenal's largest blast and terrain crater; 1 use.
+- **Cryo Shot**: damages and freezes victims, blocking movement and jumping on each victim's next personal turn while still allowing weapon selection and activation; 2 uses.
+- **Teleporter**: moves the player without damage to the canonical safe surface target resolved from the pointer; 2 uses.
 
 Successful activation consumes ammunition once and locks input until the action and world settling finish. A simultaneous elimination is a draw.
 
-Every player visibly carries the selected weapon through a procedural toy-tech model. Held models rotate through the full aim range, mirror their grip correctly, recoil from authoritative firing events, and remain cosmetic-only. Rockets, grenades, cluster canisters and children use distinct state-reconstructed silhouettes and bounded trails; Scatter Shot and Teleporter use dedicated transient traces, sparks, and rings. Reconnect restores held weapons and live projectiles without replaying old flashes or impacts.
+Every player visibly carries the selected weapon through a distinct procedural toy-tech model. Held models rotate through the full aim range, mirror their grip correctly, recoil from authoritative activation events, and remain cosmetic-only. Rockets, cannon shells, mortar shells, grenades, cluster canisters and children, drills, beacon canisters and bombs, fork rockets and children, shoes, siege rockets, and cryo capsules use state-reconstructed silhouettes and bounded trails. Pocket Knife, Scatter Shot, Deployable Mine, Bomb Beacon, Cryo freeze state, and Teleporter use dedicated transient, persistent, or player-state presentation. Reconnect restores held weapons, live projectiles, deployed mines, active beacons, and frozen players without replaying old flashes or impacts.
 
 ## Technology and architecture
 
 - **React + Vite** owns the page shell and starts/destroys the game canvas in `src/app/App.tsx`.
-- **MatchSimulation** in `src/simulation/match/MatchSimulation.ts` owns players, fixed-tick movement, turns, timer, ammunition, every weapon, projectiles, terrain mutations, damage, falling, and victory without depending on Phaser or browser APIs.
-- **Typed commands and events** in `src/simulation/match/` form the authority boundary used by both local and server-hosted play.
+- **MatchSimulation** in `src/simulation/match/MatchSimulation.ts` owns players and their frozen-turn counters, fixed-tick movement, turns, timer, ammunition, all fifteen weapons, projectiles, persistent mines and bomb beacons, terrain mutations, damage, falling, and victory without depending on Phaser or browser APIs.
+- **Typed commands and events** in `src/simulation/match/` form the authority boundary used by both local and server-hosted play. One generic weapon command carries a directional, target-position, or self activation; a separate trigger command performs Fork Rocket's one-time in-flight split.
 - **Match sources** in `src/game/matchSource.ts`, `src/game/LocalMatchSource.ts`, and `src/network/OnlineMatchSource.ts` let one Phaser scene consume either local authority or synchronized server state.
 - **Phaser** converts keyboard and pointer intent into commands, renders read-only source state, interpolates online entity positions through the online source, and consumes events in `src/game/scenes/MatchScene.ts`.
 - **PrivateMatchRoom** in `server/rooms/PrivateMatchRoom.ts` owns mode-specific two/four/six-player capacity, fixed team seats, the online `MatchSimulation`, 60 Hz command/tick loop, ready/countdown flow, Schema projection, snapshots, sequenced events, disconnect pause, team forfeit, and unanimous rematch.
-- **Colyseus Schema** patches player/projectile and room state every 50 ms (20 Hz). The authoritative simulation still runs at 60 Hz; clients interpolate only visual positions between patches.
+- **Colyseus Schema** patches complete player ammunition maps, frozen-player fields, projectiles, persistent mines, active bomb beacons, and room state every 50 ms (20 Hz). The authoritative simulation still runs at 60 Hz; clients interpolate only visual positions between patches.
 - **Private room codes** are six-character aliases held by the single-process registry in `server/roomCodeRegistry.ts` and resolved by `server/app.config.ts`. They are invitations, not authentication secrets.
-- **Shared protocol validation** and explicit protocol/snapshot/map/weapon/build versions live in `src/network/protocol.ts`.
+- **Shared protocol validation** and explicit protocol/snapshot/map/weapon/build versions live in `src/network/protocol.ts`. The current compatibility contract is protocol `private-room-6`, snapshot `6`, weapon registry `weapons-4`, and client build `1.4.0`.
 - **Weapon registry and inventories** live in `src/weapons/registry.ts`; shared definitions are separate from scene runtime behaviour.
 - **Weapon presentation registry** in `src/game/weaponPresentation.ts` owns client-only model geometry, colors, recoil, trails, and reduced-motion policy without affecting simulation checksums or collision.
 - **Map documents and registry** live in `src/maps/`; they own versioned material grids, world dimensions, visual themes, and explicit `x`/`y` team spawns independently of scenes. `maps-src/README.md` documents external PNG authoring.
-- **Serialization and replay** live in `src/simulation/serialization/` and `src/simulation/replay/`. Snapshots store the map plus ordered terrain operations rather than texture data.
+- **Serialization and replay** live in `src/simulation/serialization/` and `src/simulation/replay/`. Snapshots store player freeze counters, the map, ordered terrain operations, authoritative deployed mines, active bomb beacons, and their next stable IDs rather than texture data.
 
 The simulation advances at 60 fixed ticks per second. Local Phaser play uses a capped accumulator; online rooms use the server room interval and deterministic FIFO command ordering. Authoritative state uses plain JSON-compatible objects and arrays; Phaser graphics, input objects, and effects never enter snapshots.
 
@@ -97,9 +108,9 @@ Versioned map documents encode material rows with deterministic run-length encod
 
 ## Physics and turns
 
-The match uses a capped fixed-step simulation (up to 1/60 s per step). Ballistic projectiles integrate explicit velocity, gravity, and deterministic per-turn horizontal wind, with swept point samples every three logical pixels to reduce terrain tunnelling. A projectile explodes on terrain, a character, or map exit. Explosions remove terrain, use linear radial damage falloff, and apply radial knockback with a small upward lift. The aiming guide renders only the first eight fixed simulation steps near the firing character, using the same wind-aware integration as a real projectile.
+The match uses a capped fixed-step simulation (up to 1/60 s per step). Ballistic projectiles integrate weapon-specific launch speed, gravity, and deterministic per-turn horizontal wind, with swept point samples every three logical pixels to reduce terrain tunnelling. A projectile explodes on terrain, a character, or map exit; drills instead produce multiple ordered terrain operations before their terminal explosion. Fork Rocket can replace its parent once with two child projectiles. Bomb Beacon persists through its delay, then releases three ordinary collision-tested bombs from above, so overhead terrain and structures block the barrage. Explosions remove terrain, use linear radial damage falloff, and apply radial knockback with a small upward lift. Mines persist in authoritative state until unsupported or triggered by an armed enemy proximity check. The aiming guide renders only the first eight fixed simulation steps near the firing character, using the same wind-aware integration as a real projectile.
 
-Characters use simple gravity, horizontal damping, local support searches, and lightweight wall/ceiling probes. They can stand on internal floors rather than always resolving to the uppermost terrain surface. During input, they can walk across gentle rises and descend into craters, but cannot climb a rise greater than 12 px per movement step. Movement and jumping are unrestricted until firing or timeout. A jump applies a 310 px/s upward impulse and may include a small horizontal push from a held movement key. It requires grounded support and key release before another jump. Characters fall into newly created craters and are eliminated if they fall below the map. After impact, the game waits for character velocity and ground state to settle before switching turns. A draw is possible if both teams fall or are reduced to zero health in one blast.
+Characters use simple gravity, horizontal damping, local support searches, and lightweight wall/ceiling probes. They can stand on internal floors rather than always resolving to the uppermost terrain surface. During input, they can walk across gentle rises and descend into craters, but cannot climb a rise greater than 12 px per movement step. Movement and jumping are unrestricted until firing or timeout unless Cryo Shot has frozen that player's current personal turn; freezing blocks only movement and jumping, not weapon selection or activation. A jump applies a 310 px/s upward impulse and may include a small horizontal push from a held movement key. It requires grounded support and key release before another jump. Characters fall into newly created craters and are eliminated if they fall below the map. After impact, the game waits for character velocity and ground state to settle before switching turns. A draw is possible if both teams fall or are reduced to zero health in one blast.
 
 The selected 20-, 30-, or 45-second timer runs only in the input phase. Firing freezes it immediately. A timeout cancels any drag, displays `Time expired` briefly, and switches players without spawning a rocket. The new active player starts with a full timer and a sensible facing-relative default aim.
 
@@ -112,13 +123,13 @@ The selected 20-, 30-, or 45-second timer runs only in the input phase. Firing f
 - Wind: deterministic -45 to 45 px/s² horizontal acceleration, in steps of 5, selected at each turn start.
 - Movement: 105 px/s while grounded; jumps support capped 85 px/s mid-air steering while the input timer is active.
 - Turn timer: 20, 30, or 45 seconds per player input phase; 30 seconds by default.
-- Mouse pull: 36 to 180 logical px maps linearly from 30% to 100% power. The firing arrow points opposite the pull and is clamped to this range.
+- Mouse drag: 36 to 180 logical px maps linearly from 30% to 100% power. The firing direction follows the drag and is clamped to this range.
 
 At the default 68% power and 45°, the rocket's ideal level-ground range is about 593 px, intentionally close to the starting opponent distance once its muzzle height is included. Full power permits forgiving high arcs and map-crossing shots, while minimum power supports nearby crater shots.
 
 ## Tests
 
-Vitest tests cover command validation, wind determinism, fixed-step physics, pause and timer authority, all five weapons, terrain reconstruction, serialization, replay checksums, effect deduplication, audio safety, interpolation, room codes, server command authority, snapshots, reconnection, forfeit, and rematch. Run simulation-only tests with `pnpm test:simulation` and online tests with `pnpm test:server`. The Playwright smoke test uses installed headless Edge and two isolated browser contexts.
+Vitest tests cover command validation, wind determinism, fixed-step physics, pause and timer authority, all fifteen weapons, terrain reconstruction, mine and beacon persistence, freeze state, serialization, replay checksums, effect deduplication, audio safety, interpolation, room codes, server command authority, snapshots, reconnection, forfeit, and rematch. Run simulation-only tests with `pnpm test:simulation` and online tests with `pnpm test:server`. The Playwright smoke test uses installed headless Edge and two isolated browser contexts.
 
 After deploying the server, verify the production health CORS response with:
 

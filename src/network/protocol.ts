@@ -14,9 +14,9 @@ import type { SerializedMatchState } from '../simulation/match/MatchState'
 import { WEAPON_ORDER, WEAPON_REGISTRY_VERSION } from '../weapons/registry'
 
 export const PRIVATE_MATCH_ROOM = 'private_match'
-export const PROTOCOL_VERSION = 'private-room-4'
-export const SIMULATION_SNAPSHOT_VERSION = 4
-export const CLIENT_BUILD_VERSION = '1.2.0'
+export const PROTOCOL_VERSION = 'private-room-6'
+export const SIMULATION_SNAPSHOT_VERSION = 6
+export const CLIENT_BUILD_VERSION = '1.4.0'
 export const ROOM_CODE_LENGTH = 6
 export const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/
 export const NETWORK_MESSAGE_TYPE = 'room'
@@ -166,30 +166,39 @@ const matchCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('select-weapon'), weaponId: z.enum(WEAPON_ORDER) }).strict(),
   z
     .object({
-      type: z.literal('fire'),
-      aimDirection: vectorSchema.refine(
-        (value) => {
-          const magnitude = Math.hypot(value.x, value.y)
-          return magnitude >= 0.999 && magnitude <= 1.001
-        },
-        { message: 'Aim direction must be normalized' },
-      ),
-      power: z.number().finite().min(POWER_MIN_PERCENT).max(POWER_MAX_PERCENT),
+      type: z.literal('activate-weapon'),
+      activation: z.discriminatedUnion('kind', [
+        z
+          .object({
+            kind: z.literal('directional'),
+            aimDirection: vectorSchema.refine(
+              (value) => {
+                const magnitude = Math.hypot(value.x, value.y)
+                return magnitude >= 0.999 && magnitude <= 1.001
+              },
+              { message: 'Aim direction must be normalized' },
+            ),
+            power: z.number().finite().min(POWER_MIN_PERCENT).max(POWER_MAX_PERCENT),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal('target-position'),
+            target: vectorSchema.refine(
+              (value) =>
+                value.x >= 0 &&
+                value.x <= MAX_WORLD_COORDINATE &&
+                value.y >= 0 &&
+                value.y <= MAX_WORLD_COORDINATE,
+              { message: 'Weapon target is outside the map' },
+            ),
+          })
+          .strict(),
+        z.object({ kind: z.literal('self') }).strict(),
+      ]),
     })
     .strict(),
-  z
-    .object({
-      type: z.literal('teleport'),
-      destination: vectorSchema.refine(
-        (value) =>
-          value.x >= 0 &&
-          value.x <= MAX_WORLD_COORDINATE &&
-          value.y >= 0 &&
-          value.y <= MAX_WORLD_COORDINATE,
-        { message: 'Teleport target is outside the map' },
-      ),
-    })
-    .strict(),
+  z.object({ type: z.literal('trigger-weapon') }).strict(),
 ])
 
 export const clientRoomMessageSchema = z.discriminatedUnion('type', [

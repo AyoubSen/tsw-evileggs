@@ -2,7 +2,12 @@ import type { Room } from '@colyseus/sdk'
 import type { MatchSource, MatchSourceCommandResult } from '../game/matchSource'
 import type { MatchCommandInput } from '../simulation/match/MatchCommand'
 import type { MatchEvent, SimulationMatchResult } from '../simulation/match/MatchEvent'
-import type { MatchState, SimProjectile } from '../simulation/match/MatchState'
+import type {
+  MatchState,
+  SimBeacon,
+  SimMine,
+  SimProjectile,
+} from '../simulation/match/MatchState'
 import { reconstructTerrain } from '../simulation/match/MatchSimulation'
 import { SIMULATION_HZ } from '../simulation/match/MatchState'
 import { matchStateChecksum } from '../simulation/serialization/matchSerialization'
@@ -15,6 +20,11 @@ import {
   type ServerRoomMessage,
 } from './protocol'
 import { INTERPOLATION_SNAP_THRESHOLD, samplePosition, type PositionSample } from './interpolation'
+import {
+  isTeleportDestinationValid,
+  resolveTeleportDestination,
+} from '../simulation/weapons/teleport'
+import { WEAPON_ORDER, WEAPONS, type WeaponInventory } from '../weapons/registry'
 
 type StateListener = (state: MatchState) => void
 type PendingCommand = {
@@ -36,13 +46,11 @@ type SchemaPlayer = {
   alive: boolean
   grounded: boolean
   moveDirection: -1 | 0 | 1
+  frozenTurnsRemaining: number
+  frozenAppliedTurn: number
   facing: -1 | 1
   selectedWeapon: MatchState['players'][number]['selectedWeapon']
-  basicRocketAmmo: number
-  timedGrenadeAmmo: number
-  scatterShotAmmo: number
-  clusterChargeAmmo: number
-  teleporterAmmo: number
+  ammunition: { get(key: string): number | undefined }
 }
 
 type SchemaProjectile = {
@@ -57,6 +65,29 @@ type SchemaProjectile = {
   velocityY: number
   radius: number
   fuseTicks: number
+}
+
+type SchemaMine = {
+  id: string
+  actionId: string
+  ownerId: string
+  teamId: 0 | 1
+  weaponId: SimMine['weaponId']
+  x: number
+  y: number
+  radius: number
+  triggerRadius: number
+  armedTurn: number
+}
+
+type SchemaBeacon = {
+  id: string
+  actionId: string
+  ownerId: string
+  weaponId: SimBeacon['weaponId']
+  x: number
+  y: number
+  remainingTicks: number
 }
 
 type OnlineSchemaState = {
@@ -78,6 +109,8 @@ type OnlineSchemaState = {
   }
   players: { values(): IterableIterator<SchemaPlayer> }
   projectiles: { values(): IterableIterator<SchemaProjectile> }
+  mines: { values(): IterableIterator<SchemaMine> }
+  beacons: { values(): IterableIterator<SchemaBeacon> }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -93,6 +126,7 @@ export class OnlineMatchSource implements MatchSource {
   private readonly stateListeners = new Set<StateListener>()
   private readonly pendingCommands = new Map<number, PendingCommand>()
   private readonly playerSamples = new Map<number, PositionSample[]>()
+  private readonly authoritativePlayerPositions = new Map<number, Vector>()
   private readonly projectileSamples = new Map<string, PositionSample[]>()
   private listenerDisposers: Array<() => void> = []
   private commandId = 0
@@ -220,29 +254,29 @@ export class OnlineMatchSource implements MatchSource {
     return this.terrain
   }
 
+  resolveTeleportTarget(pointer: Vector): Vector | null {
+    if (!this.snapshotState || !this.terrain) return null
+    return resolveTeleportDestination(pointer, this.teleportContext())
+  }
+
   isValidTeleport(target: Vector): boolean {
     if (!this.snapshotState || !this.terrain) return false
-    if (!Number.isFinite(target.x) || !Number.isFinite(target.y)) return false
-    if (
-      target.x < 20 ||
-      target.x > this.state.worldWidth - 20 ||
-      target.y < 20 ||
-      target.y > this.state.worldHeight - 20
-    )
-      return false
-    if (
-      this.terrain.isSolid(target.x, target.y) ||
-      this.terrain.isSolid(target.x, target.y + this.activePlayer.radius)
-    )
-      return false
-    const surface = this.terrain.surfaceY(target.x, target.y)
-    if (surface === null || surface - target.y > 24 || surface - target.y < 10) return false
-    return !this.state.players.some(
-      (player, seat) =>
-        seat !== this.localSeat &&
-        player.alive &&
-        Math.hypot(player.position.x - target.x, player.position.y - target.y) < player.radius * 2,
-    )
+    return isTeleportDestinationValid(target, this.teleportContext())
+  }
+
+  private teleportContext() {
+    const players = this.state.players.map((player, seat) => ({
+      ...player,
+      position: { ...(this.authoritativePlayerPositions.get(seat) ?? player.position) },
+    }))
+    return {
+      terrain: this.terrain!,
+      worldWidth: this.state.worldWidth,
+      worldHeight: this.state.worldHeight,
+      player: players[this.state.activePlayerIndex],
+      players,
+      weapon: WEAPONS.teleporter,
+    }
   }
 
   canControlActivePlayer(): boolean {
@@ -292,6 +326,7 @@ export class OnlineMatchSource implements MatchSource {
     this.stateListeners.clear()
     this.events.splice(0)
     this.playerSamples.clear()
+    this.authoritativePlayerPositions.clear()
     this.projectileSamples.clear()
   }
 
@@ -340,6 +375,9 @@ export class OnlineMatchSource implements MatchSource {
     const generationChanged = message.matchGeneration !== this.matchGeneration
     if (generationChanged) this.cancelPendingCommands()
     this.snapshotState = structuredClone(message.snapshot.state)
+    this.snapshotState.players.forEach((player, seat) =>
+      this.authoritativePlayerPositions.set(seat, { ...player.position }),
+    )
     this.presentationRevisionValue += 1
     this.terrain = reconstructTerrain(
       this.snapshotState.mapId,
@@ -373,6 +411,7 @@ export class OnlineMatchSource implements MatchSource {
       const player = state.players[projected.seat]
       if (projected.sessionId === this.room.sessionId) this.playerId = projected.playerId
       const position = { x: projected.x, y: projected.y }
+      this.authoritativePlayerPositions.set(projected.seat, { ...position })
       const distance = Math.hypot(position.x - player.position.x, position.y - player.position.y)
       const sample = {
         tick: schema.simulationTick,
@@ -389,17 +428,15 @@ export class OnlineMatchSource implements MatchSource {
       player.alive = projected.alive
       player.grounded = projected.grounded
       player.moveDirection = projected.moveDirection
+      player.frozenTurnsRemaining = projected.frozenTurnsRemaining
+      player.frozenAppliedTurn = projected.frozenAppliedTurn
       if (projected.facing === -1 || projected.facing === 1) player.facing = projected.facing
       if (projected.teamId === 0 || projected.teamId === 1) player.teamId = projected.teamId
       if (Number.isSafeInteger(projected.teamSlot)) player.teamSlot = projected.teamSlot
       player.selectedWeapon = projected.selectedWeapon
-      player.inventory = {
-        'basic-rocket': ammo(projected.basicRocketAmmo),
-        'timed-grenade': ammo(projected.timedGrenadeAmmo),
-        'scatter-shot': ammo(projected.scatterShotAmmo),
-        'cluster-charge': ammo(projected.clusterChargeAmmo),
-        teleporter: ammo(projected.teleporterAmmo),
-      }
+      player.inventory = Object.fromEntries(
+        WEAPON_ORDER.map((weaponId) => [weaponId, ammo(projected.ammunition.get(weaponId) ?? 0)]),
+      ) as WeaponInventory
     }
     const projected = [...schema.projectiles.values()]
     const ids = new Set(projected.map((projectile) => projectile.id))
@@ -439,6 +476,25 @@ export class OnlineMatchSource implements MatchSource {
     }
     for (const id of this.projectileSamples.keys())
       if (!ids.has(id)) this.projectileSamples.delete(id)
+    state.mines = [...schema.mines.values()].map((mine) => ({
+      id: mine.id,
+      actionId: mine.actionId,
+      ownerId: mine.ownerId,
+      teamId: mine.teamId,
+      weaponId: mine.weaponId,
+      position: { x: mine.x, y: mine.y },
+      radius: mine.radius,
+      triggerRadius: mine.triggerRadius,
+      armedTurn: mine.armedTurn,
+    }))
+    state.beacons = [...schema.beacons.values()].map((beacon) => ({
+      id: beacon.id,
+      actionId: beacon.actionId,
+      ownerId: beacon.ownerId,
+      weaponId: beacon.weaponId,
+      position: { x: beacon.x, y: beacon.y },
+      remainingTicks: beacon.remainingTicks,
+    }))
     if (schema.result.available) {
       const winnerSeat = schema.result.winnerSeat
       const winnerTeamId = schema.result.winnerTeamId ?? state.players[winnerSeat]?.teamId ?? -1
@@ -495,6 +551,18 @@ export class OnlineMatchSource implements MatchSource {
           this.playerSamples.set(seat, [])
         }
       }
+      if (event.type === 'mine-deployed' && this.snapshotState)
+        this.snapshotState.mines.push(structuredClone(event.mine))
+      if (event.type === 'mine-triggered' && this.snapshotState)
+        this.snapshotState.mines = this.snapshotState.mines.filter(
+          (mine) => mine.id !== event.mineId,
+        )
+      if (event.type === 'beacon-deployed' && this.snapshotState)
+        this.snapshotState.beacons.push(structuredClone(event.beacon))
+      if (event.type === 'barrage-released' && this.snapshotState)
+        this.snapshotState.beacons = this.snapshotState.beacons.filter(
+          (beacon) => beacon.actionId !== event.actionId,
+        )
       this.lastEventSequence = event.sequence
       if (
         event.type === 'match-ended' &&

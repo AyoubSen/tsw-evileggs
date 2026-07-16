@@ -7,12 +7,17 @@ type CommandEnvelope = {
   playerId: string
 }
 
+export type WeaponActivation =
+  | { kind: 'directional'; aimDirection: Vector; power: number }
+  | { kind: 'target-position'; target: Vector }
+  | { kind: 'self' }
+
 export type MatchCommand =
   | (CommandEnvelope & { type: 'move'; direction: -1 | 0 | 1; pressed: boolean })
   | (CommandEnvelope & { type: 'jump' })
   | (CommandEnvelope & { type: 'select-weapon'; weaponId: WeaponId })
-  | (CommandEnvelope & { type: 'fire'; aimDirection: Vector; power: number })
-  | (CommandEnvelope & { type: 'teleport'; destination: Vector })
+  | (CommandEnvelope & { type: 'activate-weapon'; activation: WeaponActivation })
+  | (CommandEnvelope & { type: 'trigger-weapon' })
 
 export type MatchCommandInput = MatchCommand extends infer Command
   ? Command extends MatchCommand
@@ -33,7 +38,10 @@ export type CommandRejection =
   | 'invalid-weapon'
   | 'no-ammunition'
   | 'cannot-jump'
-  | 'invalid-teleport'
+  | 'invalid-target'
+  | 'invalid-placement'
+  | 'cannot-trigger'
+  | 'movement-locked'
 
 export type CommandResult =
   | { accepted: true; sequence: number }

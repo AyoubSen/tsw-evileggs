@@ -20,7 +20,10 @@ const select = (simulation: MatchSimulation, weaponId: WeaponId) =>
 
 const fire = (simulation: MatchSimulation) =>
   simulation.applyCommand(
-    command(simulation, { type: 'fire', aimDirection: { x: 0, y: -1 }, power: 60 }),
+    command(simulation, {
+      type: 'activate-weapon',
+      activation: { kind: 'directional', aimDirection: { x: 0, y: -1 }, power: 60 },
+    }),
   )
 
 const airborneProjectile = (weaponId: WeaponId, kind: SimProjectile['kind']): SimProjectile => ({
@@ -62,9 +65,18 @@ describe('authoritative wind', () => {
 
   it.each([
     ['basic-rocket', 'primary'],
+    ['precision-cannon', 'primary'],
+    ['high-arc-mortar', 'primary'],
     ['timed-grenade', 'primary'],
     ['cluster-charge', 'primary'],
     ['cluster-charge', 'cluster-child'],
+    ['bomb-beacon', 'primary'],
+    ['bomb-beacon', 'beacon-bomb'],
+    ['fork-rocket', 'primary'],
+    ['fork-rocket', 'fork-child'],
+    ['old-shoe', 'primary'],
+    ['siege-bazooka', 'primary'],
+    ['cryo-shot', 'primary'],
   ] as const)('%s %s projectiles respond to wind while airborne', (weaponId, kind) => {
     const simulation = new MatchSimulation()
     simulation.state.wind = WIND_MAX_ACCELERATION
@@ -87,7 +99,10 @@ describe('authoritative wind', () => {
       }
       select(simulation, 'scatter-shot')
       simulation.applyCommand(
-        command(simulation, { type: 'fire', aimDirection: { x: 1, y: 0 }, power: 50 }),
+        command(simulation, {
+          type: 'activate-weapon',
+          activation: { kind: 'directional', aimDirection: { x: 1, y: 0 }, power: 50 },
+        }),
       )
       return simulation.state.players[1].health
     }
@@ -98,8 +113,13 @@ describe('authoritative wind', () => {
       simulation.state.wind = wind
       select(simulation, 'teleporter')
       const x = 400
-      const destination = { x, y: simulation.getTerrain().surfaceY(x)! - 15 }
-      simulation.applyCommand(command(simulation, { type: 'teleport', destination }))
+      const target = simulation.resolveTeleportTarget({ x, y: 0 })!
+      simulation.applyCommand(
+        command(simulation, {
+          type: 'activate-weapon',
+          activation: { kind: 'target-position', target },
+        }),
+      )
       return simulation.activePlayer.position.x
     }
     expect(teleportX(-WIND_MAX_ACCELERATION)).toBe(teleportX(WIND_MAX_ACCELERATION))

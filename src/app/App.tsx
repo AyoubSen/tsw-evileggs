@@ -244,24 +244,24 @@ function Help() {
         <p>Move with Q/A and D. Jump with Z/W.</p>
       </section>
       <section className="tutorial-step">
-        <span className="tutorial-icon drag-icon">↙</span>
-        <h3>2. Pull back</h3>
-        <p>Drag backward from your toy to choose an arc.</p>
+        <span className="tutorial-icon drag-icon">↗</span>
+        <h3>2. Choose a tool</h3>
+        <p>Click a weapon in the dock, or use [ and ]. Watch its ammunition.</p>
       </section>
       <section className="tutorial-step">
         <span className="tutorial-icon power-icon">▰</span>
-        <h3>3. Build power</h3>
-        <p>A longer pull makes a stronger launch.</p>
+        <h3>3. Aim shots</h3>
+        <p>For launchers, drag in front to set the arc and power.</p>
       </section>
       <section className="tutorial-step">
         <span className="tutorial-icon weapon-icon">✦</span>
-        <h3>4. Pick a tool</h3>
-        <p>Use 1–5. Watch each toy's ammunition.</p>
+        <h3>4. Place tools</h3>
+        <p>Point the Teleporter at safe ground. Face a clear ledge for mines.</p>
       </section>
       <section className="tutorial-step">
         <span className="tutorial-icon fire-icon">➤</span>
-        <h3>5. Fire</h3>
-        <p>Press Space. Craters change every route.</p>
+        <h3>5. Activate</h3>
+        <p>Press Space to fire, warp, or deploy. Craters change every route.</p>
       </section>
       <section className="tutorial-step">
         <span className="tutorial-icon boom-icon">✹</span>

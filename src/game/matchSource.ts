@@ -25,6 +25,7 @@ export interface MatchSource {
   sendCommand(command: MatchCommandInput): Promise<MatchSourceCommandResult>
   drainEvents(): MatchEvent[]
   getTerrain(): TerrainMask
+  resolveTeleportTarget(pointer: Vector): Vector | null
   isValidTeleport(target: Vector): boolean
   canControlActivePlayer(): boolean
   setPaused(paused: boolean): void

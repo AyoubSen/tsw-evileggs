@@ -3,12 +3,28 @@ export type SoundCue =
   | 'jump'
   | 'weapon-select'
   | 'rocket-fire'
+  | 'cannon-fire'
+  | 'mortar-fire'
   | 'grenade-fire'
   | 'grenade-bounce'
   | 'grenade-fuse'
   | 'scatter-fire'
   | 'cluster-fire'
   | 'cluster-split'
+  | 'drill-fire'
+  | 'mine-deploy'
+  | 'mine-trigger'
+  | 'knife-swing'
+  | 'knife-hit'
+  | 'beacon-fire'
+  | 'beacon-armed'
+  | 'barrage-release'
+  | 'fork-fire'
+  | 'fork-split'
+  | 'shoe-fire'
+  | 'siege-fire'
+  | 'cryo-fire'
+  | 'freeze'
   | 'explosion'
   | 'teleport'
   | 'damage'
@@ -32,12 +48,28 @@ const frequencies: Record<SoundCue, readonly [number, number, number]> = {
   jump: [250, 430, 0.09],
   'weapon-select': [440, 560, 0.055],
   'rocket-fire': [115, 55, 0.18],
+  'cannon-fire': [155, 42, 0.2],
+  'mortar-fire': [92, 38, 0.24],
   'grenade-fire': [180, 105, 0.14],
   'grenade-bounce': [310, 220, 0.07],
   'grenade-fuse': [780, 680, 0.045],
   'scatter-fire': [190, 85, 0.11],
   'cluster-fire': [145, 75, 0.17],
   'cluster-split': [620, 230, 0.13],
+  'drill-fire': [240, 70, 0.2],
+  'mine-deploy': [310, 180, 0.1],
+  'mine-trigger': [880, 260, 0.12],
+  'knife-swing': [720, 260, 0.08],
+  'knife-hit': [230, 120, 0.09],
+  'beacon-fire': [260, 520, 0.14],
+  'beacon-armed': [620, 820, 0.1],
+  'barrage-release': [190, 70, 0.2],
+  'fork-fire': [140, 80, 0.16],
+  'fork-split': [650, 330, 0.11],
+  'shoe-fire': [330, 120, 0.14],
+  'siege-fire': [72, 30, 0.3],
+  'cryo-fire': [510, 920, 0.16],
+  freeze: [940, 280, 0.24],
   explosion: [90, 34, 0.26],
   teleport: [330, 920, 0.2],
   damage: [170, 115, 0.09],
@@ -92,7 +124,10 @@ export class AudioDirector {
       const oscillator = context.createOscillator()
       const gain = context.createGain()
       const start = context.currentTime
-      oscillator.type = cue === 'explosion' || cue === 'scatter-fire' ? 'sawtooth' : 'sine'
+      oscillator.type =
+        cue === 'explosion' || cue === 'scatter-fire' || cue === 'siege-fire'
+          ? 'sawtooth'
+          : 'sine'
       oscillator.frequency.setValueAtTime(startFrequency, start)
       oscillator.frequency.exponentialRampToValueAtTime(
         Math.max(20, endFrequency),

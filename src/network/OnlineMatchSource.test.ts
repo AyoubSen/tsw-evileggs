@@ -4,6 +4,18 @@ import { MatchSimulation } from '../simulation/match/MatchSimulation'
 import { OnlineMatchSource } from './OnlineMatchSource'
 import { NETWORK_MESSAGE_TYPE, type ServerRoomMessage } from './protocol'
 import { matchStateChecksum } from '../simulation/serialization/matchSerialization'
+import { WEAPON_ORDER, WEAPONS } from '../weapons/registry'
+
+const ammunition = () =>
+  new Map(
+    WEAPON_ORDER.map(
+      (weaponId) =>
+        [
+          weaponId,
+          WEAPONS[weaponId].ammunition === 'unlimited' ? -1 : WEAPONS[weaponId].ammunition,
+        ] as const,
+    ),
+  )
 
 class FakeRoom {
   sessionId = 'session-host'
@@ -26,6 +38,8 @@ class FakeRoom {
     },
     players: new Map(),
     projectiles: new Map(),
+    mines: new Map(),
+    beacons: new Map(),
   }
   sent: Array<{ type: string | number; payload: unknown }> = []
   messageDisposeCount = 0
@@ -168,17 +182,24 @@ describe('OnlineMatchSource synchronization', () => {
       alive: true,
       grounded: true,
       moveDirection: 1,
+      frozenTurnsRemaining: 1,
+      frozenAppliedTurn: 10,
+      facing: 1,
+      teamId: 0,
+      teamSlot: 0,
       selectedWeapon: 'basic-rocket',
-      basicRocketAmmo: -1,
-      timedGrenadeAmmo: 3,
-      scatterShotAmmo: 3,
-      clusterChargeAmmo: 2,
-      teleporterAmmo: 2,
+      ammunition: ammunition(),
     })
     room.patch()
     expect(source.state.tick).toBe(12)
     expect(source.state.timerRemainingTicks).toBe(1700)
     expect(source.state.players[0].health).toBe(83)
+    expect(source.state.players[0]).toMatchObject({
+      frozenTurnsRemaining: 1,
+      frozenAppliedTurn: 10,
+    })
+    expect(Object.keys(source.state.players[0].inventory)).toEqual(WEAPON_ORDER)
+    expect(source.state.beacons).toEqual([])
     expect(source.state.players[0].position.x).toBe(startX)
     source.update(1 / 60)
     expect(source.state.players[0].position.x).toBe(startX)
@@ -216,12 +237,13 @@ describe('OnlineMatchSource synchronization', () => {
       alive: true,
       grounded: true,
       moveDirection: 1,
+      frozenTurnsRemaining: 0,
+      frozenAppliedTurn: 0,
+      facing: 1,
+      teamId: 0,
+      teamSlot: 0,
       selectedWeapon: 'basic-rocket',
-      basicRocketAmmo: -1,
-      timedGrenadeAmmo: 3,
-      scatterShotAmmo: 3,
-      clusterChargeAmmo: 2,
-      teleporterAmmo: 2,
+      ammunition: ammunition(),
     })
     room.patch()
     source.update(1 / 60)

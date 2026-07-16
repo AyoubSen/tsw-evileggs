@@ -339,6 +339,8 @@ export class PrivateMatchRoom extends Room<{
     this.commandQueue = []
     this.recentEvents = []
     this.state.projectiles.clear()
+    this.state.mines.clear()
+    this.state.beacons.clear()
     this.state.result = new MatchResultState()
     for (const player of this.state.players.values()) {
       player.ready = false
@@ -479,7 +481,7 @@ export class PrivateMatchRoom extends Room<{
           commandId: queued.commandId,
           reason: result.reason,
         })
-      if (result.accepted && ['fire', 'teleport'].includes(queued.command.command.type))
+      if (result.accepted && queued.command.command.type === 'activate-weapon')
         this.clearAllHeldInput()
     }
   }

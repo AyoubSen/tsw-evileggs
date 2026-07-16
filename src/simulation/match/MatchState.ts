@@ -21,6 +21,8 @@ export type SimPlayer = {
   alive: boolean
   grounded: boolean
   moveDirection: -1 | 0 | 1
+  frozenTurnsRemaining: number
+  frozenAppliedTurn: number
   selectedWeapon: WeaponId
   inventory: WeaponInventory
 }
@@ -30,11 +32,32 @@ export type SimProjectile = {
   actionId: string
   ownerId: string
   weaponId: WeaponId
-  kind: 'primary' | 'cluster-child'
+  kind: 'primary' | 'cluster-child' | 'fork-child' | 'beacon-bomb'
   position: Vector
   velocity: Vector
   radius: number
   fuseTicks: number
+}
+
+export type SimMine = {
+  id: string
+  actionId: string
+  ownerId: string
+  teamId: TeamId
+  weaponId: 'deployable-mine'
+  position: Vector
+  radius: number
+  triggerRadius: number
+  armedTurn: number
+}
+
+export type SimBeacon = {
+  id: string
+  actionId: string
+  ownerId: string
+  weaponId: 'bomb-beacon'
+  position: Vector
+  remainingTicks: number
 }
 
 export type TerrainOperation = {
@@ -74,6 +97,8 @@ export type MatchState = {
   durationTicks: number
   wind: number
   projectiles: SimProjectile[]
+  mines: SimMine[]
+  beacons: SimBeacon[]
   activeAction: ActiveAction
   pendingExplosions: []
   terrainOperations: TerrainOperation[]
@@ -81,6 +106,8 @@ export type MatchState = {
   winnerTeamId: TeamId | null
   isDraw: boolean
   nextProjectileId: number
+  nextMineId: number
+  nextBeaconId: number
   nextActionId: number
   nextTerrainSequence: number
   nextEventSequence: number
@@ -88,7 +115,7 @@ export type MatchState = {
 }
 
 export type SerializedMatchState = {
-  version: 4
+  version: 6
   state: MatchState
   accumulatorSeconds: number
 }

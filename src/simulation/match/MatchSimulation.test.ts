@@ -35,8 +35,31 @@ function fireDown(
   sequence = simulation.state.lastCommandSequence + 1,
 ) {
   return simulation.applyCommand(
-    command(simulation, { type: 'fire', aimDirection: { x: 0, y: 1 }, power: 30 }, sequence),
+    command(
+      simulation,
+      {
+        type: 'activate-weapon',
+        activation: { kind: 'directional', aimDirection: { x: 0, y: 1 }, power: 30 },
+      },
+      sequence,
+    ),
   )
+}
+
+function placeActiveProjectileNextToPlayer(simulation: MatchSimulation, playerIndex: number): void {
+  const projectile = simulation.state.projectiles[0]
+  const target = simulation.state.players[playerIndex]
+  projectile.position = {
+    x: target.position.x - target.radius - projectile.radius - 1,
+    y: target.position.y,
+  }
+  projectile.velocity = { x: 120, y: 0 }
+}
+
+function placeActiveProjectileInTerrain(simulation: MatchSimulation, x = 400): void {
+  const projectile = simulation.state.projectiles[0]
+  projectile.position = { x, y: simulation.getTerrain().surfaceY(x)! }
+  projectile.velocity = { x: 0, y: 0 }
 }
 
 describe('authoritative commands', () => {
@@ -51,7 +74,10 @@ describe('authoritative commands', () => {
       reason: 'not-active-player',
     })
     const nonActiveFire = {
-      ...command(simulation, { type: 'fire', aimDirection: { x: -1, y: 0 }, power: 50 }),
+      ...command(simulation, {
+        type: 'activate-weapon',
+        activation: { kind: 'directional', aimDirection: { x: -1, y: 0 }, power: 50 },
+      }),
       playerId: 'player-2',
     }
     expect(simulation.applyCommand(nonActiveFire)).toMatchObject({
@@ -60,7 +86,10 @@ describe('authoritative commands', () => {
     })
     expect(
       simulation.applyCommand(
-        command(simulation, { type: 'fire', aimDirection: { x: 1, y: 0 }, power: 101 }),
+        command(simulation, {
+          type: 'activate-weapon',
+          activation: { kind: 'directional', aimDirection: { x: 1, y: 0 }, power: 101 },
+        }),
       ),
     ).toMatchObject({ accepted: false, reason: 'invalid-power' })
     expect(fireDown(simulation).accepted).toBe(true)
@@ -77,7 +106,7 @@ describe('authoritative commands', () => {
     expect(timeout.applyCommand(stale)).toMatchObject({ accepted: false, reason: 'stale-turn' })
   })
 
-  it('rejects invalid teleport without consuming ammunition', () => {
+  it('rejects an invalid Teleporter target without consuming ammunition', () => {
     const simulation = new MatchSimulation(config)
     expect(
       simulation.applyCommand(
@@ -87,9 +116,12 @@ describe('authoritative commands', () => {
     const before = simulation.activePlayer.inventory.teleporter
     expect(
       simulation.applyCommand(
-        command(simulation, { type: 'teleport', destination: { x: -10, y: 20 } }),
+        command(simulation, {
+          type: 'activate-weapon',
+          activation: { kind: 'target-position', target: { x: -10, y: 20 } },
+        }),
       ),
-    ).toMatchObject({ accepted: false, reason: 'invalid-teleport' })
+    ).toMatchObject({ accepted: false, reason: 'invalid-target' })
     expect(simulation.activePlayer.inventory.teleporter).toBe(before)
 
     const empty = new MatchSimulation(config)
@@ -166,7 +198,10 @@ describe('framework-independent weapons', () => {
     }
     scatter.applyCommand(command(scatter, { type: 'select-weapon', weaponId: 'scatter-shot' }))
     scatter.applyCommand(
-      command(scatter, { type: 'fire', aimDirection: { x: 1, y: 0 }, power: 50 }),
+      command(scatter, {
+        type: 'activate-weapon',
+        activation: { kind: 'directional', aimDirection: { x: 1, y: 0 }, power: 50 },
+      }),
     )
     expect(scatter.state.players[1].health).toBeLessThan(100)
     expect(scatter.state.projectiles).toHaveLength(0)
@@ -179,18 +214,206 @@ describe('framework-independent weapons', () => {
     expect(cluster.state.nextProjectileId).toBeGreaterThan(2)
   })
 
-  it('validates and applies teleport through the command boundary', () => {
+  it('resolves a canonical Teleporter surface target and activates it', () => {
     const simulation = new MatchSimulation(config)
     simulation.applyCommand(command(simulation, { type: 'select-weapon', weaponId: 'teleporter' }))
     const x = 400
-    const surface = simulation.getTerrain().surfaceY(x)!
-    const destination = { x, y: surface - 15 }
-    expect(simulation.isValidTeleport(destination)).toBe(true)
+    const destination = simulation.resolveTeleportTarget({ x, y: 0 })
+    expect(destination).toEqual({ x, y: simulation.getTerrain().surfaceY(x)! - 14 })
+    expect(simulation.isValidTeleport(destination!)).toBe(true)
     expect(
-      simulation.applyCommand(command(simulation, { type: 'teleport', destination })).accepted,
+      simulation.applyCommand(
+        command(simulation, {
+          type: 'activate-weapon',
+          activation: { kind: 'target-position', target: destination! },
+        }),
+      ).accepted,
     ).toBe(true)
     expect(simulation.activePlayer.position.x).toBe(x)
     expect(simulation.activePlayer.inventory.teleporter).toBe(1)
+  })
+
+  it('gives the Precision Cannon and High-Arc Mortar distinct ballistic profiles', () => {
+    const launch = (weaponId: 'precision-cannon' | 'high-arc-mortar') => {
+      const simulation = new MatchSimulation(config)
+      simulation.applyCommand(command(simulation, { type: 'select-weapon', weaponId }))
+      simulation.applyCommand(
+        command(simulation, {
+          type: 'activate-weapon',
+          activation: { kind: 'directional', aimDirection: { x: 0.8, y: -0.6 }, power: 60 },
+        }),
+      )
+      const initial = { ...simulation.state.projectiles[0].velocity }
+      simulation.step()
+      return { initial, after: { ...simulation.state.projectiles[0].velocity } }
+    }
+
+    const cannon = launch('precision-cannon')
+    const mortar = launch('high-arc-mortar')
+    expect(cannon.initial.x).toBeGreaterThan(mortar.initial.x)
+    expect(mortar.after.y - mortar.initial.y).toBeGreaterThan(
+      cannon.after.y - cannon.initial.y,
+    )
+  })
+
+  it('records multiple ordered terrain operations for the Terrain-Boring Drill', () => {
+    const simulation = new MatchSimulation(config)
+    simulation.applyCommand(
+      command(simulation, { type: 'select-weapon', weaponId: 'terrain-boring-drill' }),
+    )
+    expect(fireDown(simulation).accepted).toBe(true)
+    simulation.step()
+    expect(simulation.state.terrainOperations.length).toBeGreaterThan(2)
+    expect(
+      new Set(simulation.state.terrainOperations.map((operation) => operation.sourceActionId)).size,
+    ).toBe(1)
+  })
+
+  it('persists an authoritative deployed mine through a snapshot restore', () => {
+    const simulation = new MatchSimulation(config)
+    simulation.applyCommand(
+      command(simulation, { type: 'select-weapon', weaponId: 'deployable-mine' }),
+    )
+    expect(
+      simulation.applyCommand(
+        command(simulation, { type: 'activate-weapon', activation: { kind: 'self' } }),
+      ).accepted,
+    ).toBe(true)
+    expect(simulation.state.mines).toHaveLength(1)
+    expect(simulation.state.nextMineId).toBe(2)
+
+    const restored = new MatchSimulation(undefined, { snapshot: simulation.snapshot() })
+    expect(restored.state.mines).toEqual(simulation.state.mines)
+    expect(restored.state.nextMineId).toBe(2)
+  })
+
+  it('lets the Pocket Knife hit at close range but stops it at terrain', () => {
+    const close = new MatchSimulation(config)
+    const closeSurface = close.getTerrain().surfaceY(300)!
+    close.state.players[0].position = { x: 300, y: closeSurface - 60 }
+    close.state.players[1].position = { x: 328, y: closeSurface - 60 }
+    close.applyCommand(command(close, { type: 'select-weapon', weaponId: 'pocket-knife' }))
+    expect(
+      close.applyCommand(
+        command(close, {
+          type: 'activate-weapon',
+          activation: { kind: 'directional', aimDirection: { x: 1, y: 0 }, power: 50 },
+        }),
+      ).accepted,
+    ).toBe(true)
+    expect(close.state.players[1].health).toBe(64)
+
+    const blocked = new MatchSimulation(config)
+    const blockedSurface = blocked.getTerrain().surfaceY(400)!
+    blocked.state.players[0].position = { x: 400, y: blockedSurface - 20 }
+    blocked.state.players[1].position = { x: 400, y: blockedSurface + 18 }
+    blocked.applyCommand(command(blocked, { type: 'select-weapon', weaponId: 'pocket-knife' }))
+    blocked.applyCommand(
+      command(blocked, {
+        type: 'activate-weapon',
+        activation: { kind: 'directional', aimDirection: { x: 0, y: 1 }, power: 50 },
+      }),
+    )
+    expect(blocked.state.players[1].health).toBe(100)
+    expect(blocked.drainEvents()).toContainEqual(
+      expect.objectContaining({ type: 'melee-struck', targetPlayerId: null }),
+    )
+  })
+
+  it('delays a Bomb Beacon barrage and preserves the beacon in snapshots', () => {
+    const simulation = new MatchSimulation(config)
+    simulation.applyCommand(command(simulation, { type: 'select-weapon', weaponId: 'bomb-beacon' }))
+    expect(fireDown(simulation).accepted).toBe(true)
+    placeActiveProjectileInTerrain(simulation)
+    simulation.step()
+    expect(simulation.state.beacons).toHaveLength(1)
+    expect(simulation.state.projectiles).toHaveLength(0)
+
+    const restored = new MatchSimulation(undefined, { snapshot: simulation.snapshot() })
+    expect(restored.state.beacons).toEqual(simulation.state.beacons)
+    expect(restored.state.nextBeaconId).toBe(2)
+    restored.state.beacons[0].remainingTicks = 1
+    restored.step()
+    expect(restored.state.beacons).toHaveLength(0)
+    expect(restored.state.projectiles.map((projectile) => projectile.kind)).toEqual([
+      'beacon-bomb',
+      'beacon-bomb',
+      'beacon-bomb',
+    ])
+  })
+
+  it('triggers a Fork Rocket once into two child projectiles', () => {
+    const simulation = new MatchSimulation(config)
+    simulation.applyCommand(command(simulation, { type: 'select-weapon', weaponId: 'fork-rocket' }))
+    expect(fireDown(simulation).accepted).toBe(true)
+    expect(simulation.state.projectiles.map((projectile) => projectile.kind)).toEqual(['primary'])
+    expect(simulation.applyCommand(command(simulation, { type: 'trigger-weapon' })).accepted).toBe(
+      true,
+    )
+    expect(simulation.state.projectiles.map((projectile) => projectile.kind)).toEqual([
+      'fork-child',
+      'fork-child',
+    ])
+    expect(simulation.applyCommand(command(simulation, { type: 'trigger-weapon' }))).toMatchObject({
+      accepted: false,
+      reason: 'cannot-trigger',
+    })
+    expect(simulation.state.projectiles).toHaveLength(2)
+  })
+
+  it('resolves an Old Shoe hit with low damage and knockback', () => {
+    const simulation = new MatchSimulation(config)
+    simulation.applyCommand(command(simulation, { type: 'select-weapon', weaponId: 'old-shoe' }))
+    fireDown(simulation)
+    placeActiveProjectileNextToPlayer(simulation, 1)
+    simulation.step()
+    expect(simulation.state.players[1].health).toBeLessThan(100)
+    expect(simulation.state.players[1].health).toBeGreaterThan(90)
+    expect(simulation.state.players[1].velocity.x).toBeGreaterThan(0)
+  })
+
+  it('gives the Siege Bazooka a larger terrain effect than the Basic Rocket', () => {
+    const terrainRadius = (weaponId: 'basic-rocket' | 'siege-bazooka') => {
+      const simulation = new MatchSimulation(config)
+      if (weaponId !== 'basic-rocket')
+        simulation.applyCommand(command(simulation, { type: 'select-weapon', weaponId }))
+      fireDown(simulation)
+      placeActiveProjectileInTerrain(simulation)
+      simulation.step()
+      return simulation.state.terrainOperations[0].radius
+    }
+
+    expect(terrainRadius('siege-bazooka')).toBeGreaterThan(terrainRadius('basic-rocket'))
+  })
+
+  it("locks a Cryo Shot victim's movement for their next turn but allows activation", () => {
+    const simulation = new MatchSimulation(config)
+    simulation.applyCommand(command(simulation, { type: 'select-weapon', weaponId: 'cryo-shot' }))
+    fireDown(simulation)
+    placeActiveProjectileNextToPlayer(simulation, 1)
+    simulation.step()
+    expect(simulation.state.players[1]).toMatchObject({
+      frozenTurnsRemaining: 1,
+      frozenAppliedTurn: 1,
+    })
+
+    for (const player of simulation.state.players) {
+      player.position.y = simulation.getTerrain().surfaceY(player.position.x)! - player.radius
+      player.velocity = { x: 0, y: 0 }
+      player.grounded = true
+    }
+    simulation.state.settlingTicks = 0
+    simulation.step(27)
+    expect(simulation.state.turnNumber).toBe(2)
+    expect(simulation.activePlayer.id).toBe('player-2')
+    expect(
+      simulation.applyCommand(command(simulation, { type: 'move', direction: 1, pressed: true })),
+    ).toMatchObject({ accepted: false, reason: 'movement-locked' })
+    expect(simulation.applyCommand(command(simulation, { type: 'jump' }))).toMatchObject({
+      accepted: false,
+      reason: 'movement-locked',
+    })
+    expect(fireDown(simulation).accepted).toBe(true)
   })
 })
 
@@ -210,7 +433,7 @@ describe('terrain, snapshots, and replay', () => {
     fireDown(simulation)
     simulation.step(20)
     const payload = serializeMatchState(simulation.state)
-    expect(deserializeMatchState(payload).version).toBe(4)
+    expect(deserializeMatchState(payload).version).toBe(6)
     const restored = restoreMatchSimulation(payload)
     expect(matchStateChecksum(restored.state)).toBe(matchStateChecksum(simulation.state))
     expect([...restored.getTerrain().cells]).toEqual([...simulation.getTerrain().cells])

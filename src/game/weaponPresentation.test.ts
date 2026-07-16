@@ -57,9 +57,17 @@ describe('weapon presentation registry', () => {
     const heldModels = WEAPON_ORDER.map((id) => getWeaponPresentation(id).heldModel)
     const launchedWeapons: WeaponId[] = [
       'basic-rocket',
+      'precision-cannon',
+      'high-arc-mortar',
       'timed-grenade',
       'scatter-shot',
       'cluster-charge',
+      'terrain-boring-drill',
+      'bomb-beacon',
+      'fork-rocket',
+      'old-shoe',
+      'siege-bazooka',
+      'cryo-shot',
     ]
     const projectileModels = launchedWeapons.map(
       (id) => getWeaponPresentation(id).projectileModel,
@@ -68,7 +76,8 @@ describe('weapon presentation registry', () => {
     expect(new Set(heldModels).size).toBe(WEAPON_ORDER.length)
     expect(projectileModels).not.toContain('none')
     expect(new Set(projectileModels).size).toBe(launchedWeapons.length)
-    expect(getWeaponPresentation('teleporter').projectileModel).toBe('none')
+    for (const id of ['deployable-mine', 'pocket-knife', 'teleporter'] as const)
+      expect(getWeaponPresentation(id).projectileModel).toBe('none')
   })
 })
 

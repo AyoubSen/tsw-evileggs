@@ -26,6 +26,7 @@ import { TerrainMask } from '../terrain/TerrainMask'
 import { DEFAULT_POWER_PERCENT, FIXED_STEP_SECONDS, GRAVITY } from '../shared/constants'
 import {
   WEAPONS,
+  WEAPON_ORDER,
   canUseWeapon,
   consumeWeapon,
   createWeaponInventory,
@@ -135,22 +136,22 @@ describe('input controls', () => {
     expect(isJumpCode('Space')).toBe(false)
   })
 
-  it('turns a pull-back drag into the opposite firing direction', () => {
+  it('uses the drag direction as the firing direction', () => {
     expect(getPullVector({ x: 100, y: 100 }, { x: 60, y: 130 })).toEqual({ x: -40, y: 30 })
-    expect(getFiringDirectionFromPull({ x: -10, y: 0 })).toEqual({ x: 1, y: -0 })
-    expect(getFiringDirectionFromPull({ x: 10, y: 0 })).toEqual({ x: -1, y: -0 })
+    expect(getFiringDirectionFromPull({ x: -10, y: 0 })).toEqual({ x: -1, y: 0 })
+    expect(getFiringDirectionFromPull({ x: 10, y: 0 })).toEqual({ x: 1, y: 0 })
     const downLeft = getFiringDirectionFromPull({ x: -10, y: 10 })
-    expect(downLeft?.x).toBeCloseTo(Math.SQRT1_2)
-    expect(downLeft?.y).toBeCloseTo(-Math.SQRT1_2)
+    expect(downLeft?.x).toBeCloseTo(-Math.SQRT1_2)
+    expect(downLeft?.y).toBeCloseTo(Math.SQRT1_2)
   })
 
   it('converts pull distance into clamped power', () => {
     const short = dragAim({ x: 100, y: 100 }, { x: 64, y: 100 }, 30, 100)
     const long = dragAim({ x: 100, y: 100 }, { x: 100, y: 100 + DRAG_MAX_DISTANCE * 2 }, 30, 100)
-    expect(short).toMatchObject({ direction: { x: 1, y: -0 }, power: 30 })
-    expect(short?.worldAngle).toBeCloseTo(0)
+    expect(short).toMatchObject({ direction: { x: -1, y: 0 }, power: 30 })
+    expect(Math.abs(short?.worldAngle ?? 0)).toBeCloseTo(180)
     expect(long?.direction.x).toBeCloseTo(0)
-    expect(long?.direction.y).toBe(-1)
+    expect(long?.direction.y).toBe(1)
     expect(long?.power).toBe(100)
     expect(dragAim({ x: 0, y: 0 }, { x: 10, y: 0 }, 30, 100)).toBeNull()
     expect(getPowerFromPullDistance(DRAG_MAX_DISTANCE * 2, 30, 100)).toBe(100)
@@ -226,12 +227,21 @@ describe('weapons', () => {
     expect(canUseWeapon({ ...first, teleporter: 0 }, 'teleporter')).toBe(false)
   })
 
-  it('defines five distinct arsenal entries with configured behaviour', () => {
+  it('defines all fifteen arsenal entries with configured behaviour', () => {
     expect(validateWeaponRegistry()).toBe(true)
-    expect(Object.keys(WEAPONS)).toHaveLength(5)
+    expect(Object.keys(WEAPONS)).toEqual(WEAPON_ORDER)
+    expect(WEAPON_ORDER).toHaveLength(15)
     expect(WEAPONS['timed-grenade'].projectileSpeed).toBeGreaterThan(0)
     expect(WEAPONS['scatter-shot'].blastRadius).toBe(0)
     expect(WEAPONS['cluster-charge'].terrainRadius).toBeGreaterThan(0)
+    expect(WEAPONS['pocket-knife'].mechanic).toBe('melee')
+    expect(WEAPONS['bomb-beacon'].beaconBombCount).toBe(3)
+    expect(WEAPONS['fork-rocket'].mechanic).toBe('remote-split')
+    expect(WEAPONS['old-shoe'].knockbackForce).toBeGreaterThan(WEAPONS['basic-rocket'].knockbackForce)
+    expect(WEAPONS['siege-bazooka'].terrainRadius).toBeGreaterThan(
+      WEAPONS['basic-rocket'].terrainRadius,
+    )
+    expect(WEAPONS['cryo-shot'].freezeTurns).toBe(1)
     expect(WEAPONS.teleporter.aimMode).toBe('target-position')
   })
 })

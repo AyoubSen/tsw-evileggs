@@ -36,7 +36,7 @@ export function getPullVector(origin: Vector, pointer: Vector): Vector {
 export function getFiringDirectionFromPull(pull: Vector): Vector | null {
   const length = Math.hypot(pull.x, pull.y)
   if (length === 0) return null
-  return { x: -pull.x / length, y: -pull.y / length }
+  return { x: pull.x / length, y: pull.y / length }
 }
 
 export function getPowerFromPullDistance(

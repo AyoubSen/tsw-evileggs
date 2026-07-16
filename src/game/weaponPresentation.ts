@@ -4,16 +4,34 @@ export type Point = Readonly<{ x: number; y: number }>
 
 export type HeldModelKind =
   | 'shoulder-rocket-tube'
+  | 'long-brass-rail-cannon'
+  | 'stubby-bell-mortar'
   | 'compact-grenade-cup-launcher'
   | 'wide-scrap-blunderbuss'
   | 'heavy-segmented-cluster-canister'
+  | 'spiral-borer-launcher'
+  | 'red-plunger-minelayer'
+  | 'folding-pocket-knife'
+  | 'signal-beacon-launcher'
+  | 'twin-prong-fork-launcher'
+  | 'spring-shoe-slinger'
+  | 'oversized-siege-bazooka'
+  | 'frost-coil-launcher'
   | 'mint-tuning-fork-teleporter'
 
 export type ProjectileModelKind =
   | 'toy-rocket'
+  | 'needle-shell'
+  | 'heavy-mortar-shell'
   | 'clockwork-grenade'
   | 'scrap-pellet'
   | 'segmented-cluster-canister'
+  | 'spinning-drill'
+  | 'beacon-canister'
+  | 'fork-rocket'
+  | 'flying-shoe'
+  | 'siege-rocket'
+  | 'cryo-capsule'
   | 'none'
 
 export type WeaponPresentation = Readonly<{
@@ -56,6 +74,40 @@ export const WEAPON_PRESENTATIONS: Readonly<Record<WeaponId, WeaponPresentation>
     recoil: { durationMs: 150, distance: 6 },
     projectileModel: 'toy-rocket',
     trail: { color: 0xff9a55, sampleCount: 8, width: 3 },
+    reducedMotionSafe: { recoil: false, trail: false, pulse: false, transient: false },
+  },
+  'precision-cannon': {
+    heldModel: 'long-brass-rail-cannon',
+    colors: {
+      primary: 0x445b6c,
+      accent: 0xf2c14e,
+      flash: 0xfff7c7,
+      impact: 0x69c7e6,
+    },
+    body: { length: 49, width: 9 },
+    grip: { x: 11, y: 5 },
+    muzzle: { x: 51, y: 0 },
+    restElevation: 5,
+    recoil: { durationMs: 220, distance: 9 },
+    projectileModel: 'needle-shell',
+    trail: { color: 0xbcecff, sampleCount: 11, width: 1.5 },
+    reducedMotionSafe: { recoil: false, trail: true, pulse: true, transient: true },
+  },
+  'high-arc-mortar': {
+    heldModel: 'stubby-bell-mortar',
+    colors: {
+      primary: 0x536248,
+      accent: 0xe7a941,
+      flash: 0xffe3a0,
+      impact: 0xe86f3f,
+    },
+    body: { length: 31, width: 21 },
+    grip: { x: 7, y: 8 },
+    muzzle: { x: 33, y: 0 },
+    restElevation: 18,
+    recoil: { durationMs: 260, distance: 10 },
+    projectileModel: 'heavy-mortar-shell',
+    trail: { color: 0x8a806c, sampleCount: 10, width: 4.5 },
     reducedMotionSafe: { recoil: false, trail: false, pulse: false, transient: false },
   },
   'timed-grenade': {
@@ -108,6 +160,112 @@ export const WEAPON_PRESENTATIONS: Readonly<Record<WeaponId, WeaponPresentation>
     projectileModel: 'segmented-cluster-canister',
     trail: { color: 0xed7090, sampleCount: 6, width: 3.5 },
     reducedMotionSafe: { recoil: false, trail: false, pulse: false, transient: false },
+  },
+  'terrain-boring-drill': {
+    heldModel: 'spiral-borer-launcher',
+    colors: {
+      primary: 0x59636b,
+      accent: 0xf08b35,
+      flash: 0xffd066,
+      impact: 0xcf5b32,
+    },
+    body: { length: 40, width: 15 },
+    grip: { x: 9, y: 6 },
+    muzzle: { x: 44, y: 0 },
+    restElevation: 4,
+    recoil: { durationMs: 190, distance: 5 },
+    projectileModel: 'spinning-drill',
+    trail: { color: 0xf08b35, sampleCount: 8, width: 3 },
+    reducedMotionSafe: { recoil: false, trail: false, pulse: false, transient: true },
+  },
+  'deployable-mine': {
+    heldModel: 'red-plunger-minelayer',
+    colors: {
+      primary: 0x743f3c,
+      accent: 0xf05b4f,
+      flash: 0xffd45e,
+      impact: 0xd63f35,
+    },
+    body: { length: 27, width: 17 },
+    grip: { x: 6, y: 7 },
+    muzzle: { x: 29, y: 0 },
+    restElevation: 24,
+    recoil: { durationMs: 100, distance: 2 },
+    projectileModel: 'none',
+    trail: { color: 0xf05b4f, sampleCount: 0, width: 0 },
+    reducedMotionSafe: { recoil: true, trail: true, pulse: false, transient: true },
+  },
+  'pocket-knife': {
+    heldModel: 'folding-pocket-knife',
+    colors: { primary: 0x8a9398, accent: 0xdde5e8, flash: 0xffffff, impact: 0xd94b45 },
+    body: { length: 29, width: 7 },
+    grip: { x: 4, y: 4 },
+    muzzle: { x: 31, y: 0 },
+    restElevation: 12,
+    recoil: { durationMs: 170, distance: 7 },
+    projectileModel: 'none',
+    trail: { color: 0xf5f8fa, sampleCount: 0, width: 0 },
+    reducedMotionSafe: { recoil: false, trail: true, pulse: true, transient: true },
+  },
+  'bomb-beacon': {
+    heldModel: 'signal-beacon-launcher',
+    colors: { primary: 0x6c513f, accent: 0xffc445, flash: 0xffef9b, impact: 0xe85b32 },
+    body: { length: 34, width: 15 },
+    grip: { x: 7, y: 6 },
+    muzzle: { x: 36, y: 0 },
+    restElevation: 14,
+    recoil: { durationMs: 150, distance: 5 },
+    projectileModel: 'beacon-canister',
+    trail: { color: 0xffc445, sampleCount: 6, width: 2.5 },
+    reducedMotionSafe: { recoil: false, trail: false, pulse: false, transient: true },
+  },
+  'fork-rocket': {
+    heldModel: 'twin-prong-fork-launcher',
+    colors: { primary: 0x4b6178, accent: 0x77c9f2, flash: 0xd9f4ff, impact: 0x4e95cf },
+    body: { length: 39, width: 14 },
+    grip: { x: 9, y: 6 },
+    muzzle: { x: 42, y: 0 },
+    restElevation: 9,
+    recoil: { durationMs: 175, distance: 6 },
+    projectileModel: 'fork-rocket',
+    trail: { color: 0x77c9f2, sampleCount: 9, width: 2.5 },
+    reducedMotionSafe: { recoil: false, trail: false, pulse: false, transient: true },
+  },
+  'old-shoe': {
+    heldModel: 'spring-shoe-slinger',
+    colors: { primary: 0x70513b, accent: 0xb98a5f, flash: 0xffe0a3, impact: 0x9b6a43 },
+    body: { length: 31, width: 17 },
+    grip: { x: 7, y: 7 },
+    muzzle: { x: 33, y: 0 },
+    restElevation: 16,
+    recoil: { durationMs: 130, distance: 4 },
+    projectileModel: 'flying-shoe',
+    trail: { color: 0xb98a5f, sampleCount: 5, width: 2 },
+    reducedMotionSafe: { recoil: false, trail: false, pulse: true, transient: true },
+  },
+  'siege-bazooka': {
+    heldModel: 'oversized-siege-bazooka',
+    colors: { primary: 0x39444b, accent: 0xe94e35, flash: 0xffd45f, impact: 0xc8322e },
+    body: { length: 55, width: 22 },
+    grip: { x: 12, y: 9 },
+    muzzle: { x: 58, y: 0 },
+    restElevation: 7,
+    recoil: { durationMs: 310, distance: 13 },
+    projectileModel: 'siege-rocket',
+    trail: { color: 0xf06a3f, sampleCount: 12, width: 6 },
+    reducedMotionSafe: { recoil: false, trail: false, pulse: false, transient: false },
+  },
+  'cryo-shot': {
+    heldModel: 'frost-coil-launcher',
+    colors: { primary: 0x477b8d, accent: 0x8ee8ff, flash: 0xe9fbff, impact: 0x54b9db },
+    body: { length: 37, width: 14 },
+    grip: { x: 8, y: 6 },
+    muzzle: { x: 40, y: 0 },
+    restElevation: 11,
+    recoil: { durationMs: 145, distance: 4 },
+    projectileModel: 'cryo-capsule',
+    trail: { color: 0x8ee8ff, sampleCount: 10, width: 3 },
+    reducedMotionSafe: { recoil: false, trail: true, pulse: false, transient: true },
   },
   teleporter: {
     heldModel: 'mint-tuning-fork-teleporter',

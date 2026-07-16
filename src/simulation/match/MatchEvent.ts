@@ -1,6 +1,6 @@
 import type { LocalMatchConfig } from '../../match/config'
 import type { WeaponId } from '../../weapons/registry'
-import type { SimProjectile, TerrainOperation } from './MatchState'
+import type { SimBeacon, SimMine, SimProjectile, TerrainOperation } from './MatchState'
 import type { Vector } from '../../shared/types'
 import type { TeamId } from '../../maps/registry'
 
@@ -44,6 +44,17 @@ export type MatchEvent =
     })
   | (EventEnvelope & { type: 'cluster-split'; actionId: string; position: Vector })
   | (EventEnvelope & {
+      type: 'remote-split'
+      actionId: string
+      position: Vector
+    })
+  | (EventEnvelope & {
+      type: 'drill-bored'
+      actionId: string
+      from: Vector
+      to: Vector
+    })
+  | (EventEnvelope & {
       type: 'scatter-fired'
       actionId: string
       origin: Vector
@@ -62,6 +73,32 @@ export type MatchEvent =
       playerId: string
       from: Vector
       to: Vector
+    })
+  | (EventEnvelope & { type: 'mine-deployed'; mine: SimMine })
+  | (EventEnvelope & {
+      type: 'mine-triggered'
+      mineId: string
+      actionId: string
+      position: Vector
+    })
+  | (EventEnvelope & { type: 'beacon-deployed'; beacon: SimBeacon })
+  | (EventEnvelope & {
+      type: 'barrage-released'
+      actionId: string
+      position: Vector
+      bombCount: number
+    })
+  | (EventEnvelope & {
+      type: 'melee-struck'
+      actionId: string
+      origin: Vector
+      endpoint: Vector
+      targetPlayerId: string | null
+    })
+  | (EventEnvelope & {
+      type: 'player-frozen'
+      playerId: string
+      sourceActionId: string
     })
   | (EventEnvelope & { type: 'player-jumped'; playerId: string })
   | (EventEnvelope & { type: 'terrain-destroyed'; operation: TerrainOperation })

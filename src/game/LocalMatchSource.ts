@@ -61,6 +61,10 @@ export class LocalMatchSource implements MatchSource {
     return this.simulation.getTerrain()
   }
 
+  resolveTeleportTarget(pointer: Vector): Vector | null {
+    return this.simulation.resolveTeleportTarget(pointer)
+  }
+
   isValidTeleport(target: Vector): boolean {
     return this.simulation.isValidTeleport(target)
   }
