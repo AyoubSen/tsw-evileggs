@@ -9,8 +9,9 @@ export type RoomCodeEntry = {
   roomId: string
   phase: RoomPhase
   connectedPlayers: number
+  occupiedPlayers: number
   capacity: number
-  mode: Extract<MatchMode, '1v1' | '2v2'>
+  mode: Extract<MatchMode, '1v1' | '2v2' | '3v3'>
   createdAt: number
 }
 
@@ -20,7 +21,7 @@ export class RoomCodeRegistry {
   register(
     roomId: string,
     capacity = 2,
-    mode: Extract<MatchMode, '1v1' | '2v2'> = '1v1',
+    mode: Extract<MatchMode, '1v1' | '2v2' | '3v3'> = '1v1',
   ): RoomCodeEntry {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       let code = ''
@@ -32,6 +33,7 @@ export class RoomCodeRegistry {
         roomId,
         phase: 'waiting' as const,
         connectedPlayers: 0,
+        occupiedPlayers: 0,
         capacity,
         mode,
         createdAt: Date.now(),
@@ -46,7 +48,10 @@ export class RoomCodeRegistry {
     return this.entries.get(normalizeRoomCode(code))
   }
 
-  update(code: string, updates: Partial<Pick<RoomCodeEntry, 'phase' | 'connectedPlayers'>>): void {
+  update(
+    code: string,
+    updates: Partial<Pick<RoomCodeEntry, 'phase' | 'connectedPlayers' | 'occupiedPlayers'>>,
+  ): void {
     const entry = this.resolve(code)
     if (entry) Object.assign(entry, updates)
   }

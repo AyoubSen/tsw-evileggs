@@ -10,6 +10,7 @@ import {
   MAP_FORMAT_VERSION,
   encodeMaterialRows,
   resolveMapDocument,
+  spawnSeatForIndex,
   type MapDocument,
   type MapTheme,
   type MatchMode,
@@ -18,7 +19,7 @@ import {
 import { TERRAIN_MATERIAL, type TerrainMaterialId } from '../terrain/materials'
 import { loadEditorDraft, saveEditorDraft } from './editorStorage'
 
-type SupportedMode = Extract<MatchMode, '1v1' | '2v2'>
+type SupportedMode = MatchMode
 type EditorTool = 'brush' | 'line' | 'rectangle' | 'fill' | 'spawn'
 type EditorDraft = {
   version: 1
@@ -77,7 +78,14 @@ const SIZE_PRESETS = [
   { label: 'Classic 960 × 540', width: 960, height: 540 },
   { label: 'Wide 1280 × 720', width: 1280, height: 720 },
   { label: 'Team 1440 × 810', width: 1440, height: 810 },
+  { label: '3v3 1728 × 972', width: 1728, height: 972 },
 ]
+
+const SPAWN_POSITIONS: Record<SupportedMode, readonly number[]> = {
+  '1v1': [0.18, 0.82],
+  '2v2': [0.13, 0.87, 0.32, 0.68],
+  '3v3': [0.1, 0.9, 0.25, 0.75, 0.4, 0.6],
+}
 
 const cloneDraft = (draft: EditorDraft): EditorDraft => ({
   ...draft,
@@ -102,15 +110,15 @@ const materialColor = (theme: MapTheme, material: TerrainMaterialId): string => 
   return colorToCss(theme.sky)
 }
 
-function defaultSpawns(width: number, groundY: number, mode: SupportedMode): SpawnDefinition[] {
-  const positions = mode === '1v1' ? [0.18, 0.82] : [0.13, 0.87, 0.32, 0.68]
-  return positions.map((position, index) => ({
-    x: Math.round(width * position),
-    y: groundY,
-    teamId: (index % 2) as 0 | 1,
-    teamSlot: Math.floor(index / 2),
-    facing: index % 2 === 0 ? 1 : -1,
-  }))
+function defaultSpawns(
+  width: number,
+  mode: SupportedMode,
+  surfaceYAt: (worldX: number) => number,
+): SpawnDefinition[] {
+  return SPAWN_POSITIONS[mode].map((position, index) => {
+    const x = Math.round(width * position)
+    return { x, y: surfaceYAt(x), ...spawnSeatForIndex(index) }
+  })
 }
 
 function createDraft(width = 960, height = 540, mode: SupportedMode = '1v1'): EditorDraft {
@@ -134,7 +142,7 @@ function createDraft(width = 960, height = 540, mode: SupportedMode = '1v1'): Ed
     cellSize,
     theme: { ...EDITOR_THEME },
     cells,
-    spawns: defaultSpawns(width, groundY, mode),
+    spawns: defaultSpawns(width, mode, () => groundY),
   }
 }
 
@@ -166,8 +174,8 @@ function buildDocument(draft: EditorDraft): MapDocument {
 
 function draftFromDocument(document: MapDocument): EditorDraft {
   const resolved = resolveMapDocument(document)
-  if (resolved.mode !== '1v1' && resolved.mode !== '2v2')
-    throw new Error('The editor currently supports only 1v1 and 2v2 maps.')
+  if (resolved.mode !== '1v1' && resolved.mode !== '2v2' && resolved.mode !== '3v3')
+    throw new Error('The editor supports only 1v1, 2v2, and 3v3 maps.')
   return {
     version: 1,
     id: document.id,
@@ -190,7 +198,7 @@ function isStoredDraft(value: unknown): value is EditorDraft {
   const draft = value as Partial<EditorDraft>
   return (
     draft.version === 1 &&
-    (draft.mode === '1v1' || draft.mode === '2v2') &&
+    (draft.mode === '1v1' || draft.mode === '2v2' || draft.mode === '3v3') &&
     Number.isSafeInteger(draft.width) &&
     Number.isSafeInteger(draft.height) &&
     draft.cells instanceof Uint8Array &&
@@ -460,22 +468,16 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
     mutateDraft((next) => {
       next.mode = mode
       const width = next.width / next.cellSize
-      const positions = mode === '1v1' ? [0.18, 0.82] : [0.13, 0.87, 0.32, 0.68]
-      next.spawns = positions.map((position, index) => {
-        const cellX = Math.floor(width * position)
+      const height = next.height / next.cellSize
+      next.spawns = defaultSpawns(next.width, mode, (worldX) => {
+        const cellX = Math.floor(worldX / next.cellSize)
         let cellY = 0
         while (
-          cellY < next.height / next.cellSize &&
+          cellY < height &&
           next.cells[cellY * width + cellX] === TERRAIN_MATERIAL.empty
         )
           cellY += 1
-        return {
-          x: cellX * next.cellSize,
-          y: cellY * next.cellSize,
-          teamId: (index % 2) as 0 | 1,
-          teamSlot: Math.floor(index / 2),
-          facing: index % 2 === 0 ? 1 : -1,
-        }
+        return cellY * next.cellSize
       })
     })
     setSelectedSpawn(0)
@@ -609,7 +611,7 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
           <div className="editor-section">
             <span className="editor-label">Mode</span>
             <div className="editor-segmented">
-              {(['1v1', '2v2'] as const).map((mode) => (
+              {(['1v1', '2v2', '3v3'] as const).map((mode) => (
                 <button key={mode} className={draft.mode === mode ? 'selected' : ''} onClick={() => changeMode(mode)}>
                   {mode}
                 </button>

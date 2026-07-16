@@ -3,6 +3,7 @@ import {
   CURRENT_COMPATIBILITY,
   clientRoomMessageSchema,
   compatibilityError,
+  createRoomOptionsSchema,
   isRoomCode,
   normalizeRoomCode,
 } from './protocol'
@@ -71,5 +72,49 @@ describe('online protocol validation', () => {
     expect(compatibilityError({ ...CURRENT_COMPATIBILITY, build: 'old-client' })).toMatch(
       /Client build/,
     )
+  })
+
+  it('admits the new official maps only for their supported team modes', () => {
+    const teamMaps = [
+      ['2v2', 'switchback-quarry'],
+      ['2v2', 'dry-aqueduct'],
+      ['3v3', 'sundered-crown'],
+      ['3v3', 'lantern-vault'],
+      ['3v3', 'fossil-wake'],
+    ] as const
+
+    for (const [mode, mapId] of teamMaps) {
+      expect(
+        createRoomOptionsSchema.safeParse({
+          playerName: 'Nova',
+          mode,
+          mapId,
+          turnDurationSeconds: 30,
+          compatibility: CURRENT_COMPATIBILITY,
+        }).success,
+      ).toBe(true)
+    }
+
+    expect(
+      createRoomOptionsSchema.safeParse({
+        playerName: 'Nova',
+        mode: '3v3',
+        mapId: 'switchback-quarry',
+        turnDurationSeconds: 30,
+        compatibility: CURRENT_COMPATIBILITY,
+      }).success,
+    ).toBe(false)
+  })
+
+  it('rejects the removed crater-basin map', () => {
+    expect(
+      createRoomOptionsSchema.safeParse({
+        playerName: 'Nova',
+        mode: '1v1',
+        mapId: 'crater-basin',
+        turnDurationSeconds: 30,
+        compatibility: CURRENT_COMPATIBILITY,
+      }).success,
+    ).toBe(false)
   })
 })

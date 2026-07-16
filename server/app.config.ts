@@ -45,7 +45,7 @@ export const server = defineServer({
           .json({ code: 'match-started', message: 'That room match has already started.' })
         return
       }
-      if (entry.connectedPlayers >= entry.capacity) {
+      if (entry.occupiedPlayers >= entry.capacity) {
         response
           .status(409)
           .json({ code: 'room-full', message: 'That private room is already full.' })

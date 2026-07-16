@@ -27,6 +27,10 @@ export class LocalMatchSource implements MatchSource {
     return this.simulation.timerRemainingSeconds
   }
 
+  get presentationRevision(): number {
+    return this.matchGeneration
+  }
+
   update(deltaSeconds: number): void {
     this.simulation.advance(deltaSeconds)
   }

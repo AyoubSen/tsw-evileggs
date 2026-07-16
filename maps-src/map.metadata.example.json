@@ -1,16 +1,18 @@
 {
   "id": "example-map",
   "revision": 1,
-  "mode": "2v2",
+  "mode": "3v3",
   "displayName": "Example Map",
   "description": "Replace this with an original map description.",
   "label": "External source",
   "cellSize": 2,
   "spawns": [
-    { "x": 180, "y": 320, "teamId": 0, "teamSlot": 0, "facing": 1 },
-    { "x": 1260, "y": 320, "teamId": 1, "teamSlot": 0, "facing": -1 },
-    { "x": 420, "y": 460, "teamId": 0, "teamSlot": 1, "facing": 1 },
-    { "x": 1020, "y": 460, "teamId": 1, "teamSlot": 1, "facing": -1 }
+    { "x": 180, "y": 680, "teamId": 0, "teamSlot": 0, "facing": 1 },
+    { "x": 1548, "y": 680, "teamId": 1, "teamSlot": 0, "facing": -1 },
+    { "x": 440, "y": 680, "teamId": 0, "teamSlot": 1, "facing": 1 },
+    { "x": 1288, "y": 680, "teamId": 1, "teamSlot": 1, "facing": -1 },
+    { "x": 700, "y": 680, "teamId": 0, "teamSlot": 2, "facing": 1 },
+    { "x": 1028, "y": 680, "teamId": 1, "teamSlot": 2, "facing": -1 }
   ],
   "theme": {
     "sky": "#9EDCE5",

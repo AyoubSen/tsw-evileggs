@@ -14,9 +14,9 @@ import type { SerializedMatchState } from '../simulation/match/MatchState'
 import { WEAPON_ORDER, WEAPON_REGISTRY_VERSION } from '../weapons/registry'
 
 export const PRIVATE_MATCH_ROOM = 'private_match'
-export const PROTOCOL_VERSION = 'private-room-3'
+export const PROTOCOL_VERSION = 'private-room-4'
 export const SIMULATION_SNAPSHOT_VERSION = 4
-export const CLIENT_BUILD_VERSION = '0.9.0'
+export const CLIENT_BUILD_VERSION = '1.2.0'
 export const ROOM_CODE_LENGTH = 6
 export const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/
 export const NETWORK_MESSAGE_TYPE = 'room'
@@ -104,7 +104,7 @@ export type ServerRoomMessage =
 
 export type CreateRoomOptions = {
   playerName: string
-  mode: Extract<MatchMode, '1v1' | '2v2'>
+  mode: Extract<MatchMode, '1v1' | '2v2' | '3v3'>
   mapId: MapId
   turnDurationSeconds: TurnDuration
   compatibility: CompatibilityVersions
@@ -115,10 +115,11 @@ export type JoinRoomOptions = {
   compatibility: CompatibilityVersions
 }
 
-const ONLINE_MAP_ORDER = [...mapIdsForMode('1v1'), ...mapIdsForMode('2v2')] as [
-  MapId,
-  ...MapId[],
-]
+const ONLINE_MAP_ORDER = [
+  ...mapIdsForMode('1v1'),
+  ...mapIdsForMode('2v2'),
+  ...mapIdsForMode('3v3'),
+] as [MapId, ...MapId[]]
 
 const compatibilitySchema = z
   .object({
@@ -133,7 +134,7 @@ const compatibilitySchema = z
 export const createRoomOptionsSchema = z
   .object({
     playerName: z.string().max(64),
-    mode: z.enum(['1v1', '2v2']),
+    mode: z.enum(['1v1', '2v2', '3v3']),
     mapId: z.enum(ONLINE_MAP_ORDER),
     turnDurationSeconds: z.union(TURN_DURATIONS.map((value) => z.literal(value))),
     compatibility: compatibilitySchema,

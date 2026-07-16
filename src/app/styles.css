@@ -401,6 +401,41 @@ textarea:focus-visible {
     inset -8px -8px #b85d36,
     5px 6px 0 var(--line);
 }
+.toy-avatar-5 {
+  background: #8267c7;
+  box-shadow:
+    inset -8px -8px #594495,
+    5px 6px 0 var(--line);
+}
+.toy-avatar-5::after {
+  content: '';
+  position: absolute;
+  width: 28px;
+  height: 8px;
+  top: -9px;
+  left: 25px;
+  border: 3px solid var(--line);
+  border-radius: 50%;
+  background: var(--mint);
+  transform: rotate(8deg);
+}
+.toy-avatar-6 {
+  background: #e2ad2f;
+  box-shadow:
+    inset -8px -8px #a67619,
+    5px 6px 0 var(--line);
+}
+.toy-avatar-6::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  right: 5px;
+  bottom: 5px;
+  border: 3px solid var(--line);
+  border-radius: 50%;
+  background: #fff9df;
+}
 .battle-setup,
 .panel {
   width: min(1080px, 100%);
@@ -428,9 +463,9 @@ textarea:focus-visible {
 }
 .mode-picker {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
-  max-width: 560px;
+  max-width: 760px;
   margin: 0 auto 22px;
 }
 .mode-picker button {
@@ -621,15 +656,22 @@ select {
   line-height: 1.25;
 }
 .map-preview {
+  display: block;
   width: 100%;
   height: 82px;
-  background: linear-gradient(#a9dfe9 0 60%, #71ba87 60%);
   border-bottom: 2px solid var(--line);
 }
-.map-preview polyline {
-  fill: none;
-  stroke: #407653;
-  stroke-width: 7;
+.map-preview-spawn {
+  stroke: #fff9e9;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
+}
+.map-preview-spawn-comet {
+  fill: var(--blue);
+}
+.map-preview-spawn-ember {
+  fill: var(--clay);
 }
 .setup-actions {
   display: flex;
@@ -1135,6 +1177,7 @@ select {
 }
 .winning-team {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 14px;
   margin: 14px 0 20px;
@@ -1512,9 +1555,18 @@ footer {
   .brand p:last-child {
     display: none;
   }
-  .team-roster-grid,
-  .mode-picker {
+  .team-roster-grid {
     grid-template-columns: 1fr;
+  }
+  .mode-picker {
+    gap: 7px;
+  }
+  .mode-picker button {
+    min-width: 0;
+    padding: 11px 5px;
+  }
+  .mode-picker span {
+    font-size: 0.66rem;
   }
   .versus-badge {
     margin: -5px auto;
@@ -1549,6 +1601,16 @@ footer {
   .lobby-seats,
   .lobby-rules {
     grid-template-columns: 1fr;
+  }
+  .lobby-seat {
+    min-height: 105px;
+    padding: 14px;
+  }
+  .lobby-seat .toy-avatar,
+  .contender .toy-avatar {
+    flex: 0 0 auto;
+    transform: scale(0.82);
+    margin: -7px;
   }
   .lobby-heading {
     display: block;

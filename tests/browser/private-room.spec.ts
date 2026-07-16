@@ -203,9 +203,9 @@ test('private room authority, reconnect, result, and rematch', async ({ browser,
   await expect.poll(() => serverTick(playerB)).toBeGreaterThan(tickBeforeMove)
 
   await playerB.reload()
-  await expect(playerA.getByRole('heading', { name: /Opponent reconnecting/i })).toBeVisible()
+  await expect(playerA.getByRole('heading', { name: /Player reconnecting/i })).toBeVisible()
   await expect(playerB.locator('canvas')).toBeVisible({ timeout: 15_000 })
-  await expect(playerA.getByRole('heading', { name: /Opponent reconnecting/i })).toBeHidden({
+  await expect(playerA.getByRole('heading', { name: /Player reconnecting/i })).toBeHidden({
     timeout: 15_000,
   })
   expect(await playerB.locator('canvas').getAttribute('data-explosion-count')).toBe('0')

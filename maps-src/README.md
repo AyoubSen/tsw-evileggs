@@ -21,3 +21,5 @@ pnpm map:compile maps-src/my-map.png maps-src/my-map.json maps-src/my-map.map.js
 ```
 
 The generated map document is deterministic data shared by browser and server. Add an approved document to the map registry before shipping it. Keep decorative artwork separate from the collision mask. Do not add scripts, URLs, or executable behavior to map metadata.
+
+List spawns in canonical seat order: `A1, B1, A2, B2, A3, B3`, stopping after the seats required by the mode. Team A uses `teamId: 0`, team B uses `teamId: 1`, and each team's `teamSlot` starts at `0`. A 3v3 map therefore requires all six entries in that exact order; documents with reordered seats or unknown modes are rejected.

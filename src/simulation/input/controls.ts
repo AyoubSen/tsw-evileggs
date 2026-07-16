@@ -57,10 +57,11 @@ export function dragAim(
   minimumPower: number,
   maximumPower: number,
   pixelsPerWorldUnit = 1,
+  effectiveScreenDistance?: number,
 ): DragAim | null {
   const pull = getPullVector(origin, pointer)
   const rawDistance = Math.hypot(pull.x, pull.y)
-  const screenDistance = rawDistance * pixelsPerWorldUnit
+  const screenDistance = effectiveScreenDistance ?? rawDistance * pixelsPerWorldUnit
   const direction = getFiringDirectionFromPull(pull)
   const power = getPowerFromPullDistance(screenDistance, minimumPower, maximumPower)
   if (!direction || power === null) return null

@@ -5,9 +5,10 @@ import {
   type MapId,
   type MatchMode,
 } from '../maps/registry'
+import { PLAYER_COUNT_BY_MODE } from '../maps/mapDocument'
 
-export const DEFAULT_PLAYER_NAMES = ['Lumen', 'Morrow', 'Nova', 'Bramble'] as const
-export const PLAYER_COUNT_BY_MODE: Record<MatchMode, number> = { '1v1': 2, '2v2': 4, '3v3': 6 }
+export const DEFAULT_PLAYER_NAMES = ['Lumen', 'Morrow', 'Nova', 'Bramble', 'Sable', 'Quill'] as const
+export { PLAYER_COUNT_BY_MODE }
 export const TURN_DURATIONS = [20, 30, 45] as const
 export type TurnDuration = (typeof TURN_DURATIONS)[number]
 

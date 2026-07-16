@@ -97,7 +97,9 @@ describe('OnlineMatchSource synchronization', () => {
     const room = new FakeRoom()
     const source = new OnlineMatchSource(room as unknown as Room)
     const simulation = new MatchSimulation()
+    expect(source.presentationRevision).toBe(0)
     room.message(snapshotMessage(simulation))
+    expect(source.presentationRevision).toBe(1)
     expect(source.ready).toBe(true)
     expect(source.state.matchId).toBe(simulation.state.matchId)
     expect(source.getTerrain().isSolid(480, 470)).toBe(true)
@@ -188,9 +190,43 @@ describe('OnlineMatchSource synchronization', () => {
     const source = new OnlineMatchSource(room as unknown as Room)
     const simulation = new MatchSimulation()
     room.message(snapshotMessage(simulation))
+    const firstRevision = source.presentationRevision
     source.state.players[0].health = 1
     room.message(snapshotMessage(simulation))
     expect(source.state.players[0].health).toBe(100)
+    expect(source.presentationRevision).toBe(firstRevision + 1)
+  })
+
+  it('holds projected entities at the latest authoritative sample while paused', () => {
+    const room = new FakeRoom()
+    const source = new OnlineMatchSource(room as unknown as Room)
+    const simulation = new MatchSimulation()
+    room.message(snapshotMessage(simulation))
+    const player = simulation.state.players[0]
+    room.state.phase = 'reconnecting'
+    room.state.players.set('host', {
+      playerId: 'room-player-1',
+      sessionId: room.sessionId,
+      seat: 0,
+      x: player.position.x + 80,
+      y: player.position.y,
+      velocityX: 40,
+      velocityY: 0,
+      health: 100,
+      alive: true,
+      grounded: true,
+      moveDirection: 1,
+      selectedWeapon: 'basic-rocket',
+      basicRocketAmmo: -1,
+      timedGrenadeAmmo: 3,
+      scatterShotAmmo: 3,
+      clusterChargeAmmo: 2,
+      teleporterAmmo: 2,
+    })
+    room.patch()
+    source.update(1 / 60)
+    expect(source.state.paused).toBe(true)
+    expect(source.state.players[0].position.x).toBe(player.position.x + 80)
   })
 
   it('rejects corrupt and older-generation snapshots', () => {
@@ -198,10 +234,12 @@ describe('OnlineMatchSource synchronization', () => {
     const source = new OnlineMatchSource(room as unknown as Room)
     const current = new MatchSimulation(undefined, { seed: 2, matchId: 'generation-2' })
     room.message(snapshotMessage(current, 2))
+    const revision = source.presentationRevision
     const corrupt = snapshotMessage(new MatchSimulation(undefined, { seed: 3 }), 3)
     room.message({ ...corrupt, checksum: '00000000' })
     room.message(snapshotMessage(new MatchSimulation(undefined, { seed: 1 }), 1))
     expect(source.state.matchId).toBe('generation-2')
+    expect(source.presentationRevision).toBe(revision)
     expect(room.sent).toContainEqual(
       expect.objectContaining({ payload: expect.objectContaining({ type: 'request-snapshot' }) }),
     )

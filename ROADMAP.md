@@ -17,17 +17,17 @@ The following summary is based on active source and tests, not only earlier docu
 | Completed   | Application and rendering    | React and Vite own the application shell; Phaser owns gameplay input and presentation. Local and online matches share the same scene through match-source abstractions.                                                                                                                                                              |
 | Completed   | Authoritative simulation     | Framework-independent TypeScript simulation owns fixed 60 Hz stepping, turn phases, timers, movement, jumping, health, ammunition, projectiles, damage, falling, victory, and draws. Commands and events define the authority boundary.                                                                                              |
 | Completed   | Core artillery play          | Pull-back mouse aiming, movement, jumping, deterministic per-turn wind, destructible terrain, and five functional weapons are implemented: Basic Rocket, Timed Grenade, Scatter Shot, Cluster Charge, and Teleporter.                                                                                                                |
-| In progress | Current maps                 | Seven selectable maps resolve through versioned documents with explicit dimensions, revisions, themes, material grids, and `x`/`y` team spawns. Ruined Foundry is the first multi-level 2v2 structure map with destructible brick and indestructible stone/steel. Full-map and action-following cameras are implemented; typed special objects are not. |
-| In progress | Local play                   | Local hot-seat 1v1 and 2v2 support names, mode-filtered maps, 20/30/45-second turns, pause, results, and rematches. Local 2v2 has alternating team turns, eliminated-player skipping, team victory, friendly fire, individual ammunition, four-player HUD presentation, and one dedicated map.                                           |
-| In progress | Private online play          | Colyseus hosts server-authoritative private 1v1 and 2v2 rooms with mode-specific capacity, fixed balanced teams, all-player readiness, countdowns, validated intent commands, rate limits, synchronized state/effects, buffered interpolation, connection quality feedback, and cold-start feedback. The new four-client path is pending user playtesting. |
-| In progress | Recovery and lifecycle       | Tab-scoped refresh recovery, a reconnect grace period, authoritative all-player pause/resume, team forfeit on a member leaving, snapshots, sequence-gap recovery, and unanimous mode-specific rematch voting are implemented. Four-player lifecycle behavior is pending user playtesting. Room codes and active rooms remain process-local. |
+| In progress | Current maps                 | Twelve official maps, four each for 1v1, 2v2, and 3v3, resolve through versioned documents with explicit dimensions, revisions, themes, material grids, and canonical `x`/`y` team spawns. The roster spans 960 x 540 through 2048 x 1152 worlds and includes multi-level structures, passages, galleries, and material-defined routes; typed special objects are not implemented. |
+| In progress | Local play                   | Local hot-seat 1v1, 2v2, and 3v3 support names, mode-filtered maps, 20/30/45-second turns, pause, results, and rematches. Team modes provide alternating turns, eliminated-player skipping, team victory, friendly fire, individual ammunition, and six-player HUD presentation. The 3v3 path is pending user playtesting. |
+| In progress | Private online play          | Colyseus hosts server-authoritative private 1v1, 2v2, and 3v3 rooms with mode-specific capacity, fixed balanced teams, all-player readiness, countdowns, validated intent commands, rate limits, synchronized state/effects, buffered interpolation, connection quality feedback, and cold-start feedback. The six-client path is pending user playtesting. |
+| In progress | Recovery and lifecycle       | Tab-scoped refresh recovery, per-player reconnect deadlines, authoritative all-player pause/resume, team forfeit on a member leaving, snapshots, sequence-gap recovery, and unanimous mode-specific rematch voting are implemented for rooms up to six players. Six-player lifecycle behavior is pending user playtesting. Room codes and active rooms remain process-local. |
 | Completed   | Preferences and presentation | Local preferences remember names, map, turn duration, audio settings, reduced motion, contrast, screen flash, camera shake, and aim-guide density. Synthesized audio and procedural visual effects are implemented. Controls and aim state are not fully customizable or remembered per player.                                      |
 | Completed   | Automated coverage           | Vitest suites cover simulation, protocol, server lifecycle, synchronization, interpolation, audio safety, serialization, and internal replay checksums. A Playwright two-browser private-room smoke test exists. Coverage is meaningful but not exhaustive.                                                                          |
 | In progress | Production maturity          | The code supports separate frontend/server endpoints, strict production origin configuration, health checks, and deployment-oriented cold-start handling. Vercel frontend and Render server deployment are reported as operational project context, but provider manifests and deployment history are not stored in this repository. |
 | Planned     | Replay product               | Snapshot serialization, deterministic command replay helpers, and checksums exist as internal/test foundations. Match recording, a durable replay format, viewer, playback controls, and sharing do not.                                                                                                                             |
-| Planned     | Product expansion            | Accounts, database persistence, chat, online teams, spectators, custom maps, advanced map objects, invite links, broader custom rules, profiles, statistics, cosmetic ownership, and public discovery are not implemented.                                                                                                             |
+| Planned     | Product expansion            | Accounts, database persistence, chat, public teams, dedicated spectator controls, online custom maps, advanced map objects, invite links, broader custom rules, profiles, statistics, cosmetic ownership, and public discovery are not implemented. A local visual map editor with import/export and authoritative test play is implemented. |
 
-Current architectural constraints matter to future work: existing profile maps are adapted into the new document format at startup rather than stored as external files; terrain materials and multi-level collision exist but typed special objects do not; online 2v2 uses fixed seats and pauses everyone for any disconnect; camera modes support variable worlds but do not yet provide manual overview panning; and room lookup is process-local. Existing architecture details remain documented in [README.md](README.md).
+Current architectural constraints matter to future work: existing profile maps are adapted into the new document format at startup rather than stored as external files; terrain materials and multi-level collision exist but typed special objects do not; online team modes use fixed seats and pause everyone for any disconnect; camera modes support variable worlds but do not yet provide manual overview panning; and room lookup is process-local. Existing architecture details remain documented in [README.md](README.md).
 
 ## Product Principles
 
@@ -44,7 +44,7 @@ Current architectural constraints matter to future work: existing profile maps a
 
 ## Priority Categories
 
-**NOW / NEXT:** Choose one coherent milestone or named sub-milestone at a time from Milestones 2-4: personalization and controls, weapon/projectile presentation, or the first bounded slice of advanced map architecture. Milestone 4 carries higher architectural risk and must be split as described there. Official map expansion follows the map foundation rather than starting independently.
+**NOW / NEXT:** Choose one coherent milestone or named sub-milestone at a time from Milestones 2-4: personalization and controls, weapon/projectile presentation, or the first bounded slice of advanced map architecture. Milestone 4 carries higher architectural risk and must be split as described there. Further mechanically distinct map work follows the remaining advanced-map architecture rather than adding map-specific simulation behavior.
 
 **LATER:** Milestones 6-16 have a known place in the product direction but depend on foundations, product decisions, or operational capacity that do not yet exist. Accessibility and operational work within these milestones should still be applied incrementally to earlier features.
 
@@ -66,7 +66,7 @@ Current architectural constraints matter to future work: existing profile maps a
 
 **Dependencies:** None; this is the foundation for every later milestone.
 
-**Broad scope:** Deterministic fixed-step simulation, destructible terrain, four current maps, five weapons, movement/jumping, pull-back aiming, wind, local preferences, local 1v1, private online 1v1, room codes, ready flow, reconnect/refresh recovery, rematches, synchronized effects, interpolation, audio, connection feedback, deployable frontend/server configuration, and simulation/server/client/browser tests.
+**Broad scope:** Deterministic fixed-step simulation, destructible terrain, the initial four-map roster, five weapons, movement/jumping, pull-back aiming, wind, local preferences, local 1v1, private online 1v1, room codes, ready flow, reconnect/refresh recovery, rematches, synchronized effects, interpolation, audio, connection feedback, deployable frontend/server configuration, and simulation/server/client/browser tests.
 
 **Explicitly out of scope:** Accounts, persistent database, chat, team play, spectators, custom maps, mechanically rich map objects, user-facing replays, public matchmaking, rankings, and horizontal scaling.
 
@@ -102,7 +102,7 @@ Player model customization includes modular original body parts or character com
 
 ### 3. Distinct Weapon and Projectile Presentation
 
-**Status:** Planned; NOW / NEXT candidate
+**Status:** Implemented; visual playtesting and tuning pending
 
 **Purpose:** Make weapon choice and projectile state immediately readable while preserving simulation authority.
 
@@ -112,13 +112,13 @@ Player model customization includes modular original body parts or character com
 
 **Dependencies:** Existing weapon registry, projectile IDs, events, interpolation, and snapshot recovery. Player appearance work can precede or follow this milestone if render interfaces stay modular.
 
-**Broad scope:** A visible held weapon; weapon-specific aiming/firing poses; distinct original model or silhouette for every weapon; readable orientation and correct mirroring; recoil and transition animation; and strict separation between visual models and authoritative weapon logic. Add unique presentation for grenade, rocket, cluster parent, cluster children, Scatter pellets/traces, and Teleporter; distinct trails and impacts; stable mapping from authoritative projectile IDs to rendered models; and reconstruction of necessary long-lived visuals after online reconnect. Visual differences must never change simulation outcomes.
+**Broad scope:** A client-only procedural presentation registry now defines visible held models, grip/muzzle geometry, colors, recoil, projectile silhouettes, bounded trails, effects, and reduced-motion policy. Characters use weapon-specific aiming/rest/firing poses with correct handed mirroring. Rockets, grenades, cluster parents and children reconstruct from authoritative projectile state; Scatter and Teleporter use sequenced transient traces and rings. Same-match snapshots clear stale event effects while restoring selected weapons and live projectiles without changing simulation outcomes.
 
 **Explicitly out of scope:** New weapon mechanics, balance changes solely to fit art, gameplay-affecting skins, cosmetic ownership, and simulation collision based on rendered sprite bounds.
 
 **Major risks:** Presentation state drifting from authoritative state, incorrect left/right mirroring, duplicate effects after snapshots, excessive asset/bundle cost, and reduced-motion regressions.
 
-**Unresolved design decisions:** Vector versus sprite workflow; animation complexity; whether Scatter pellets receive transient models or traces only; how skins compose with base models later; and which long-lived effects must be represented in snapshots.
+**Unresolved design decisions:** Procedural toy-tech silhouettes are the current workflow, and Scatter remains an instantaneous trace. Future decisions include whether selected models later migrate to trusted SVG/atlas artwork, how skins compose with base models, and whether live remote pre-fire aim should remain intentionally private.
 
 **Completion indicators:** All five weapons and every projectile subtype are visually distinguishable in both orientations; fire/recoil/impact transitions respond to authoritative events; reconnect does not lose or duplicate relevant long-lived visuals; reduced-motion settings remain effective; and visual substitutions leave deterministic checksums unchanged.
 
@@ -150,7 +150,7 @@ Mechanics include destructible and indestructible terrain; reflective walls that
 
 ### 5. Larger and Mechanically Distinct Official Maps
 
-**Status:** Later; follows Milestone 4
+**Status:** In progress; twelve-map baseline roster implemented
 
 **Purpose:** Turn the map roster into meaningful mechanical and visual variety while validating the advanced architecture with curated content.
 
@@ -160,7 +160,7 @@ Mechanics include destructible and indestructible terrain; reflective walls that
 
 **Dependencies:** Advanced map architecture. Team-capable spawn design should be coordinated with Milestone 9.
 
-**Broad scope:** Distinct layouts including vertical arenas, separated islands, caves or enclosed areas, narrow corridors, asymmetric layouts, and different world sizes; destructible and indestructible regions; custom spawn zones; team-compatible layouts; map-specific environmental presentation; safe spawn validation; and selected reusable mechanics such as portals, reflective surfaces, wraparound projectiles, one-way barriers, or material differences. Larger maps must accommodate longer travel distances and spawn distribution for 2v2 and eventually 3v3.
+**Broad scope:** The official registry now contains twelve maps, with four maps for each of 1v1, 2v2, and 3v3; Crater Basin has been retired. Current worlds range from 960 x 540 to 2048 x 1152 and include profile terrain, fractured bridges, terraces, team-scale structures, passages, galleries, and permanent material skeletons. Further scope includes separated islands, asymmetric layouts, custom spawn zones, map-specific environmental presentation, and selected reusable mechanics such as portals, reflective surfaces, wraparound projectiles, or one-way barriers. Those mechanics must be generic map data rather than map-specific simulation code.
 
 **Explicitly out of scope:** Cosmetic reskins presented as new maps, arbitrary map-specific simulation code, unvalidated user maps, random hazards without readable rules, and a minimap unless playtesting demonstrates a need.
 
@@ -240,7 +240,7 @@ Keep room codes. Add a shareable room URL that launches the game and pre-fills o
 
 ### 9. 2v2 Team Play
 
-**Status:** In progress; local and online vertical slices implemented, four-client playtesting pending
+**Status:** Implemented and playtested as the foundation for 3v3
 
 **Purpose:** Expand private play to four friends without treating teams as a simple room-capacity change.
 
@@ -250,9 +250,9 @@ Keep room codes. Add a shareable room URL that launches the game and pre-fills o
 
 **Dependencies:** Larger team-compatible official maps and camera support; explicit team/spawn data; stable custom room configuration; and clear player identity presentation. Accounts are not required.
 
-**Broad scope:** Local four-player hot-seat, mode-specific four-player online rooms, fixed balanced team assignment, alternating team turns, eliminated-player skipping, team victory/draw, team-readable names/colors/indicators, explicit team spawns, four-seat lobby/HUD, enabled friendly fire, individual ammunition, all-player reconnect pause, team forfeit on leave, all-player readiness, and unanimous rematches are implemented. Remaining work is four-client playtesting, bandwidth/snapshot observation, and a later spectator policy for eliminated players.
+**Broad scope:** Local four-player hot-seat, mode-specific four-player online rooms, fixed balanced team assignment, alternating team turns, eliminated-player skipping, team victory/draw, team-readable names/colors/indicators, explicit team spawns, four-seat lobby/HUD, enabled friendly fire, individual ammunition, all-player reconnect pause, team forfeit on leave, all-player readiness, and unanimous rematches are implemented and playtested. Remaining work is bandwidth/snapshot observation and a later spectator policy for eliminated players.
 
-**Explicitly out of scope:** 3v3, public team matchmaking, clans, ranking, AI substitutes, and assumptions that current 1v1 maps are automatically safe for four players.
+**Explicitly out of scope:** Public team matchmaking, clans, ranking, AI substitutes, and assumptions that current 1v1 maps are automatically safe for four players.
 
 **Major risks:** Turn-order edge cases, oversized state patches, confusing camera/HUD, unreadable teams, match abandonment, unfair spawns, long waits between turns, friendly-fire griefing, and combinatorial lifecycle tests.
 
@@ -262,7 +262,7 @@ Keep room codes. Add a shareable room URL that launches the game and pre-fills o
 
 ### 10. 3v3 Expansion
 
-**Status:** Later; follows proven 2v2
+**Status:** Implemented; six-client playtesting and performance observation pending
 
 **Purpose:** Extend stable team play to six friends after four-player behavior and operations are understood.
 
@@ -272,13 +272,13 @@ Keep room codes. Add a shareable room URL that launches the game and pre-fills o
 
 **Dependencies:** Completed and observed 2v2; maps sized and validated for six players; performance/bandwidth evidence; and resolved team lifecycle rules.
 
-**Broad scope:** Six-player capacity, three-player teams, spawn distribution, turn pacing, larger-map readability, ready/rematch quorum, leave/forfeit handling, dead-player spectating, connection indicators, snapshot review, and concurrency/load validation.
+**Broad scope:** Six-player local and private-online capacity, fixed three-player teams, canonical `A1, B1, A2, B2, A3, B3` spawn distribution, alternating turn pacing, six-player map/editor/HUD/lobby/results presentation, all-player readiness, unanimous rematches, team forfeit on leave, per-player reconnect deadlines, connection indicators, snapshots, and protocol compatibility are implemented. Six-client lifecycle playtesting and measured concurrency/bandwidth observation remain.
 
 **Explicitly out of scope:** More than six active players, battle royale/free-for-all, public queues, tournaments, clans, and redesigning team rules independently from 2v2 without evidence.
 
 **Major risks:** Excessive match length, player downtime, server or bandwidth pressure, six-way reconnect complexity, HUD crowding, and maps too large for readable aiming.
 
-**Unresolved design decisions:** Whether 3v3 uses the same turn cadence and rules as 2v2; maximum turn duration; rematch quorum; whether disconnected seats can be replaced; and whether six-player rooms require stronger spectator/chat controls.
+**Unresolved design decisions:** 3v3 currently reuses 2v2's alternating cadence, 20/30/45-second turn options, fixed seats, no substitutions, team forfeit on permanent leave, and unanimous rematches. Whether future six-player rooms need dedicated spectator controls, chat, substitutions, or different pacing remains unresolved.
 
 **Completion indicators:** Six clients can finish the full lifecycle within measured server, bandwidth, and rendering budgets; team turns and victory remain deterministic; supported maps pass six-player spawn/playability checks; and UX testing confirms that active player, team state, and camera context remain clear.
 

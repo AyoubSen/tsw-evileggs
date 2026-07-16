@@ -27,7 +27,7 @@ describe('local match configuration', () => {
   it('falls back safely for an invalid map and duration', () => {
     const config = validateMatchConfig({
       playerNames: ['', '  Morrow '],
-      mapId: 'removed-map' as never,
+      mapId: 'crater-basin' as never,
       turnDurationSeconds: 99 as never,
     })
     expect(config.playerNames).toEqual([DEFAULT_PLAYER_NAMES[0], 'Morrow'])
@@ -41,7 +41,7 @@ describe('preferences', () => {
     const key = `${BRAND.storageNamespace}:preferences`
     expect(loadPreferences(memoryStorage({ [key]: '{broken' }))).toEqual(DEFAULT_PREFERENCES)
     const preferences = loadPreferences(
-      memoryStorage({ [key]: JSON.stringify({ version: 1, lastMapId: 'gone' }) }),
+      memoryStorage({ [key]: JSON.stringify({ version: 1, lastMapId: 'crater-basin' }) }),
     )
     expect(preferences.lastMapId).toBe('rolling-hills')
   })
@@ -49,7 +49,14 @@ describe('preferences', () => {
   it('saves only versioned preferences and tolerates unavailable storage', () => {
     const storage = memoryStorage()
     savePreferences({ ...DEFAULT_PREFERENCES, playerNames: ['Ash', 'Birch'] }, storage)
-    expect(loadPreferences(storage).playerNames).toEqual(['Ash', 'Birch', 'Nova', 'Bramble'])
+    expect(loadPreferences(storage).playerNames).toEqual([
+      'Ash',
+      'Birch',
+      'Nova',
+      'Bramble',
+      'Sable',
+      'Quill',
+    ])
     expect(() => savePreferences(DEFAULT_PREFERENCES, undefined)).not.toThrow()
   })
 

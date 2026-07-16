@@ -45,8 +45,9 @@ type RoomMetadata = {
   code: string
   phase: string
   connectedPlayers: number
+  occupiedPlayers: number
   capacity: number
-  mode: Extract<MatchMode, '1v1' | '2v2'>
+  mode: Extract<MatchMode, '1v1' | '2v2' | '3v3'>
 }
 
 type ClientData = {
@@ -74,7 +75,7 @@ export class PrivateMatchRoom extends Room<{
   metadata: RoomMetadata
 }> {
   state = new PrivateMatchState()
-  maxClients = 4
+  maxClients = PLAYER_COUNT_BY_MODE['3v3']
   patchRate = 50
   maxMessagesPerSecond = 40
   autoDispose = true
@@ -88,6 +89,7 @@ export class PrivateMatchRoom extends Room<{
   private countdownRemainingMs = 0
   private roomCode = ''
   private reconnectGraceSeconds = RECONNECT_GRACE_SECONDS
+  private readonly reconnectDeadlines = new Map<string, number>()
   private matchHasBegun = false
 
   messages: Messages<this> = {
@@ -125,6 +127,7 @@ export class PrivateMatchRoom extends Room<{
       code: entry.code,
       phase: 'waiting',
       connectedPlayers: 0,
+      occupiedPlayers: 0,
       capacity,
       mode: parsed.data.mode,
     }
@@ -190,11 +193,19 @@ export class PrivateMatchRoom extends Room<{
     if (!player) return
     player.connected = false
     player.ready = false
+    this.reconnectDeadlines.set(
+      player.playerId,
+      this.clock.currentTime + this.reconnectGraceSeconds * 1000,
+    )
     this.clearHeldInput(player.seat)
-    if (this.state.phase === 'playing' || this.state.phase === 'starting') {
+    if (
+      this.state.phase === 'playing' ||
+      this.state.phase === 'starting' ||
+      this.state.phase === 'reconnecting'
+    ) {
       this.simulation?.setPaused(true)
       this.state.phase = 'reconnecting'
-      this.state.reconnectRemainingMs = this.reconnectGraceSeconds * 1000
+      this.projectReconnectRemaining()
       this.countdownRemainingMs = 0
       this.state.countdownRemainingMs = 0
       this.updatePhaseListing()
@@ -209,11 +220,13 @@ export class PrivateMatchRoom extends Room<{
     if (!player) return
     player.connected = true
     player.sessionId = client.sessionId
-    this.state.reconnectRemainingMs = 0
+    this.reconnectDeadlines.delete(player.playerId)
+    this.projectReconnectRemaining()
     if (this.state.phase === 'reconnecting' && this.allPlayersConnected()) {
       this.countdownRemainingMs = RESUME_COUNTDOWN_MS
       this.state.countdownRemainingMs = RESUME_COUNTDOWN_MS
     }
+    this.tryStartRematch()
     this.sendSnapshot(client)
     this.updateListing()
     roomLog('player-reconnected', {
@@ -226,6 +239,7 @@ export class PrivateMatchRoom extends Room<{
   onLeave(client: Client, code?: number): void {
     const player = this.playerFor(client)
     if (!player) return
+    this.reconnectDeadlines.delete(player.playerId)
     this.clearHeldInput(player.seat)
     player.connected = false
     const activeMatch = ['starting', 'playing', 'reconnecting'].includes(this.state.phase)
@@ -261,7 +275,7 @@ export class PrivateMatchRoom extends Room<{
   finishForBrowserTest(): void {
     if (process.env.ENABLE_TEST_ROUTES !== 'true') throw new Error('Test routes are disabled')
     if (this.state.phase !== 'playing') throw new Error('Match is not playing')
-    this.finishByForfeit(0)
+    this.finishByForfeit(0, 'normal')
   }
 
   private receiveMessage(client: Client, payload: unknown): void {
@@ -394,8 +408,7 @@ export class PrivateMatchRoom extends Room<{
       return
     }
     if (this.state.phase === 'reconnecting') {
-      if (this.state.reconnectRemainingMs > 0)
-        this.state.reconnectRemainingMs = Math.max(0, this.state.reconnectRemainingMs - deltaMs)
+      this.projectReconnectRemaining()
       if (this.countdownRemainingMs > 0) this.advanceCountdown(deltaMs, true)
       return
     }
@@ -506,7 +519,10 @@ export class PrivateMatchRoom extends Room<{
     this.enterResults(this.simulation.getResult(), 'normal')
   }
 
-  private finishByForfeit(winnerTeamId: TeamId): void {
+  private finishByForfeit(
+    winnerTeamId: TeamId,
+    reason: 'normal' | 'forfeit' = 'forfeit',
+  ): void {
     if (!this.simulation || this.state.phase === 'results') return
     const state = this.simulation.state
     const winnerIndex = state.players.findIndex((player) => player.teamId === winnerTeamId)
@@ -517,7 +533,7 @@ export class PrivateMatchRoom extends Room<{
     state.winnerTeamId = winnerTeamId
     state.isDraw = false
     this.clearAllHeldInput()
-    this.enterResults(this.simulation.getResult(), 'forfeit')
+    this.enterResults(this.simulation.getResult(), reason)
   }
 
   private enterResults(result: SimulationMatchResult, reason: 'normal' | 'forfeit'): void {
@@ -551,6 +567,11 @@ export class PrivateMatchRoom extends Room<{
   private setRematchVote(player: RoomPlayerState, wantsRematch: boolean): void {
     if (this.state.phase !== 'results') return
     player.wantsRematch = wantsRematch
+    this.tryStartRematch()
+  }
+
+  private tryStartRematch(): void {
+    if (this.state.phase !== 'results') return
     const players = [...this.state.players.values()]
     if (
       players.length === this.state.capacity &&
@@ -642,6 +663,19 @@ export class PrivateMatchRoom extends Room<{
     return [...this.state.players.values()].filter((player) => player.connected).length
   }
 
+  private projectReconnectRemaining(): void {
+    if (this.state.phase !== 'reconnecting') {
+      this.state.reconnectRemainingMs = 0
+      return
+    }
+    const remaining = [...this.state.players.values()]
+      .filter((player) => !player.connected)
+      .map((player) => this.reconnectDeadlines.get(player.playerId))
+      .filter((deadline): deadline is number => deadline !== undefined)
+      .map((deadline) => Math.max(0, deadline - this.clock.currentTime))
+    this.state.reconnectRemainingMs = remaining.length ? Math.ceil(Math.min(...remaining)) : 0
+  }
+
   private allPlayersConnected(): boolean {
     return (
       this.state.players.size === this.state.capacity &&
@@ -671,8 +705,11 @@ export class PrivateMatchRoom extends Room<{
 
   private updateListing(): void {
     const connectedPlayers = this.connectedPlayerCount()
-    roomCodeRegistry.update(this.roomCode, { connectedPlayers })
-    void this.setMetadata({ ...this.metadata, connectedPlayers }).catch(() => undefined)
+    const occupiedPlayers = this.state.players.size
+    roomCodeRegistry.update(this.roomCode, { connectedPlayers, occupiedPlayers })
+    void this.setMetadata({ ...this.metadata, connectedPlayers, occupiedPlayers }).catch(
+      () => undefined,
+    )
   }
 
   private updatePhaseListing(): void {

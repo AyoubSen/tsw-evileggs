@@ -29,7 +29,7 @@ export type OnlineRoomResultView = {
 export type OnlineRoomView = {
   roomCode: string
   phase: RoomPhase
-  mode: Extract<MatchMode, '1v1' | '2v2'>
+  mode: Extract<MatchMode, '1v1' | '2v2' | '3v3'>
   capacity: number
   mapId: MapId
   turnDurationSeconds: 20 | 30 | 45
@@ -62,7 +62,7 @@ export function roomViewFromSchema(state: RawRoomState): OnlineRoomView {
   return {
     roomCode: state.roomCode,
     phase: state.phase,
-    mode: state.mode === '2v2' ? '2v2' : '1v1',
+    mode: state.mode === '3v3' ? '3v3' : state.mode === '2v2' ? '2v2' : '1v1',
     capacity: Number(state.capacity) || 2,
     mapId: state.mapId,
     turnDurationSeconds: state.turnDurationSeconds,

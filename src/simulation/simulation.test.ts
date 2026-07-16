@@ -31,7 +31,15 @@ import {
   createWeaponInventory,
   validateWeaponRegistry,
 } from '../weapons/registry'
-import { MAPS, MAP_ORDER, createMapTerrain, getMap, hasSafeSpawns } from '../maps/registry'
+import {
+  MAPS,
+  MAP_ORDER,
+  createMapTerrain,
+  getMap,
+  hasSafeSpawns,
+  mapIdsForMode,
+} from '../maps/registry'
+import { PLAYER_COUNT_BY_MODE } from '../maps/mapDocument'
 
 describe('explosions', () => {
   it('uses linear damage falloff and no damage outside the blast', () => {
@@ -229,17 +237,33 @@ describe('weapons', () => {
 })
 
 describe('maps', () => {
-  it('registers seven distinct maps with safe supported spawns and fallback lookup', () => {
-    expect(MAP_ORDER).toHaveLength(7)
-    expect(new Set(MAP_ORDER).size).toBe(7)
+  it('registers the deterministic twelve-map roster with four safe maps per mode', () => {
+    expect(MAP_ORDER).toEqual([
+      'rolling-hills',
+      'twin-peaks',
+      'broken-crossing',
+      'sunken-garden',
+      'canopy-rift',
+      'ruined-foundry',
+      'switchback-quarry',
+      'dry-aqueduct',
+      'triad-reach',
+      'sundered-crown',
+      'lantern-vault',
+      'fossil-wake',
+    ])
+    expect(new Set(MAP_ORDER).size).toBe(12)
+    expect(mapIdsForMode('1v1')).toHaveLength(4)
+    expect(mapIdsForMode('2v2')).toHaveLength(4)
+    expect(mapIdsForMode('3v3')).toHaveLength(4)
     for (const id of MAP_ORDER) {
       const map = MAPS[id]
       expect(map.displayName.length).toBeGreaterThan(0)
-      expect(map.spawnPoints).toHaveLength(map.mode === '2v2' ? 4 : 2)
+      expect(map.spawnPoints).toHaveLength(PLAYER_COUNT_BY_MODE[map.mode])
       expect(hasSafeSpawns(map)).toBe(true)
       const terrain = createMapTerrain(map)
       for (const spawn of map.spawnPoints) expect(terrain.surfaceY(spawn.x)).not.toBeNull()
     }
-    expect(getMap('missing-map').id).toBe('rolling-hills')
+    expect(getMap('crater-basin').id).toBe('rolling-hills')
   })
 })

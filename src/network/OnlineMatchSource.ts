@@ -8,7 +8,12 @@ import { SIMULATION_HZ } from '../simulation/match/MatchState'
 import { matchStateChecksum } from '../simulation/serialization/matchSerialization'
 import type { TerrainMask } from '../terrain/TerrainMask'
 import type { Vector } from '../shared/types'
-import { NETWORK_MESSAGE_TYPE, type FullSnapshotMessage, type ServerRoomMessage } from './protocol'
+import {
+  NETWORK_MESSAGE_TYPE,
+  SIMULATION_SNAPSHOT_VERSION,
+  type FullSnapshotMessage,
+  type ServerRoomMessage,
+} from './protocol'
 import { INTERPOLATION_SNAP_THRESHOLD, samplePosition, type PositionSample } from './interpolation'
 
 type StateListener = (state: MatchState) => void
@@ -97,6 +102,7 @@ export class OnlineMatchSource implements MatchSource {
   private inputPaused = false
   private disposed = false
   private resultQueuedForMatch = ''
+  private presentationRevisionValue = 0
   playerId = ''
 
   constructor(private readonly room: Room) {
@@ -126,6 +132,10 @@ export class OnlineMatchSource implements MatchSource {
     return this.state.timerRemainingTicks / SIMULATION_HZ
   }
 
+  get presentationRevision(): number {
+    return this.presentationRevisionValue
+  }
+
   get localSeat(): number | null {
     const state = this.room.state as unknown as OnlineSchemaState
     if (!state?.players) return null
@@ -138,6 +148,21 @@ export class OnlineMatchSource implements MatchSource {
   update(deltaSeconds: number): void {
     if (this.disposed || !this.snapshotState) return
     if (!Number.isFinite(deltaSeconds)) return
+    if (this.snapshotState.paused) {
+      this.snapshotState.players.forEach((player, seat) => {
+        const samples = this.playerSamples.get(seat)
+        const latest = samples?.[samples.length - 1]
+        if (latest) player.position = { ...latest.position }
+        this.keepLatestSample(this.playerSamples, seat)
+      })
+      for (const projectile of this.snapshotState.projectiles) {
+        const samples = this.projectileSamples.get(projectile.id)
+        const latest = samples?.[samples.length - 1]
+        if (latest) projectile.position = { ...latest.position }
+        this.keepLatestSample(this.projectileSamples, projectile.id)
+      }
+      return
+    }
     const now = performance.now()
     this.snapshotState.players.forEach((player, seat) => {
       const sampled = samplePosition(this.playerSamples.get(seat) ?? [], now, player.position)
@@ -306,7 +331,7 @@ export class OnlineMatchSource implements MatchSource {
 
   private applySnapshot(message: FullSnapshotMessage): void {
     if (this.disposed) return
-    if (message.snapshot.version !== 4 || !message.snapshot.state) return
+    if (message.snapshot.version !== SIMULATION_SNAPSHOT_VERSION || !message.snapshot.state) return
     if (message.matchGeneration < this.matchGeneration) return
     if (matchStateChecksum(message.snapshot.state) !== message.checksum) {
       this.requestSnapshot()
@@ -315,6 +340,7 @@ export class OnlineMatchSource implements MatchSource {
     const generationChanged = message.matchGeneration !== this.matchGeneration
     if (generationChanged) this.cancelPendingCommands()
     this.snapshotState = structuredClone(message.snapshot.state)
+    this.presentationRevisionValue += 1
     this.terrain = reconstructTerrain(
       this.snapshotState.mapId,
       this.snapshotState.terrainOperations,

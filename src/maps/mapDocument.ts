@@ -7,6 +7,7 @@ import {
 export const MAP_FORMAT_VERSION = 1
 export type MatchMode = '1v1' | '2v2' | '3v3'
 export type TeamId = 0 | 1
+export const PLAYER_COUNT_BY_MODE: Record<MatchMode, number> = { '1v1': 2, '2v2': 4, '3v3': 6 }
 
 export type SpawnDefinition = {
   x: number
@@ -59,7 +60,6 @@ export type ResolvedMap = Omit<MapDocument, 'terrain'> & {
 type HeightFieldSource = Omit<MapDocument, 'format' | 'formatVersion' | 'spawns' | 'terrain'> & {
   terrainScale: number
   spawnXs: readonly number[]
-  spawnTeams: readonly TeamId[]
   surfaceAt: (x: number) => number
 }
 
@@ -69,6 +69,21 @@ export type MaterialRectangle = {
   width: number
   height: number
   material: Exclude<TerrainMaterialId, 0>
+}
+
+export function playerCountForMode(mode: unknown): number {
+  if (mode !== '1v1' && mode !== '2v2' && mode !== '3v3')
+    throw new Error(`Unsupported map mode: ${String(mode)}.`)
+  return PLAYER_COUNT_BY_MODE[mode]
+}
+
+export function spawnSeatForIndex(index: number): Pick<SpawnDefinition, 'teamId' | 'teamSlot' | 'facing'> {
+  const teamId = (index % 2) as TeamId
+  return {
+    teamId,
+    teamSlot: Math.floor(index / 2),
+    facing: teamId === 0 ? 1 : -1,
+  }
 }
 
 type ShapeMapSource = Omit<MapDocument, 'format' | 'formatVersion' | 'terrain'> & {
@@ -161,20 +176,13 @@ export function resolveMapDocument(document: MapDocument): ResolvedMap {
     }
     if (x !== terrainWidth) throw new Error(`Map terrain row ${y} is too short.`)
   })
-  const expectedPlayers = document.mode === '1v1' ? 2 : document.mode === '2v2' ? 4 : 6
+  const expectedPlayers = playerCountForMode(document.mode)
   if (document.spawns.length !== expectedPlayers)
     throw new Error(`Map mode ${document.mode} requires ${expectedPlayers} spawns.`)
-  for (const teamId of [0, 1] as const) {
-    const teamSpawns = document.spawns
-      .filter((spawn) => spawn.teamId === teamId)
-      .sort((left, right) => left.teamSlot - right.teamSlot)
-    if (
-      teamSpawns.length !== expectedPlayers / 2 ||
-      teamSpawns.some((spawn, index) => spawn.teamSlot !== index)
-    )
-      throw new Error(`Map team ${teamId} has invalid spawn slots.`)
-  }
-  for (const spawn of document.spawns) {
+  for (const [index, spawn] of document.spawns.entries()) {
+    const seat = spawnSeatForIndex(index)
+    if (spawn.teamId !== seat.teamId || spawn.teamSlot !== seat.teamSlot)
+      throw new Error('Map spawns must use canonical seat order A1, B1, A2, B2, A3, B3.')
     if (
       !Number.isFinite(spawn.x) ||
       !Number.isFinite(spawn.y) ||
@@ -227,9 +235,7 @@ export function createHeightFieldDocument(source: HeightFieldSource): MapDocumen
   const spawns = source.spawnXs.map((x, index) => ({
     x,
     y: materialSurfaceY(cells, terrainWidth, terrainHeight, source.terrainScale, x, 0) ?? source.height,
-    teamId: source.spawnTeams[index],
-    teamSlot: Math.floor(index / 2),
-    facing: (source.spawnTeams[index] === 0 ? 1 : -1) as -1 | 1,
+    ...spawnSeatForIndex(index),
   }))
   return {
     format: 'mossfire-map',

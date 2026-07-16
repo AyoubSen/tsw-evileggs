@@ -1,6 +1,6 @@
 # Map Foundation v1
 
-**Status:** Implemented. Online 2v2 has been playtested, and the first local custom-map editor milestone is implemented pending user playtesting.
+**Status:** Implemented for static material maps, variable world sizes, local editing, and 1v1/2v2/3v3 play. Typed special map objects and online custom-map transfer remain deferred.
 
 ## Goal
 
@@ -10,9 +10,9 @@ Replace procedural height-only maps with a deterministic, data-driven foundation
 
 1. Complete Map Foundation v1.
 2. Prove it with local 1v1 and 2v2 play on Ruined Foundry.
-3. Resume online 2v2 with four-seat rooms, team lobby flow, reconnect/forfeit policy, and rematch quorum. Implemented and playtested.
-4. Build the local custom-map editor against the proven map document after the online 2v2 playtest. Implemented; pending editor playtesting.
-5. Add 3v3 after online 2v2 and six-player maps are ready.
+3. Resume online 2v2 with four-seat rooms, team lobby flow, reconnect/forfeit policy, and rematch quorum. Implemented.
+4. Build the local custom-map editor against the shared map document. Implemented.
+5. Add 3v3 after online 2v2 and six-player maps are ready. Implemented with four official 3v3 maps.
 
 Online admission and transfer of custom maps remain deliberately deferred. Editor drafts are local-only and test through the existing local authoritative simulation.
 
@@ -52,8 +52,9 @@ The local editor paints the same materials, places validated team spawns, previe
 * Spawns include explicit vertical placement and validation.
 * Rendering distinguishes materials and redraws after terrain mutations.
 * Ruined Foundry demonstrates buildings, internal floors, roofs, steel supports, and destructible routes.
-* Existing 1v1 and local 2v2 maps remain playable through the new resolver.
-* The local editor provides brush, line, rectangle, fill, spawn, history, validation, browser draft storage, import/export, and test-play controls.
+* Twelve official maps use the same resolver, with four maps each for 1v1, 2v2, and 3v3.
+* The official roster spans 960 x 540 through 2048 x 1152 worlds with canonical mode-specific team spawns.
+* The local editor provides 1v1/2v2/3v3 brush, line, rectangle, fill, spawn, history, validation, browser draft storage, import/export, and test-play controls.
 
 ## Deferred Work
 

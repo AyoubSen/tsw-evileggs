@@ -20,6 +20,7 @@ export interface MatchSource {
   readonly timerRemainingSeconds: number
   readonly localSeat: number | null
   readonly online: boolean
+  readonly presentationRevision: number
   update(deltaSeconds: number): void
   sendCommand(command: MatchCommandInput): Promise<MatchSourceCommandResult>
   drainEvents(): MatchEvent[]

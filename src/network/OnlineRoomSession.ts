@@ -194,7 +194,7 @@ export class OnlineRoomSession {
     signal?: AbortSignal,
   ): Promise<OnlineRoomSession> {
     try {
-      if (config.mode !== '1v1' && config.mode !== '2v2')
+      if (config.mode !== '1v1' && config.mode !== '2v2' && config.mode !== '3v3')
         throw new Error('That match mode is not available for private online rooms.')
       throwIfOnlineStartupAborted(signal)
       await waitForGameServer(signal)

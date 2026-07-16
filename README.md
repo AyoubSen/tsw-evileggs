@@ -1,6 +1,6 @@
 # Mossfire Skirmish
 
-An original browser artillery game with local hot-seat and private online 1v1/2v2 play. It takes broad inspiration from the readable, turn-based projectile play found in classic artillery games, but is not a remake or clone of any existing game. The characters, maps, UI, naming, and code are original placeholder work.
+An original browser artillery game with local hot-seat and private online 1v1, 2v2, and 3v3 play. It takes broad inspiration from the readable, turn-based projectile play found in classic artillery games, but is not a remake or clone of any existing game. The characters, maps, UI, naming, and code are original placeholder work.
 
 Mossfire Skirmish is an original turn-based artillery game with destructible terrain, timed turns, movement, pull-back aiming, five weapons, and selectable maps.
 
@@ -44,15 +44,20 @@ Use the main menu to start a local match or create/join a private online room. E
 
 ## Maps
 
-- **Rolling Hills (1v1)**: broad, forgiving slopes with open long-range firing lanes.
-- **Twin Peaks (1v1)**: elevated side spawns and a central valley for high arcs.
-- **Broken Crossing (1v1)**: a fractured low crossing that rewards careful movement.
-- **Crater Basin (1v1)**: uneven outer ridges surrounding a close central bowl.
-- **Sunken Garden (1v1)**: a larger terraced arena built to compare full-map and action-following cameras.
-- **Canopy Rift (2v2)**: a wide team arena with four staggered spawn shelves.
-- **Ruined Foundry (2v2)**: destructible brick workshops with internal floors, roofs, stone foundations, steel supports, and a broken central span.
+- **Rolling Hills (1v1, 960 x 540)**: broad, forgiving slopes with open long-range firing lanes.
+- **Twin Peaks (1v1, 1280 x 720)**: reinforced mesas meet at a destructible central saddle.
+- **Broken Crossing (1v1, 1280 x 720)**: a fractured upper causeway hangs over a dependable lower route.
+- **Sunken Garden (1v1, 1440 x 810)**: terraced ramps descend into a sheltered garden floor.
+- **Canopy Rift (2v2, 1600 x 900)**: mirrored root shelves trade exposed crests for protected inner ground.
+- **Ruined Foundry (2v2, 1440 x 810)**: brick workshops, internal floors, steel supports, and a shattered central span create multi-level routes.
+- **Switchback Quarry (2v2, 1600 x 900)**: open quarry benches switch back around a permanent central outcrop.
+- **Dry Aqueduct (2v2, 1536 x 864)**: broken upper decks cross stone arches above a continuous dry channel.
+- **Triad Reach (3v3, 1920 x 1080)**: three open ridge ranges descend toward broad central shelves.
+- **Sundered Crown (3v3, 1920 x 1080)**: a broken crown joins upper lanes above a permanent lower passage.
+- **Lantern Vault (3v3, 1920 x 1080)**: cavern galleries climb through three broad ceiling shafts.
+- **Fossil Wake (3v3, 2048 x 1152)**: permanent fossil ribs rise through a destructible basin and broken scaffolds.
 
-The movement aliases use physical browser keyboard codes, so both AZERTY and QWERTY layouts work without configuration. Ballistic weapons use world-space pull-back aiming. Teleporter instead points at a safe map destination. Local and online 2v2 alternate Team Comet and Team Ember players, skip eliminated players, keep ammunition per player, and enable friendly fire. Online seats are assigned `A1, B1, A2, B2`; all four players must ready and unanimously approve rematches. Each input turn lasts 30 seconds. Rocket is unlimited; Grenade and Scatter have 3 uses; Cluster and Teleporter have 2.
+The movement aliases use physical browser keyboard codes, so both AZERTY and QWERTY layouts work without configuration. Ballistic weapons use world-space pull-back aiming. Teleporter instead points at a safe map destination. Local and online team modes alternate Team Comet and Team Ember players, skip eliminated players, keep ammunition per player, and enable friendly fire. Online seats are assigned `A1, B1, A2, B2` for 2v2 and `A1, B1, A2, B2, A3, B3` for 3v3; every player must ready and unanimously approve rematches. Each input turn lasts 20, 30, or 45 seconds. Rocket is unlimited; Grenade and Scatter have 3 uses; Cluster and Teleporter have 2.
 
 ## Arsenal
 
@@ -64,6 +69,8 @@ The movement aliases use physical browser keyboard codes, so both AZERTY and QWE
 
 Successful activation consumes ammunition once and locks input until the action and world settling finish. A simultaneous elimination is a draw.
 
+Every player visibly carries the selected weapon through a procedural toy-tech model. Held models rotate through the full aim range, mirror their grip correctly, recoil from authoritative firing events, and remain cosmetic-only. Rockets, grenades, cluster canisters and children use distinct state-reconstructed silhouettes and bounded trails; Scatter Shot and Teleporter use dedicated transient traces, sparks, and rings. Reconnect restores held weapons and live projectiles without replaying old flashes or impacts.
+
 ## Technology and architecture
 
 - **React + Vite** owns the page shell and starts/destroys the game canvas in `src/app/App.tsx`.
@@ -71,11 +78,12 @@ Successful activation consumes ammunition once and locks input until the action 
 - **Typed commands and events** in `src/simulation/match/` form the authority boundary used by both local and server-hosted play.
 - **Match sources** in `src/game/matchSource.ts`, `src/game/LocalMatchSource.ts`, and `src/network/OnlineMatchSource.ts` let one Phaser scene consume either local authority or synchronized server state.
 - **Phaser** converts keyboard and pointer intent into commands, renders read-only source state, interpolates online entity positions through the online source, and consumes events in `src/game/scenes/MatchScene.ts`.
-- **PrivateMatchRoom** in `server/rooms/PrivateMatchRoom.ts` owns mode-specific two/four-player capacity, fixed team seats, the online `MatchSimulation`, 60 Hz command/tick loop, ready/countdown flow, Schema projection, snapshots, sequenced events, disconnect pause, team forfeit, and unanimous rematch.
+- **PrivateMatchRoom** in `server/rooms/PrivateMatchRoom.ts` owns mode-specific two/four/six-player capacity, fixed team seats, the online `MatchSimulation`, 60 Hz command/tick loop, ready/countdown flow, Schema projection, snapshots, sequenced events, disconnect pause, team forfeit, and unanimous rematch.
 - **Colyseus Schema** patches player/projectile and room state every 50 ms (20 Hz). The authoritative simulation still runs at 60 Hz; clients interpolate only visual positions between patches.
 - **Private room codes** are six-character aliases held by the single-process registry in `server/roomCodeRegistry.ts` and resolved by `server/app.config.ts`. They are invitations, not authentication secrets.
 - **Shared protocol validation** and explicit protocol/snapshot/map/weapon/build versions live in `src/network/protocol.ts`.
 - **Weapon registry and inventories** live in `src/weapons/registry.ts`; shared definitions are separate from scene runtime behaviour.
+- **Weapon presentation registry** in `src/game/weaponPresentation.ts` owns client-only model geometry, colors, recoil, trails, and reduced-motion policy without affecting simulation checksums or collision.
 - **Map documents and registry** live in `src/maps/`; they own versioned material grids, world dimensions, visual themes, and explicit `x`/`y` team spawns independently of scenes. `maps-src/README.md` documents external PNG authoring.
 - **Serialization and replay** live in `src/simulation/serialization/` and `src/simulation/replay/`. Snapshots store the map plus ordered terrain operations rather than texture data.
 
@@ -93,17 +101,17 @@ The match uses a capped fixed-step simulation (up to 1/60 s per step). Ballistic
 
 Characters use simple gravity, horizontal damping, local support searches, and lightweight wall/ceiling probes. They can stand on internal floors rather than always resolving to the uppermost terrain surface. During input, they can walk across gentle rises and descend into craters, but cannot climb a rise greater than 12 px per movement step. Movement and jumping are unrestricted until firing or timeout. A jump applies a 310 px/s upward impulse and may include a small horizontal push from a held movement key. It requires grounded support and key release before another jump. Characters fall into newly created craters and are eliminated if they fall below the map. After impact, the game waits for character velocity and ground state to settle before switching turns. A draw is possible if both teams fall or are reduced to zero health in one blast.
 
-The 30-second timer runs only in the input phase. Firing freezes it immediately. A timeout cancels any drag, displays `Time expired` briefly, and switches players without spawning a rocket. The new active player starts with a full timer and a sensible facing-relative default aim.
+The selected 20-, 30-, or 45-second timer runs only in the input phase. Firing freezes it immediately. A timeout cancels any drag, displays `Time expired` briefly, and switches players without spawning a rocket. The new active player starts with a full timer and a sensible facing-relative default aim.
 
 ## Gameplay tuning
 
-- Viewport: 960 x 540 px. Classic maps use the same world size; Sunken Garden uses 1280 x 720; Canopy Rift and Ruined Foundry use 1440 x 810 with camera fitting or action tracking.
+- Viewport: 960 x 540 px. Official worlds range from Rolling Hills at 960 x 540 to Fossil Wake at 2048 x 1152. All maps retain a 16:9 world and use camera fitting or action tracking when larger than the viewport.
 - Aim: any world-space drag direction; `0°` is right, `90°` is up, and `180°` is left.
 - Power: 30% to 100%; Basic Rocket launch speed is `950 * power / 100`, or 285 to 950 px/s.
 - Gravity: 700 px/s²; fixed simulation step: 1/60 s.
 - Wind: deterministic -45 to 45 px/s² horizontal acceleration, in steps of 5, selected at each turn start.
 - Movement: 105 px/s while grounded; jumps support capped 85 px/s mid-air steering while the input timer is active.
-- Turn timer: 30 seconds per player input phase.
+- Turn timer: 20, 30, or 45 seconds per player input phase; 30 seconds by default.
 - Mouse pull: 36 to 180 logical px maps linearly from 30% to 100% power. The firing arrow points opposite the pull and is clamped to this range.
 
 At the default 68% power and 45°, the rocket's ideal level-ground range is about 593 px, intentionally close to the starting opponent distance once its muzzle height is included. Full power permits forgiving high arcs and map-crossing shots, while minimum power supports nearby crater shots.
@@ -162,7 +170,7 @@ When testing the deployed-style same-origin path locally, set `VITE_GAME_HTTP_BA
 - The event queue is capped and intended to be drained every simulation update; events are presentation notifications, not reconstruction data.
 - Character physics remain intentionally simple, and authoritative floating-point math assumes the same JavaScript runtime semantics on server and replay hosts.
 - Private-room lookup is intentionally in-memory and single-process. Restarting the server invalidates room codes and active matches.
-- Online 2v2 uses fixed balanced team assignment; team choice, substitutions, and uneven teams are not supported.
+- Online 2v2 and 3v3 use fixed balanced team assignment; team choice, substitutions, and uneven teams are not supported.
 - There are no accounts, authentication, public matchmaking, database, Redis, rankings, spectators, or horizontal scaling.
 - Online rendering uses buffered interpolation and bounded extrapolation without rollback or local movement prediction, so very high latency still affects responsiveness.
 - A separately deployed web client must set both browser endpoints. Custom HTTP can use the Vercel same-origin rewrite, but Colyseus matchmaking and WebSocket traffic remain direct to the public TLS server and may still be blocked by local privacy or network policy. The server must set its public port/address and exact `ALLOWED_WEB_ORIGINS`.

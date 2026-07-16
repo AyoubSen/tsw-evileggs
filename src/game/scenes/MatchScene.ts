@@ -1,12 +1,13 @@
 import Phaser from 'phaser'
 import type { MatchCommandInput } from '../../simulation/match/MatchCommand'
 import type { MatchEvent, SimulationMatchResult } from '../../simulation/match/MatchEvent'
-import type { SimProjectile } from '../../simulation/match/MatchState'
+import type { SimPlayer, SimProjectile } from '../../simulation/match/MatchState'
 import { launchVelocity } from '../../simulation/aim/aim'
 import { integrateProjectile } from '../../simulation/projectile/integrate'
 import {
   AIM_GUIDE_STEPS,
   DRAG_MAX_DISTANCE,
+  DRAG_MIN_DISTANCE,
   DRAG_START_DISTANCE,
   canvasPointToWorld,
   dragAim,
@@ -29,10 +30,21 @@ import { getMap } from '../../maps/registry'
 import type { TerrainMask } from '../../terrain/TerrainMask'
 import { TERRAIN_MATERIAL, type TerrainMaterialId } from '../../terrain/materials'
 import { WEAPON_ORDER, WEAPONS } from '../../weapons/registry'
+import type { WeaponId } from '../../weapons/registry'
 import type { GameEvents } from '../types'
 import type { MatchSource } from '../matchSource'
 import type { AudioDirector, SoundCue } from '../../audio/AudioDirector'
 import { EventSequenceGuard, type PresentationPreferences } from '../presentation'
+import {
+  getWeaponMotionPolicy,
+  getWeaponPresentation,
+  heldWeaponHandedness,
+  normalizeDirection,
+  perpendicular,
+  transformLocalPoint,
+  weaponModelScale,
+  type WeaponMotionPolicy,
+} from '../weaponPresentation'
 
 type BurstEffect = {
   kind: 'explosion' | 'teleport'
@@ -50,11 +62,37 @@ type DamageEffect = {
   age: number
   label: Phaser.GameObjects.Text
 }
-type TraceEffect = { origin: Vector; endpoints: Vector[]; age: number }
-type Reaction = { hurtUntil?: number; firedUntil?: number; defeatedAt?: number }
+type TraceEffect = { origin: Vector; endpoints: Vector[]; age: number; lifetime: number }
+type Reaction = {
+  hurtUntil?: number
+  firedAt?: number
+  firedUntil?: number
+  fireDirection?: Vector
+  fireWeapon?: WeaponId
+  equippedAt?: number
+  equippedWeapon?: WeaponId
+  defeatedAt?: number
+}
+type ProjectileTrail = {
+  weaponId: WeaponId
+  kind: SimProjectile['kind']
+  points: Vector[]
+}
+type WeaponEffect = {
+  kind: 'muzzle' | 'bounce' | 'split'
+  weaponId: WeaponId
+  position: Vector
+  direction: Vector
+  age: number
+  lifetime: number
+  seed: number
+}
 const ACTOR_VISUAL_SCALE = 0.9
-const ACTOR_COLORS = [0x2863b7, 0xed7090, 0x57b89e, 0xf39a55]
+const ACTOR_COLORS = [0x2863b7, 0xed7090, 0x57b89e, 0xf39a55, 0x8267c7, 0xe2ad2f]
 const TEAM_COLORS = [0x17447f, 0xaa392b]
+const INK_COLOR = 0x24313a
+const MAX_PROJECTILE_TRAILS = 32
+const MAX_WEAPON_EFFECTS = 40
 
 export class MatchScene extends Phaser.Scene {
   private source!: MatchSource
@@ -75,6 +113,7 @@ export class MatchScene extends Phaser.Scene {
   private hudGraphics!: Phaser.GameObjects.Graphics
   private uiCamera!: Phaser.Cameras.Scene2D.Camera
   private playerHudTexts: Phaser.GameObjects.Text[] = []
+  private weaponHudTexts: Phaser.GameObjects.Text[] = []
   private bottomHud!: Phaser.GameObjects.Text
   private timerText!: Phaser.GameObjects.Text
   private windText!: Phaser.GameObjects.Text
@@ -95,12 +134,17 @@ export class MatchScene extends Phaser.Scene {
   private burstEffects: BurstEffect[] = []
   private damageEffects: DamageEffect[] = []
   private traceEffects: TraceEffect[] = []
+  private projectileTrails = new Map<string, ProjectileTrail>()
+  private weaponEffects: WeaponEffect[] = []
   private reactions = new Map<string, Reaction>()
   private displayedHealth: number[] = []
   private pendingResult: SimulationMatchResult | null = null
   private resultDelay = 0
   private bannerOverride = ''
   private lastMatchId = ''
+  private lastPresentationRevision = -1
+  private lastPresentedActivePlayerId = ''
+  private presentationWasPaused = false
   private lastTimerSecond = -1
   private warnedGrenades = new Set<string>()
   private lastExplosionAudioAt = -1
@@ -139,7 +183,14 @@ export class MatchScene extends Phaser.Scene {
       color: '#fff8df',
       fontStyle: 'bold',
     }
-    this.playerHudTexts = Array.from({ length: 4 }, () => this.add.text(0, 0, '', hudStyle))
+    this.playerHudTexts = Array.from({ length: 6 }, () => this.add.text(0, 0, '', hudStyle))
+    this.weaponHudTexts = Array.from({ length: WEAPON_ORDER.length }, () =>
+      this.add.text(0, 0, '', {
+        ...hudStyle,
+        fontSize: '10px',
+        lineSpacing: 2,
+      }),
+    )
     this.bottomHud = this.add.text(0, 0, '', hudStyle)
     this.timerText = this.add
       .text(VIEWPORT_WIDTH / 2, 17, '', {
@@ -186,6 +237,7 @@ export class MatchScene extends Phaser.Scene {
     const hudObjects = [
       this.hudGraphics,
       ...this.playerHudTexts,
+      ...this.weaponHudTexts,
       this.bottomHud,
       this.timerText,
       this.windText,
@@ -201,35 +253,51 @@ export class MatchScene extends Phaser.Scene {
 
   update(_: number, deltaMilliseconds: number): void {
     const delta = Math.min(deltaMilliseconds / 1000, 0.25)
-    this.visualTime += delta
     if (this.source.state.matchId !== this.lastMatchId) this.resetPresentation()
-    if (this.introDuration > 0) this.introDuration = Math.max(0, this.introDuration - delta)
     this.source.update(delta)
-    this.updateWorldCamera(delta)
-    this.turnBannerDuration = Math.max(0, this.turnBannerDuration - delta)
-    this.burstEffects.forEach((effect) => (effect.age += delta))
+    if (this.source.presentationRevision !== this.lastPresentationRevision)
+      this.resetTransientPresentation(
+        this.source.activePlayer.id === this.lastPresentedActivePlayerId,
+      )
+    const presentationDelta = this.source.state.paused && this.source.state.phase !== 'victory' ? 0 : delta
+    const presentationPaused = this.source.state.paused && this.source.state.phase !== 'victory'
+    if (presentationPaused && !this.presentationWasPaused) this.cameras.main.shakeEffect.reset()
+    this.presentationWasPaused = presentationPaused
+    this.lastPresentedActivePlayerId = this.source.activePlayer.id
+    this.visualTime += presentationDelta
+    if (this.introDuration > 0)
+      this.introDuration = Math.max(0, this.introDuration - presentationDelta)
+    this.reconcileProjectileTrails()
+    this.updateWorldCamera(presentationDelta)
+    this.turnBannerDuration = Math.max(0, this.turnBannerDuration - presentationDelta)
+    this.burstEffects.forEach((effect) => (effect.age += presentationDelta))
     this.damageEffects.forEach((effect) => {
-      effect.age += delta
+      effect.age += presentationDelta
       const player = this.source.state.players.find((candidate) => candidate.id === effect.playerId)
       if (player)
         effect.label
-          .setPosition(player.position.x, player.position.y - 36 - effect.age * 20)
+          .setPosition(
+            player.position.x,
+            player.position.y - 36 - (this.preferences.reducedMotion ? 0 : effect.age * 20),
+          )
           .setAlpha(1 - effect.age)
     })
-    this.traceEffects.forEach((effect) => (effect.age += delta))
+    this.traceEffects.forEach((effect) => (effect.age += presentationDelta))
+    this.weaponEffects.forEach((effect) => (effect.age += presentationDelta))
     this.burstEffects = this.burstEffects.filter((effect) => effect.age < effect.lifetime)
     this.damageEffects = this.damageEffects.filter((effect) => {
       if (effect.age < 1) return true
       effect.label.destroy()
       return false
     })
-    this.traceEffects = this.traceEffects.filter((effect) => effect.age < 0.22)
+    this.traceEffects = this.traceEffects.filter((effect) => effect.age < effect.lifetime)
+    this.weaponEffects = this.weaponEffects.filter((effect) => effect.age < effect.lifetime)
     for (const event of this.source.drainEvents()) this.consumeMatchEvent(event)
-    this.updateHealthPresentation(delta)
+    this.updateHealthPresentation(presentationDelta)
     this.updateTimerAudio()
     this.updateGrenadeAudio()
     if (this.pendingResult) {
-      this.resultDelay = Math.max(0, this.resultDelay - delta)
+      this.resultDelay = Math.max(0, this.resultDelay - presentationDelta)
       if (this.resultDelay === 0) {
         const result = this.pendingResult
         this.pendingResult = null
@@ -241,6 +309,7 @@ export class MatchScene extends Phaser.Scene {
 
   public setPaused(paused: boolean): void {
     this.source.setPaused(paused)
+    if (paused) this.cameras.main.shakeEffect.reset()
     this.pressedCodes.clear()
     this.clearDrag()
   }
@@ -251,7 +320,17 @@ export class MatchScene extends Phaser.Scene {
   }
 
   public setPresentationPreferences(preferences: PresentationPreferences): void {
+    const enablingReducedMotion = preferences.reducedMotion && !this.preferences.reducedMotion
     this.preferences = preferences
+    if (enablingReducedMotion) {
+      this.cameras?.main?.shakeEffect.reset()
+      this.weaponEffects = []
+      this.burstEffects = []
+      this.traceEffects = []
+      for (const trail of this.projectileTrails.values())
+        trail.points = trail.points.slice(-1)
+      this.actionFocusUntil = this.visualTime
+    }
   }
 
   private resetPresentation(): void {
@@ -267,11 +346,16 @@ export class MatchScene extends Phaser.Scene {
     for (const effect of this.damageEffects) effect.label.destroy()
     this.damageEffects = []
     this.traceEffects = []
+    this.projectileTrails.clear()
+    this.weaponEffects = []
     this.reactions.clear()
     this.pendingResult = null
     this.resultDelay = 0
     this.eventGuard.reset()
     this.lastMatchId = this.source.state.matchId
+    this.lastPresentationRevision = this.source.presentationRevision
+    this.lastPresentedActivePlayerId = this.source.activePlayer.id
+    this.presentationWasPaused = false
     this.displayedHealth = this.source.state.players.map((player) => player.health)
     this.lastTimerSecond = -1
     this.warnedGrenades.clear()
@@ -285,6 +369,25 @@ export class MatchScene extends Phaser.Scene {
     this.canvas?.setAttribute('data-damage-count', '0')
     this.canvas?.setAttribute('data-effect-count', '0')
     this.render()
+  }
+
+  private resetTransientPresentation(preserveCommittedAim: boolean): void {
+    this.clearDrag()
+    if (!preserveCommittedAim) {
+      this.teleportTarget = null
+      this.shotAim = this.defaultAim()
+    }
+    this.projectileTrails.clear()
+    this.weaponEffects = []
+    this.burstEffects = []
+    this.traceEffects = []
+    for (const effect of this.damageEffects) effect.label.destroy()
+    this.damageEffects = []
+    this.reactions.clear()
+    this.displayedHealth = this.source.state.players.map((player) => player.health)
+    this.actionFocus = null
+    this.actionFocusUntil = 0
+    this.lastPresentationRevision = this.source.presentationRevision
   }
 
   private send(command: MatchCommandInput): void {
@@ -312,6 +415,7 @@ export class MatchScene extends Phaser.Scene {
     this.canvas.addEventListener('pointermove', this.onPointerMove)
     this.canvas.addEventListener('pointerup', this.onPointerUp)
     this.canvas.addEventListener('pointercancel', this.onPointerCancel)
+    this.canvas.addEventListener('lostpointercapture', this.onLostPointerCapture)
     this.canvas.addEventListener('keydown', this.onKeyDown)
     this.canvas.addEventListener('keyup', this.onKeyUp)
     this.canvas.addEventListener('blur', this.onCanvasBlur)
@@ -324,6 +428,7 @@ export class MatchScene extends Phaser.Scene {
     this.canvas.removeEventListener('pointermove', this.onPointerMove)
     this.canvas.removeEventListener('pointerup', this.onPointerUp)
     this.canvas.removeEventListener('pointercancel', this.onPointerCancel)
+    this.canvas.removeEventListener('lostpointercapture', this.onLostPointerCapture)
     this.canvas.removeEventListener('keydown', this.onKeyDown)
     this.canvas.removeEventListener('keyup', this.onKeyUp)
     this.canvas.removeEventListener('blur', this.onCanvasBlur)
@@ -406,6 +511,7 @@ export class MatchScene extends Phaser.Scene {
 
   private readonly onPointerMove = (event: PointerEvent): void => {
     if (!this.canInput()) return
+    if (this.activePointerId !== null && event.pointerId !== this.activePointerId) return
     const pointer = this.pointerWorldPoint(event)
     if (this.selectedWeapon().aimMode === 'target-position') {
       const surface = this.source.getTerrain().surfaceY(pointer.x)
@@ -426,18 +532,29 @@ export class MatchScene extends Phaser.Scene {
         POWER_MIN_PERCENT,
         POWER_MAX_PERCENT,
         this.cameras.main.zoom,
+        this.edgeAdjustedPullDistance(event, pointer),
       )
     event.preventDefault()
   }
 
   private readonly onPointerUp = (event: PointerEvent): void => {
-    if (!this.dragging) return
+    if (!this.dragging || event.pointerId !== this.activePointerId) return
     if (this.canInput() && this.dragPreview) this.shotAim = this.dragPreview
     this.clearDrag(event.pointerId)
     event.preventDefault()
   }
 
-  private readonly onPointerCancel = (event: PointerEvent): void => this.clearDrag(event.pointerId)
+  private readonly onPointerCancel = (event: PointerEvent): void => {
+    if (event.pointerId === this.activePointerId) this.clearDrag(event.pointerId)
+  }
+
+  private readonly onLostPointerCapture = (event: PointerEvent): void => {
+    if (event.pointerId !== this.activePointerId) return
+    this.dragging = false
+    this.activePointerId = null
+    this.dragStart = null
+    this.dragPreview = null
+  }
 
   private activateWeapon(): void {
     if (this.selectedWeapon().id === 'teleporter') {
@@ -466,6 +583,53 @@ export class MatchScene extends Phaser.Scene {
       VIEWPORT_HEIGHT,
     )
     return this.cameras.main.getWorldPoint(viewportPoint.x, viewportPoint.y)
+  }
+
+  private edgeAdjustedPullDistance(event: PointerEvent, pointer: Vector): number {
+    const origin = this.aimOrigin()
+    const zoom = this.cameras.main.zoom
+    const pullX = (pointer.x - origin.x) * zoom
+    const pullY = (pointer.y - origin.y) * zoom
+    const rawDistance = Math.hypot(pullX, pullY)
+    const bounds = this.canvas.getBoundingClientRect()
+    const scaleX = bounds.width / VIEWPORT_WIDTH
+    const scaleY = bounds.height / VIEWPORT_HEIGHT
+    const originClientX = event.clientX - pullX * scaleX
+    const originClientY = event.clientY - pullY * scaleY
+    const clientPullX = event.clientX - originClientX
+    const clientPullY = event.clientY - originClientY
+    const clientDistance = Math.hypot(clientPullX, clientPullY)
+    if (clientDistance === 0) return rawDistance
+
+    const directionX = clientPullX / clientDistance
+    const directionY = clientPullY / clientDistance
+    const viewport = window.visualViewport
+    const left = viewport?.offsetLeft ?? 0
+    const top = viewport?.offsetTop ?? 0
+    const right = left + (viewport?.width ?? window.innerWidth)
+    const bottom = top + (viewport?.height ?? window.innerHeight)
+    const boundaryDistances = [
+      directionX < 0 ? (left - originClientX) / directionX : Number.POSITIVE_INFINITY,
+      directionX > 0 ? (right - originClientX) / directionX : Number.POSITIVE_INFINITY,
+      directionY < 0 ? (top - originClientY) / directionY : Number.POSITIVE_INFINITY,
+      directionY > 0 ? (bottom - originClientY) / directionY : Number.POSITIVE_INFINITY,
+    ].filter((distance) => distance >= 0)
+    const availableClientDistance = Math.min(...boundaryDistances)
+    const cssScale = (scaleX + scaleY) / 2
+    const availableDistance = availableClientDistance / Math.max(cssScale, Number.EPSILON)
+    if (!Number.isFinite(availableDistance) || availableDistance >= DRAG_MAX_DISTANCE)
+      return rawDistance
+
+    // Preserve angle while mapping the constrained edge travel across the full power range.
+    const usableDistance = Math.max(availableDistance, DRAG_START_DISTANCE + 1)
+    const progress = Math.max(
+      0,
+      Math.min(
+        1,
+        (rawDistance - DRAG_START_DISTANCE) / (usableDistance - DRAG_START_DISTANCE),
+      ),
+    )
+    return DRAG_MIN_DISTANCE + progress * (DRAG_MAX_DISTANCE - DRAG_MIN_DISTANCE)
   }
 
   private selectedWeapon() {
@@ -628,12 +792,9 @@ export class MatchScene extends Phaser.Scene {
     this.actorGraphics.clear()
     this.source.state.players.forEach((player, index) => {
       const reaction = this.reactions.get(player.id)
-      if (!player.alive && reaction?.defeatedAt === undefined) return
       const moving = player.moveDirection !== 0 && player.grounded
-      const aimingFacing =
-        index === this.source.state.activePlayerIndex
-          ? Math.sign((this.dragPreview ?? this.shotAim).direction.x)
-          : 0
+      const weaponPose = this.resolveWeaponPose(player, index, reaction)
+      const aimingFacing = Math.sign(weaponPose.direction.x)
       const facing = player.moveDirection || aimingFacing || player.facing
       const bob =
         !this.preferences.reducedMotion && player.grounded
@@ -641,7 +802,6 @@ export class MatchScene extends Phaser.Scene {
           : 0
       const { x } = player.position
       const hurt = (reaction?.hurtUntil ?? 0) > this.visualTime
-      const fired = (reaction?.firedUntil ?? 0) > this.visualTime
       const defeated = !player.alive
       const victory =
         player.alive &&
@@ -651,7 +811,7 @@ export class MatchScene extends Phaser.Scene {
         victory && !this.preferences.reducedMotion
           ? -Math.abs(Math.sin(this.visualTime * 7)) * 7
           : 0
-      const y = player.position.y + bob + victoryBob + (fired ? 2 : 0)
+      const y = player.position.y + bob + victoryBob
       const scale = ACTOR_VISUAL_SCALE
       const shadowY =
         this.source
@@ -661,7 +821,7 @@ export class MatchScene extends Phaser.Scene {
         .fillStyle(0x473b31, 0.7)
         .fillEllipse(x + 3 * scale, shadowY + 7 * scale, 32 * scale, 9 * scale)
       this.actorGraphics
-        .fillStyle(hurt ? 0xffffff : ACTOR_COLORS[index] ?? ACTOR_COLORS[index % 4])
+        .fillStyle(hurt ? 0xffffff : ACTOR_COLORS[index % ACTOR_COLORS.length])
         .fillRoundedRect(
           x - 17 * scale,
           y - (defeated ? 4 : 13) * scale,
@@ -685,7 +845,7 @@ export class MatchScene extends Phaser.Scene {
           y + (hurt ? 8 : 5) * scale,
         )
       this.actorGraphics
-        .fillStyle(ACTOR_COLORS[index] ?? ACTOR_COLORS[index % 4])
+        .fillStyle(ACTOR_COLORS[index % ACTOR_COLORS.length])
         .fillTriangle(
           x - 13 * facing * scale,
           y - 13 * scale,
@@ -701,6 +861,14 @@ export class MatchScene extends Phaser.Scene {
         this.actorGraphics
           .fillStyle(0xfff6d8)
           .fillCircle(x - player.teamSlot * 3 + marker * 6, y + 13 * scale, 1.8)
+      if (!defeated)
+        this.renderHeldWeapon(
+          { x, y },
+          weaponPose.direction,
+          weaponPose.weaponId,
+          reaction,
+          facing,
+        )
       if (
         !defeated &&
         this.source.state.phase === 'input' &&
@@ -708,6 +876,235 @@ export class MatchScene extends Phaser.Scene {
       )
         this.actorGraphics.lineStyle(3, 0xf7bd3f).strokeCircle(x, y, player.radius + 6)
     })
+  }
+
+  private resolveWeaponPose(
+    player: SimPlayer,
+    index: number,
+    reaction?: Reaction,
+  ): { direction: Vector; weaponId: WeaponId } {
+    const fired = (reaction?.firedUntil ?? 0) > this.visualTime && reaction?.fireWeapon
+    if (fired)
+      return {
+        direction: normalizeDirection(reaction.fireDirection, { x: player.facing, y: 0 }),
+        weaponId: reaction.fireWeapon!,
+      }
+
+    const equippedWeapon =
+      reaction?.equippedWeapon &&
+      reaction.equippedAt !== undefined &&
+      (player.selectedWeapon === reaction.equippedWeapon ||
+        this.visualTime - reaction.equippedAt < 1)
+        ? reaction.equippedWeapon
+        : player.selectedWeapon
+    const locallyControlled =
+      index === this.source.state.activePlayerIndex && this.source.canControlActivePlayer()
+    if (locallyControlled) {
+      if (equippedWeapon === 'teleporter' && this.teleportTarget)
+        return {
+          direction: normalizeDirection({
+            x: this.teleportTarget.x - player.position.x,
+            y: this.teleportTarget.y - player.position.y,
+          }),
+          weaponId: equippedWeapon,
+        }
+      if (equippedWeapon !== 'teleporter')
+        return {
+          direction: normalizeDirection((this.dragPreview ?? this.shotAim).direction),
+          weaponId: equippedWeapon,
+        }
+    }
+
+    const presentation = getWeaponPresentation(equippedWeapon)
+    const elevation = (presentation.restElevation * Math.PI) / 180
+    return {
+      direction: { x: Math.cos(elevation) * player.facing, y: Math.sin(elevation) },
+      weaponId: equippedWeapon,
+    }
+  }
+
+  private renderHeldWeapon(
+    actorCenter: Vector,
+    direction: Vector,
+    weaponId: WeaponId,
+    reaction: Reaction | undefined,
+    facing: number,
+  ): void {
+    const presentation = getWeaponPresentation(weaponId)
+    const policy = this.weaponMotionPolicy(weaponId)
+    const firedAge = this.visualTime - (reaction?.firedAt ?? -Infinity)
+    const recoilProgress =
+      reaction?.fireWeapon === weaponId && policy.recoilDurationMs > 0
+        ? Phaser.Math.Clamp(firedAge / (policy.recoilDurationMs / 1000), 0, 1)
+        : 1
+    const recoil = policy.recoilDistance * (1 - recoilProgress)
+    const forward = normalizeDirection(direction, { x: facing, y: 0 })
+    const origin = {
+      x: actorCenter.x - forward.x * recoil,
+      y:
+        actorCenter.y -
+        forward.y * recoil +
+        (!this.preferences.reducedMotion &&
+        reaction?.equippedAt !== undefined &&
+        reaction.equippedWeapon === weaponId
+          ? Math.max(0, 1 - (this.visualTime - reaction.equippedAt) / 0.16) * 7
+          : 0),
+    }
+    const modelScale = weaponModelScale(weaponId)
+    const handedness = heldWeaponHandedness(forward, facing)
+    const posePoint = (x: number, y: number) =>
+      transformLocalPoint(origin, forward, { x, y: y * handedness })
+    const local = (x: number, y: number) =>
+      posePoint(x * modelScale, y * modelScale)
+    const grip = local(presentation.grip.x, presentation.grip.y)
+    const support = local(
+      Math.min(presentation.body.length * 0.62, presentation.muzzle.x - 5),
+      presentation.grip.y * 0.35,
+    )
+    const shoulderBack = posePoint(-5, 4.5)
+    const shoulderFront = posePoint(1, -2.5)
+
+    this.actorGraphics
+      .lineStyle(7, INK_COLOR)
+      .lineBetween(shoulderBack.x, shoulderBack.y, grip.x, grip.y)
+      .lineBetween(shoulderFront.x, shoulderFront.y, support.x, support.y)
+      .lineStyle(4, 0xffdca8)
+      .lineBetween(shoulderBack.x, shoulderBack.y, grip.x, grip.y)
+      .lineBetween(shoulderFront.x, shoulderFront.y, support.x, support.y)
+
+    this.drawWeaponModel(this.actorGraphics, weaponId, local, modelScale)
+    this.actorGraphics
+      .fillStyle(INK_COLOR)
+      .fillCircle(grip.x, grip.y, 4.2)
+      .fillCircle(support.x, support.y, 4.2)
+      .fillStyle(0xffe2b2)
+      .fillCircle(grip.x, grip.y, 2.5)
+      .fillCircle(support.x, support.y, 2.5)
+  }
+
+  private drawWeaponModel(
+    graphics: Phaser.GameObjects.Graphics,
+    weaponId: WeaponId,
+    local: (x: number, y: number) => Vector,
+    shapeScale: number,
+  ): void {
+    const presentation = getWeaponPresentation(weaponId)
+    const outline = Math.max(1.25, 3 * shapeScale)
+    const polygon = (points: Array<[number, number]>, color: number): void => {
+      const worldPoints = points.map(([x, y]) => {
+        const point = local(x, y)
+        return new Phaser.Math.Vector2(point.x, point.y)
+      })
+      graphics
+        .fillStyle(color)
+        .fillPoints(worldPoints, true)
+        .lineStyle(outline, INK_COLOR)
+        .strokePoints(worldPoints, true)
+    }
+    const line = (width: number, color: number, from: [number, number], to: [number, number]) => {
+      const start = local(...from)
+      const end = local(...to)
+      const innerWidth = Math.max(1, width * shapeScale)
+      graphics
+        .lineStyle(innerWidth + outline, INK_COLOR)
+        .lineBetween(start.x, start.y, end.x, end.y)
+        .lineStyle(innerWidth, color)
+        .lineBetween(start.x, start.y, end.x, end.y)
+    }
+    const body = presentation.body
+    const halfWidth = body.width / 2
+
+    switch (presentation.heldModel) {
+      case 'shoulder-rocket-tube':
+        polygon(
+          [
+            [-7, -halfWidth * 0.7],
+            [body.length - 2, -halfWidth * 0.7],
+            [body.length - 2, halfWidth * 0.7],
+            [-7, halfWidth * 0.7],
+          ],
+          presentation.colors.primary,
+        )
+        polygon(
+          [
+            [body.length - 5, -halfWidth],
+            [presentation.muzzle.x + 2, -halfWidth * 1.15],
+            [presentation.muzzle.x + 2, halfWidth * 1.15],
+            [body.length - 5, halfWidth],
+          ],
+          presentation.colors.accent,
+        )
+        line(3, presentation.colors.accent, [-5, 0], [body.length - 7, 0])
+        return
+      case 'compact-grenade-cup-launcher':
+        polygon(
+          [
+            [-6, -halfWidth * 0.45],
+            [body.length - 7, -halfWidth * 0.6],
+            [body.length - 7, halfWidth * 0.6],
+            [-6, halfWidth * 0.45],
+          ],
+          presentation.colors.primary,
+        )
+        polygon(
+          [
+            [body.length - 9, -halfWidth],
+            [presentation.muzzle.x + 2, -halfWidth * 0.85],
+            [presentation.muzzle.x + 2, halfWidth * 0.85],
+            [body.length - 9, halfWidth],
+          ],
+          presentation.colors.accent,
+        )
+        line(4, presentation.colors.primary, [presentation.grip.x, 3], [presentation.grip.x - 2, 13])
+        return
+      case 'wide-scrap-blunderbuss':
+        polygon(
+          [
+            [-7, -halfWidth * 0.35],
+            [body.length * 0.45, -halfWidth * 0.45],
+            [presentation.muzzle.x + 2, -halfWidth],
+            [presentation.muzzle.x + 2, halfWidth],
+            [body.length * 0.45, halfWidth * 0.45],
+            [-7, halfWidth * 0.35],
+          ],
+          presentation.colors.primary,
+        )
+        line(3, presentation.colors.accent, [body.length * 0.5, -halfWidth * 0.45], [presentation.muzzle.x, -halfWidth * 0.85])
+        line(3, presentation.colors.accent, [body.length * 0.5, halfWidth * 0.45], [presentation.muzzle.x, halfWidth * 0.85])
+        return
+      case 'heavy-segmented-cluster-canister':
+        polygon(
+          [
+            [-6, -halfWidth * 0.7],
+            [presentation.muzzle.x, -halfWidth * 0.7],
+            [presentation.muzzle.x, halfWidth * 0.7],
+            [-6, halfWidth * 0.7],
+          ],
+          presentation.colors.primary,
+        )
+        for (const segment of [5, 16, 27, 38])
+          line(3, presentation.colors.accent, [segment, -halfWidth * 0.7], [segment, halfWidth * 0.7])
+        return
+      case 'mint-tuning-fork-teleporter': {
+        polygon(
+          [
+            [-5, -halfWidth * 0.5],
+            [body.length * 0.48, -halfWidth * 0.5],
+            [body.length * 0.48, halfWidth * 0.5],
+            [-5, halfWidth * 0.5],
+          ],
+          presentation.colors.primary,
+        )
+        line(4, presentation.colors.accent, [body.length * 0.42, -3], [presentation.muzzle.x, -halfWidth])
+        line(4, presentation.colors.accent, [body.length * 0.42, 3], [presentation.muzzle.x, halfWidth])
+        const ring = local(body.length * 0.7, 0)
+        graphics
+          .lineStyle(Math.max(1.25, 2.5 * shapeScale), INK_COLOR)
+          .strokeCircle(ring.x, ring.y, 5.5 * shapeScale)
+          .lineStyle(Math.max(1, 1.5 * shapeScale), presentation.colors.accent)
+          .strokeCircle(ring.x, ring.y, 4 * shapeScale)
+      }
+    }
   }
 
   private renderOverlay(): void {
@@ -727,37 +1124,204 @@ export class MatchScene extends Phaser.Scene {
         else this.renderAimGuide(this.projectileOrigin(aim.direction), aim.direction, aim.power)
       }
     }
+    this.renderProjectileTrails()
     for (const projectile of this.source.state.projectiles) this.renderProjectile(projectile)
   }
 
+  private reconcileProjectileTrails(): void {
+    const present = new Set<string>()
+    for (const projectile of this.source.state.projectiles) {
+      present.add(projectile.id)
+      const policy = this.weaponMotionPolicy(projectile.weaponId)
+      const cap = Math.max(1, policy.trailSampleCount)
+      const existing = this.projectileTrails.get(projectile.id)
+      if (!existing) {
+        this.projectileTrails.set(projectile.id, {
+          weaponId: projectile.weaponId,
+          kind: projectile.kind,
+          points: [{ ...projectile.position }],
+        })
+        continue
+      }
+      existing.weaponId = projectile.weaponId
+      existing.kind = projectile.kind
+      const last = existing.points[existing.points.length - 1]
+      const movement = Math.hypot(projectile.position.x - last.x, projectile.position.y - last.y)
+      if (movement >= Math.max(0.8, policy.trailWidth * 0.35))
+        existing.points.push({ ...projectile.position })
+      if (existing.points.length > cap) existing.points.splice(0, existing.points.length - cap)
+    }
+    for (const id of this.projectileTrails.keys())
+      if (!present.has(id)) this.projectileTrails.delete(id)
+    while (this.projectileTrails.size > MAX_PROJECTILE_TRAILS) {
+      const oldest = this.projectileTrails.keys().next().value as string | undefined
+      if (!oldest) break
+      this.projectileTrails.delete(oldest)
+    }
+  }
+
+  private renderProjectileTrails(): void {
+    for (const trail of this.projectileTrails.values()) {
+      const policy = this.weaponMotionPolicy(trail.weaponId)
+      const points = trail.points.slice(-policy.trailSampleCount)
+      if (points.length < 2) continue
+      const presentation = getWeaponPresentation(trail.weaponId)
+      for (let index = 1; index < points.length; index += 1) {
+        const alpha = (index / points.length) * 0.72
+        const width =
+          policy.trailWidth * (trail.kind === 'cluster-child' ? 0.65 : 1) *
+          (0.45 + index / points.length / 2)
+        this.overlayGraphics
+          .lineStyle(width, presentation.trail.color, alpha)
+          .lineBetween(points[index - 1].x, points[index - 1].y, points[index].x, points[index].y)
+      }
+    }
+  }
+
   private renderProjectile(projectile: SimProjectile): void {
-    const color =
-      projectile.weaponId === 'timed-grenade'
-        ? 0x57b89e
-        : projectile.kind === 'cluster-child'
-          ? 0xed7090
-          : 0xffd75b
-    this.overlayGraphics
-      .fillStyle(0x473b31)
-      .fillCircle(projectile.position.x + 2, projectile.position.y + 2, projectile.radius + 2)
-    this.overlayGraphics
-      .fillStyle(color)
-      .fillCircle(projectile.position.x, projectile.position.y, projectile.radius)
-    if (projectile.weaponId === 'timed-grenade') {
-      const pulse = 2 + Math.sin(this.visualTime * 12) * 1.5
+    const presentation = getWeaponPresentation(projectile.weaponId)
+    const policy = this.weaponMotionPolicy(projectile.weaponId)
+    const direction = normalizeDirection(projectile.velocity)
+    const local = (x: number, y: number) =>
+      transformLocalPoint(projectile.position, direction, { x, y })
+    const polygon = (points: Array<[number, number]>, color: number, outline = 2): void => {
+      const worldPoints = points.map(([x, y]) => {
+        const point = local(x, y)
+        return new Phaser.Math.Vector2(point.x, point.y)
+      })
       this.overlayGraphics
-        .fillStyle(0xfff6d8)
-        .fillCircle(projectile.position.x + 2, projectile.position.y - projectile.radius - 2, pulse)
-    } else if (projectile.weaponId === 'basic-rocket') {
-      const speed = Math.hypot(projectile.velocity.x, projectile.velocity.y) || 1
+        .fillStyle(color)
+        .fillPoints(worldPoints, true)
+        .lineStyle(outline, INK_COLOR)
+        .strokePoints(worldPoints, true)
+    }
+
+    if (projectile.kind === 'cluster-child') {
+      polygon(
+        [
+          [-6, 0],
+          [-2, -4],
+          [4, -3],
+          [7, 0],
+          [4, 3],
+          [-2, 4],
+        ],
+        presentation.colors.accent,
+      )
+      const bandA = local(-1, -3.5)
+      const bandB = local(-1, 3.5)
       this.overlayGraphics
-        .lineStyle(3, 0xff9a55, 0.8)
-        .lineBetween(
-          projectile.position.x,
-          projectile.position.y,
-          projectile.position.x - (projectile.velocity.x / speed) * 14,
-          projectile.position.y - (projectile.velocity.y / speed) * 14,
+        .lineStyle(2, presentation.colors.primary)
+        .lineBetween(bandA.x, bandA.y, bandB.x, bandB.y)
+      return
+    }
+
+    switch (presentation.projectileModel) {
+      case 'toy-rocket': {
+        const flameLength = policy.pulse ? 8 + Math.sin(this.visualTime * 22) * 2 : 7
+        polygon(
+          [
+            [-9, -2.5],
+            [-9 - flameLength, 0],
+            [-9, 2.5],
+          ],
+          presentation.colors.flash,
+          1.5,
         )
+        polygon(
+          [
+            [-8, -4],
+            [5, -4],
+            [10, 0],
+            [5, 4],
+            [-8, 4],
+          ],
+          presentation.colors.primary,
+        )
+        polygon(
+          [
+            [-6, -3],
+            [-11, -8],
+            [-1, -4],
+          ],
+          presentation.colors.accent,
+          1.5,
+        )
+        polygon(
+          [
+            [-6, 3],
+            [-11, 8],
+            [-1, 4],
+          ],
+          presentation.colors.accent,
+          1.5,
+        )
+        break
+      }
+      case 'clockwork-grenade': {
+        const radius = projectile.radius + 1
+        this.overlayGraphics
+          .fillStyle(presentation.colors.primary)
+          .fillCircle(projectile.position.x, projectile.position.y, radius)
+          .lineStyle(2.5, INK_COLOR)
+          .strokeCircle(projectile.position.x, projectile.position.y, radius)
+          .lineStyle(1.5, presentation.colors.accent)
+          .strokeCircle(projectile.position.x, projectile.position.y, radius * 0.55)
+        const hand = local(radius * 0.45, 0)
+        this.overlayGraphics
+          .lineStyle(1.5, presentation.colors.flash)
+          .lineBetween(projectile.position.x, projectile.position.y, hand.x, hand.y)
+        const fuseStart = local(0, -radius)
+        const fuseEnd = local(3, -radius - 5)
+        const pin = local(-2, -radius - 3)
+        this.overlayGraphics
+          .lineStyle(2.5, INK_COLOR)
+          .lineBetween(fuseStart.x, fuseStart.y, fuseEnd.x, fuseEnd.y)
+          .lineStyle(1.5, presentation.colors.accent)
+          .strokeCircle(pin.x, pin.y, 2.5)
+          .fillStyle(presentation.colors.flash)
+          .fillCircle(fuseEnd.x, fuseEnd.y, 2)
+        if (policy.pulse) {
+          const pulse = radius + 3 + Math.sin(this.visualTime * 12) * 1.5
+          this.overlayGraphics
+            .lineStyle(1.5, presentation.colors.accent, 0.45)
+            .strokeCircle(projectile.position.x, projectile.position.y, pulse)
+        }
+        break
+      }
+      case 'segmented-cluster-canister': {
+        polygon(
+          [
+            [-10, -5],
+            [7, -5],
+            [10, -2],
+            [10, 2],
+            [7, 5],
+            [-10, 5],
+          ],
+          presentation.colors.primary,
+        )
+        for (const x of [-5, 1, 7]) {
+          const top = local(x, -5)
+          const bottom = local(x, 5)
+          this.overlayGraphics
+            .lineStyle(2, presentation.colors.accent)
+            .lineBetween(top.x, top.y, bottom.x, bottom.y)
+        }
+        break
+      }
+      case 'scrap-pellet':
+        polygon(
+          [
+            [-4, -3],
+            [5, 0],
+            [-4, 3],
+          ],
+          presentation.colors.accent,
+        )
+        break
+      case 'none':
+        break
     }
   }
 
@@ -838,16 +1402,24 @@ export class MatchScene extends Phaser.Scene {
 
   private renderHud(): void {
     const state = this.source.state
+    const rackX = 20
+    const rackY = VIEWPORT_HEIGHT - 86
+    const rackWidth = VIEWPORT_WIDTH - rackX * 2
+    const rackGap = 6
+    const rackCardWidth = (rackWidth - rackGap * (WEAPON_ORDER.length - 1)) / WEAPON_ORDER.length
+    const rackCardHeight = 70
     this.hudGraphics.clear().fillStyle(0x473b31, 0.88)
-    this.hudGraphics
-      .fillRoundedRect(VIEWPORT_WIDTH / 2 - 64, 9, 128, 47, 18)
-      .fillRoundedRect(15, VIEWPORT_HEIGHT - 72, VIEWPORT_WIDTH - 30, 57, 14)
+    this.hudGraphics.fillRoundedRect(VIEWPORT_WIDTH / 2 - 64, 9, 128, 47, 18)
     state.players.forEach((player, index) => {
       const cardX = player.teamId === 0 ? 12 : VIEWPORT_WIDTH - 237
       const cardY = 10 + player.teamSlot * 52
       this.hudGraphics.fillStyle(0x473b31, 0.88).fillRoundedRect(cardX, cardY, 225, 46, 10)
       this.hudGraphics
-        .fillStyle(this.preferences.highContrastHud ? 0x72e58d : ACTOR_COLORS[index])
+        .fillStyle(
+          this.preferences.highContrastHud
+            ? 0x72e58d
+            : ACTOR_COLORS[index % ACTOR_COLORS.length],
+        )
         .fillRoundedRect(
           player.teamId === 0 ? cardX + 20 : cardX + 55,
           cardY + 30,
@@ -870,15 +1442,58 @@ export class MatchScene extends Phaser.Scene {
     this.hudGraphics
       .fillStyle(this.source.timerRemainingSeconds <= 5 ? 0xe65d3d : 0xf7bd3f)
       .fillCircle(VIEWPORT_WIDTH / 2, 31, 18)
+    this.hudGraphics
+      .fillStyle(0x24313a, 0.94)
+      .fillRoundedRect(VIEWPORT_WIDTH / 2 - 245, rackY - 27, 490, 22, 11)
+    WEAPON_ORDER.forEach((id, index) => {
+      const weapon = WEAPONS[id]
+      const ammo = this.source.activePlayer.inventory[id]
+      const available = ammo === 'unlimited' || ammo > 0
+      const selected = this.source.activePlayer.selectedWeapon === id
+      const cardX = rackX + index * (rackCardWidth + rackGap)
+      const presentation = getWeaponPresentation(id)
+      const cardColor = selected
+        ? 0xffe29a
+        : available
+          ? this.preferences.highContrastHud
+            ? 0x111111
+            : 0x31464d
+          : 0x202a2d
+      this.hudGraphics
+        .fillStyle(cardColor, 0.97)
+        .fillRoundedRect(cardX, rackY, rackCardWidth, rackCardHeight, 11)
+        .lineStyle(selected ? 3 : 1.5, selected ? presentation.colors.accent : 0xfff4d8, selected ? 1 : 0.42)
+        .strokeRoundedRect(cardX, rackY, rackCardWidth, rackCardHeight, 11)
+      const iconScale = 0.52
+      const iconOrigin = { x: cardX + 34, y: rackY + 39 }
+      this.drawWeaponModel(
+        this.hudGraphics,
+        id,
+        (x, y) => ({ x: iconOrigin.x + x * iconScale, y: iconOrigin.y + y * iconScale }),
+        iconScale,
+      )
+      if (!available)
+        this.hudGraphics
+          .lineStyle(3, 0xe65d3d, 0.9)
+          .lineBetween(cardX + 20, rackY + 53, cardX + 58, rackY + 20)
+      const ammoLabel = ammo === 'unlimited' ? 'UNLIMITED' : ammo > 0 ? `${ammo} LEFT` : 'EMPTY'
+      this.weaponHudTexts[index]
+        .setPosition(cardX + 69, rackY + 14)
+        .setOrigin(0, 0)
+        .setAlpha(available || selected || this.preferences.highContrastHud ? 1 : 0.5)
+        .setColor(selected ? '#24313a' : '#fff8df')
+        .setText(`${index + 1}  ${weapon.displayName.toUpperCase()}\n${ammoLabel}`)
+    })
     this.canvas.setAttribute('data-wind', String(state.wind))
     this.canvas.setAttribute(
       'data-effect-count',
-      String(this.burstEffects.length + this.damageEffects.length + this.traceEffects.length),
+      String(
+        this.burstEffects.length +
+          this.damageEffects.length +
+          this.traceEffects.length +
+          this.weaponEffects.length,
+      ),
     )
-    const weapons = WEAPON_ORDER.map((id, index) => {
-      const ammo = this.source.activePlayer.inventory[id]
-      return `${this.source.activePlayer.selectedWeapon === id ? '◆' : '◇'} ${index + 1} ${ammo === 'unlimited' ? '∞' : ammo}`
-    }).join('    ')
     const hint =
       this.selectedWeapon().aimMode === 'target-position'
         ? 'Point at safe ground · Space to warp'
@@ -886,21 +1501,21 @@ export class MatchScene extends Phaser.Scene {
           ? 'Short-range spread · Space to fire'
           : `Power ${Math.round((this.dragPreview ?? this.shotAim).power)}% · drag backward · Space to fire`
     this.bottomHud
-      .setPosition(31, VIEWPORT_HEIGHT - 64)
-      .setOrigin(0)
-      .setText(`${weapons}\n${this.selectedWeapon().displayName} · ${hint}`)
+      .setPosition(VIEWPORT_WIDTH / 2, rackY - 23)
+      .setOrigin(0.5, 0)
+      .setText(`${this.selectedWeapon().displayName} · ${hint}`)
     if (this.introDuration > 0) {
       const countdown = this.introDuration > 0.6 ? Math.ceil(this.introDuration / 0.6) : 'Begin'
       this.bannerText
         .setText(
-          `${getMap(state.config.mapId).displayName}\n${state.config.mode === '2v2' ? 'Team Comet vs Team Ember' : `${state.players[0].name} vs ${state.players[1].name}`}\n${countdown}`,
+          `${getMap(state.config.mapId).displayName}\n${state.config.mode !== '1v1' ? 'Team Comet vs Team Ember' : `${state.players[0].name} vs ${state.players[1].name}`}\n${countdown}`,
         )
         .setVisible(true)
     } else if (this.turnBannerDuration > 0)
       this.bannerText
         .setText(
           this.bannerOverride ||
-            `${this.source.activePlayer.name}'s Turn\n${state.config.mode === '2v2' ? `Team ${this.source.activePlayer.teamId === 0 ? 'Comet' : 'Ember'} · ` : ''}${this.windLabel(state.wind)}`,
+            `${this.source.activePlayer.name}'s Turn\n${state.config.mode !== '1v1' ? `Team ${this.source.activePlayer.teamId === 0 ? 'Comet' : 'Ember'} · ` : ''}${this.windLabel(state.wind)}`,
         )
         .setVisible(true)
     else this.bannerText.setVisible(false)
@@ -930,12 +1545,49 @@ export class MatchScene extends Phaser.Scene {
         this.turnBannerDuration = 0.7
         return
       case 'weapon-selected':
+        {
+          const state = reaction(event.playerId)
+          state.equippedAt = this.visualTime
+          state.equippedWeapon = event.weaponId
+          this.reactions.set(event.playerId, state)
+        }
         this.audio.play('weapon-select')
         return
       case 'weapon-fired': {
         const state = reaction(event.playerId)
-        state.firedUntil = this.visualTime + 0.2
+        const policy = this.weaponMotionPolicy(event.weaponId)
+        const player = this.source.state.players.find((candidate) => candidate.id === event.playerId)
+        const direction = normalizeDirection(event.direction, { x: player?.facing ?? 1, y: 0 })
+        state.firedAt = this.visualTime
+        state.firedUntil = this.visualTime + Math.max(0.14, policy.recoilDurationMs / 1000)
+        state.fireDirection = direction
+        state.fireWeapon = event.weaponId
         this.reactions.set(event.playerId, state)
+        const effectPosition =
+          event.weaponId === 'teleporter'
+            ? event.origin
+            : {
+                x: event.origin.x + direction.x * 24,
+                y: event.origin.y + direction.y * 24,
+              }
+        const requestedLifetime =
+          event.weaponId === 'teleporter'
+            ? 360
+            : event.weaponId === 'scatter-shot'
+              ? 150
+              : event.weaponId === 'cluster-charge'
+                ? 210
+                : event.weaponId === 'timed-grenade'
+                  ? 195
+                  : 180
+        this.addWeaponEffect(
+          'muzzle',
+          event.weaponId,
+          effectPosition,
+          direction,
+          requestedLifetime,
+          event.sequence,
+        )
         const cue: Record<string, SoundCue> = {
           'basic-rocket': 'rocket-fire',
           'timed-grenade': 'grenade-fire',
@@ -949,15 +1601,38 @@ export class MatchScene extends Phaser.Scene {
       case 'projectile-spawned':
         return
       case 'projectile-bounced':
+        this.addWeaponEffect(
+          'bounce',
+          event.weaponId,
+          event.position,
+          { x: 0, y: -1 },
+          240,
+          event.sequence,
+        )
         this.audio.play('grenade-bounce')
         return
       case 'cluster-split':
         this.addBurst('explosion', event.position, 25, event.sequence, 'cluster-charge')
+        this.addWeaponEffect(
+          'split',
+          'cluster-charge',
+          event.position,
+          { x: 1, y: 0 },
+          300,
+          event.sequence,
+        )
         this.audio.play('cluster-split')
         return
-      case 'scatter-fired':
-        this.traceEffects.push({ origin: event.origin, endpoints: event.endpoints, age: 0 })
+      case 'scatter-fired': {
+        const lifetime =
+          this.weaponMotionPolicy('scatter-shot').transientDurationMs(
+            this.preferences.reducedMotion ? 100 : 220,
+          ) / 1000
+        this.traceEffects.push({ origin: event.origin, endpoints: event.endpoints, age: 0, lifetime })
+        if (this.traceEffects.length > 16)
+          this.traceEffects.splice(0, this.traceEffects.length - 16)
         return
+      }
       case 'explosion-resolved':
         this.actionFocus = { ...event.position }
         this.actionFocusUntil = this.visualTime + (this.preferences.reducedMotion ? 0 : 0.65)
@@ -978,8 +1653,8 @@ export class MatchScene extends Phaser.Scene {
       case 'teleported':
         this.actionFocus = { ...event.to }
         this.actionFocusUntil = this.visualTime + (this.preferences.reducedMotion ? 0 : 0.5)
-        this.addBurst('teleport', event.from, 28, event.sequence)
-        this.addBurst('teleport', event.to, 34, event.sequence + 1)
+        this.addBurst('teleport', event.from, 28, event.sequence, 'teleporter')
+        this.addBurst('teleport', event.to, 34, event.sequence + 1, 'teleporter')
         return
       case 'player-jumped':
         this.audio.play('jump')
@@ -1015,6 +1690,10 @@ export class MatchScene extends Phaser.Scene {
           age: 0,
           label,
         })
+        if (this.damageEffects.length > 24) {
+          const removed = this.damageEffects.splice(0, this.damageEffects.length - 24)
+          for (const effect of removed) effect.label.destroy()
+        }
         const state = reaction(event.playerId)
         state.hurtUntil = this.visualTime + (this.preferences.reducedMotion ? 0.12 : 0.35)
         this.reactions.set(event.playerId, state)
@@ -1037,6 +1716,34 @@ export class MatchScene extends Phaser.Scene {
     }
   }
 
+  private weaponMotionPolicy(weaponId: WeaponId): WeaponMotionPolicy {
+    return getWeaponMotionPolicy(weaponId, this.preferences.reducedMotion)
+  }
+
+  private addWeaponEffect(
+    kind: WeaponEffect['kind'],
+    weaponId: WeaponId,
+    position: Vector,
+    direction: Vector,
+    requestedLifetimeMs: number,
+    seed: number,
+  ): void {
+    const lifetime =
+      this.weaponMotionPolicy(weaponId).transientDurationMs(requestedLifetimeMs) / 1000
+    if (lifetime <= 0) return
+    this.weaponEffects.push({
+      kind,
+      weaponId,
+      position: { ...position },
+      direction: normalizeDirection(direction),
+      age: 0,
+      lifetime,
+      seed,
+    })
+    if (this.weaponEffects.length > MAX_WEAPON_EFFECTS)
+      this.weaponEffects.splice(0, this.weaponEffects.length - MAX_WEAPON_EFFECTS)
+  }
+
   private addBurst(
     kind: BurstEffect['kind'],
     position: Vector,
@@ -1044,6 +1751,11 @@ export class MatchScene extends Phaser.Scene {
     seed: number,
     weaponId?: SimProjectile['weaponId'],
   ): void {
+    const lifetime = weaponId
+      ? this.weaponMotionPolicy(weaponId).transientDurationMs(700) / 1000
+      : this.preferences.reducedMotion
+        ? 0.22
+        : 0.7
     this.burstEffects.push({
       kind,
       position: { ...position },
@@ -1051,7 +1763,7 @@ export class MatchScene extends Phaser.Scene {
       radius,
       seed,
       age: 0,
-      lifetime: this.preferences.reducedMotion ? 0.22 : 0.7,
+      lifetime,
     })
     if (this.burstEffects.length > 24) this.burstEffects.splice(0, this.burstEffects.length - 24)
   }
@@ -1077,16 +1789,107 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private renderEffects(): void {
+    for (const effect of this.weaponEffects) {
+      const progress = Phaser.Math.Clamp(effect.age / effect.lifetime, 0, 1)
+      const alpha = 1 - progress
+      const presentation = getWeaponPresentation(effect.weaponId)
+      const policy = this.weaponMotionPolicy(effect.weaponId)
+      const forward = normalizeDirection(effect.direction)
+      const across = perpendicular(forward)
+      const point = (forwardDistance: number, acrossDistance: number): Vector => ({
+        x:
+          effect.position.x +
+          forward.x * forwardDistance +
+          across.x * acrossDistance,
+        y:
+          effect.position.y +
+          forward.y * forwardDistance +
+          across.y * acrossDistance,
+      })
+
+      if (effect.kind === 'muzzle' && effect.weaponId === 'teleporter') {
+        const ringProgress = policy.pulse ? progress : Math.min(progress, 0.35)
+        this.overlayGraphics
+          .lineStyle(3, presentation.colors.accent, alpha)
+          .strokeCircle(effect.position.x, effect.position.y, 8 + ringProgress * 22)
+          .lineStyle(2, presentation.colors.flash, alpha * 0.8)
+          .strokeCircle(effect.position.x, effect.position.y, 3 + ringProgress * 14)
+        continue
+      }
+
+      if (effect.kind === 'muzzle') {
+        const length =
+          effect.weaponId === 'scatter-shot'
+            ? 18
+            : effect.weaponId === 'cluster-charge'
+              ? 14
+              : 12
+        const width = effect.weaponId === 'scatter-shot' ? 12 : 7
+        const tip = point(length * (1 - progress * 0.35), 0)
+        const upper = point(1, -width * (1 - progress * 0.45))
+        const lower = point(1, width * (1 - progress * 0.45))
+        this.overlayGraphics
+          .fillStyle(presentation.colors.flash, alpha)
+          .fillTriangle(upper.x, upper.y, lower.x, lower.y, tip.x, tip.y)
+          .lineStyle(2, presentation.colors.accent, alpha)
+          .lineBetween(upper.x, upper.y, tip.x, tip.y)
+          .lineBetween(lower.x, lower.y, tip.x, tip.y)
+        if (effect.weaponId === 'cluster-charge') {
+          for (const offset of [-7, 0, 7]) {
+            const spark = point(7 + progress * 8, offset)
+            this.overlayGraphics
+              .fillStyle(presentation.colors.accent, alpha)
+              .fillRect(spark.x - 1.5, spark.y - 1.5, 3, 3)
+          }
+        }
+        continue
+      }
+
+      if (effect.kind === 'bounce') {
+        const travel = policy.pulse ? progress * 13 : 2
+        for (let spark = 0; spark < 5; spark += 1) {
+          const angle = -Math.PI * 0.9 + (spark / 4) * Math.PI * 0.8
+          const distance = 4 + travel * (0.65 + spark * 0.08)
+          const endpoint = {
+            x: effect.position.x + Math.cos(angle) * distance,
+            y: effect.position.y + Math.sin(angle) * distance,
+          }
+          this.overlayGraphics
+            .lineStyle(2, spark % 2 ? presentation.colors.accent : presentation.colors.flash, alpha)
+            .lineBetween(effect.position.x, effect.position.y, endpoint.x, endpoint.y)
+        }
+        continue
+      }
+
+      const spokeDistance = (policy.pulse ? 8 + progress * 22 : 12)
+      for (let spoke = 0; spoke < 10; spoke += 1) {
+        const angle = effect.seed * 0.13 + (spoke / 10) * Math.PI * 2
+        const inner = spokeDistance * 0.35
+        this.overlayGraphics
+          .lineStyle(
+            spoke % 2 ? 2 : 3,
+            spoke % 2 ? presentation.colors.accent : presentation.colors.impact,
+            alpha,
+          )
+          .lineBetween(
+            effect.position.x + Math.cos(angle) * inner,
+            effect.position.y + Math.sin(angle) * inner,
+            effect.position.x + Math.cos(angle) * spokeDistance,
+            effect.position.y + Math.sin(angle) * spokeDistance,
+          )
+      }
+    }
     for (const effect of this.burstEffects) {
       const progress = effect.age / effect.lifetime
-      const color = effect.kind === 'teleport' ? 0x74f1d0 : 0xffc04d
+      const colors = effect.weaponId ? getWeaponPresentation(effect.weaponId).colors : null
+      const color = colors?.impact ?? (effect.kind === 'teleport' ? 0x74f1d0 : 0xffc04d)
       const size = effect.radius * (0.25 + progress * 0.9)
       this.overlayGraphics
         .lineStyle(4 - progress * 2, color, 1 - progress)
         .strokeCircle(effect.position.x, effect.position.y, size)
       if (progress < 0.3)
         this.overlayGraphics
-          .fillStyle(0xfff7cf, 1 - progress / 0.3)
+          .fillStyle(colors?.flash ?? 0xfff7cf, 1 - progress / 0.3)
           .fillCircle(effect.position.x, effect.position.y, effect.radius * (0.45 - progress * 0.6))
       if (!this.preferences.reducedMotion && effect.kind === 'explosion') {
         const fragments = effect.weaponId === 'cluster-charge' ? 3 : 6
@@ -1094,7 +1897,10 @@ export class MatchScene extends Phaser.Scene {
           const angle = effect.seed * 0.73 + index * 2.4
           const distance = progress * effect.radius * 0.85
           this.overlayGraphics
-            .fillStyle(index % 2 ? 0x8f6848 : 0xd7ad66, 1 - progress)
+            .fillStyle(
+              index % 2 ? (colors?.impact ?? 0x8f6848) : (colors?.accent ?? 0xd7ad66),
+              1 - progress,
+            )
             .fillCircle(
               effect.position.x + Math.cos(angle) * distance,
               effect.position.y + Math.sin(angle) * distance - progress * 12,
@@ -1117,26 +1923,28 @@ export class MatchScene extends Phaser.Scene {
       }
     }
     for (const trace of this.traceEffects) {
-      const alpha = 1 - trace.age / 0.22
-      this.overlayGraphics.lineStyle(2, 0xfff2a6, alpha)
+      const alpha = 1 - trace.age / trace.lifetime
+      const colors = getWeaponPresentation('scatter-shot').colors
+      this.overlayGraphics.lineStyle(2, colors.flash, alpha)
       for (const endpoint of trace.endpoints)
         this.overlayGraphics.lineBetween(trace.origin.x, trace.origin.y, endpoint.x, endpoint.y)
       for (const endpoint of trace.endpoints)
-        this.overlayGraphics.fillStyle(0xffd36b, alpha).fillCircle(endpoint.x, endpoint.y, 2.5)
+        this.overlayGraphics.fillStyle(colors.impact, alpha).fillCircle(endpoint.x, endpoint.y, 2.5)
     }
     for (const damage of this.damageEffects) {
       const player = this.source.state.players.find((candidate) => candidate.id === damage.playerId)
       if (!player) continue
       const progress = damage.age
+      const rise = this.preferences.reducedMotion ? 0 : progress * 20
       this.overlayGraphics
         .fillStyle(damage.selfDamage ? 0xffb061 : 0xffffff, 1 - progress)
-        .fillRoundedRect(player.position.x - 18, player.position.y - 35 - progress * 20, 36, 18, 6)
+        .fillRoundedRect(player.position.x - 18, player.position.y - 35 - rise, 36, 18, 6)
       this.overlayGraphics.fillStyle(0x8f2f2f, 1 - progress)
       const bars = Math.min(8, Math.max(1, Math.round(damage.amount / 8)))
       for (let bar = 0; bar < bars; bar += 1)
         this.overlayGraphics.fillRect(
           player.position.x - 12 + bar * 3,
-          player.position.y - 29 - progress * 20,
+          player.position.y - 29 - rise,
           2,
           6,
         )
