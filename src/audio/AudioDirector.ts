@@ -17,6 +17,7 @@ export type SoundCue =
   | 'mine-trigger'
   | 'knife-swing'
   | 'knife-hit'
+  | 'knife-block'
   | 'beacon-fire'
   | 'beacon-armed'
   | 'barrage-release'
@@ -26,6 +27,18 @@ export type SoundCue =
   | 'siege-fire'
   | 'cryo-fire'
   | 'freeze'
+  | 'rocket-impact'
+  | 'cannon-impact'
+  | 'mortar-impact'
+  | 'grenade-impact'
+  | 'cluster-impact'
+  | 'drill-impact'
+  | 'mine-impact'
+  | 'beacon-impact'
+  | 'fork-impact'
+  | 'shoe-impact'
+  | 'siege-impact'
+  | 'cryo-impact'
   | 'explosion'
   | 'teleport'
   | 'damage'
@@ -63,6 +76,7 @@ const frequencies: Record<SoundCue, readonly [number, number, number]> = {
   'mine-trigger': [880, 260, 0.12],
   'knife-swing': [720, 260, 0.08],
   'knife-hit': [230, 120, 0.09],
+  'knife-block': [1400, 310, 0.075],
   'beacon-fire': [260, 520, 0.14],
   'beacon-armed': [620, 820, 0.1],
   'barrage-release': [190, 70, 0.2],
@@ -72,6 +86,18 @@ const frequencies: Record<SoundCue, readonly [number, number, number]> = {
   'siege-fire': [72, 30, 0.3],
   'cryo-fire': [510, 920, 0.16],
   freeze: [940, 280, 0.24],
+  'rocket-impact': [125, 42, 0.2],
+  'cannon-impact': [760, 130, 0.11],
+  'mortar-impact': [82, 28, 0.3],
+  'grenade-impact': [150, 48, 0.2],
+  'cluster-impact': [210, 58, 0.14],
+  'drill-impact': [340, 64, 0.22],
+  'mine-impact': [112, 36, 0.22],
+  'beacon-impact': [180, 52, 0.18],
+  'fork-impact': [250, 72, 0.16],
+  'shoe-impact': [165, 82, 0.12],
+  'siege-impact': [62, 24, 0.38],
+  'cryo-impact': [1080, 190, 0.24],
   explosion: [90, 34, 0.26],
   teleport: [330, 920, 0.2],
   damage: [170, 115, 0.09],
@@ -129,7 +155,11 @@ export class AudioDirector {
       oscillator.type =
         cue === 'reflector-hit'
           ? 'square'
-          : cue === 'explosion' || cue === 'scatter-fire' || cue === 'siege-fire'
+          : cue === 'explosion' ||
+              cue === 'scatter-fire' ||
+              cue === 'siege-fire' ||
+              cue === 'siege-impact' ||
+              cue === 'shoe-impact'
           ? 'sawtooth'
           : 'sine'
       oscillator.frequency.setValueAtTime(startFrequency, start)

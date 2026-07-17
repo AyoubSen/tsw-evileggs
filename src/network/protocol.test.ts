@@ -89,11 +89,11 @@ describe('online protocol validation', () => {
 
   it('reports explicit compatibility failures', () => {
     expect(CURRENT_COMPATIBILITY).toMatchObject({
-      protocol: 'private-room-7',
+      protocol: 'private-room-8',
       snapshot: 7,
       maps: 'maps-7',
       weapons: 'weapons-4',
-      build: '1.5.0',
+      build: '1.6.0',
     })
     expect(compatibilityError(CURRENT_COMPATIBILITY)).toBeNull()
     expect(compatibilityError({ ...CURRENT_COMPATIBILITY, maps: 'maps-old' })).toMatch(

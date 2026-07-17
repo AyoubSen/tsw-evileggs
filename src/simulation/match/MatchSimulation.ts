@@ -836,6 +836,7 @@ export class MatchSimulation {
       y: origin.y + direction.y * range,
     }
     let target: SimPlayer | null = null
+    let blockedByTerrain = false
     for (let distance = 6; distance <= range; distance += 3) {
       const point = {
         x: origin.x + direction.x * distance,
@@ -843,6 +844,7 @@ export class MatchSimulation {
       }
       if (this.terrain.isSolid(point.x, point.y)) {
         endpoint = point
+        blockedByTerrain = true
         break
       }
       target =
@@ -866,6 +868,7 @@ export class MatchSimulation {
       origin,
       endpoint,
       targetPlayerId: target?.id ?? null,
+      result: target ? 'player' : blockedByTerrain ? 'terrain' : 'miss',
     })
   }
 

@@ -27,7 +27,7 @@ The following summary is based on active source and tests, not only earlier docu
 | Planned     | Replay product               | Snapshot serialization, deterministic command replay helpers, and checksums exist as internal/test foundations. Match recording, a durable replay format, viewer, playback controls, and sharing do not.                                                                                                                             |
 | Planned     | Product expansion            | Accounts, database persistence, chat, public teams, dedicated spectator controls, online custom maps, advanced map objects, invite links, broader custom rules, profiles, statistics, cosmetic ownership, and public discovery are not implemented. A local visual map editor with import/export and authoritative test play is implemented. |
 
-Current architectural constraints matter to future work: existing profile maps are adapted into map format v2 at startup rather than stored as external files; terrain materials, multi-level collision, and typed immutable map objects exist; online team modes use fixed seats and pause everyone for any disconnect; camera modes support variable worlds but do not yet provide manual overview panning; and room lookup is process-local. Match snapshots are version 7 and include map-content identity, freeze counters, beacons, and stable next IDs; online compatibility is protocol `private-room-7`, map registry `maps-7`, weapon registry `weapons-4`, and build `1.5.0`. Existing architecture details remain documented in [README.md](README.md).
+Current architectural constraints matter to future work: existing profile maps are adapted into map format v2 at startup rather than stored as external files; terrain materials, multi-level collision, and typed immutable map objects exist; online team modes use fixed seats and pause everyone for any disconnect; camera modes support variable worlds but do not yet provide manual overview panning; and room lookup is process-local. Match snapshots are version 7 and include map-content identity, freeze counters, beacons, and stable next IDs; online compatibility is protocol `private-room-8`, map registry `maps-7`, weapon registry `weapons-4`, and build `1.6.0`. Existing architecture details remain documented in [README.md](README.md).
 
 ## Product Principles
 
@@ -102,7 +102,7 @@ Player model customization includes modular original body parts or character com
 
 ### 3. Distinct Weapon and Projectile Presentation
 
-**Status:** Implemented; visual playtesting and tuning pending
+**Status:** Implemented through exhaustive visual recipes; visual playtesting and tuning pending
 
 **Purpose:** Make weapon choice and projectile state immediately readable while preserving simulation authority.
 
@@ -112,7 +112,7 @@ Player model customization includes modular original body parts or character com
 
 **Dependencies:** Existing weapon registry, projectile IDs, events, interpolation, and snapshot recovery. Player appearance work can precede or follow this milestone if render interfaces stay modular.
 
-**Broad scope:** A client-only procedural presentation registry now defines visible held models, grip/muzzle geometry, colors, recoil, projectile silhouettes, bounded trails, effects, and reduced-motion policy for all fifteen weapons. Characters use weapon-specific aiming/rest/firing poses with correct handed mirroring. Rockets, cannon shells, mortar shells, grenades, cluster parents and children, drills, beacon bombs, fork parents and children, shoes, siege rockets, and cryo capsules reconstruct from authoritative state; Pocket Knife, Scatter, and Teleporter use sequenced transient effects, while deployed mines, active beacons, and player freeze state reconstruct from persistent authoritative state. Same-match snapshots clear stale event effects while restoring selected weapons, live projectiles, mines, beacons, and frozen players without changing simulation outcomes.
+**Broad scope:** A client-only procedural recipe registry and generic primitive renderer define separate held models and compact icons, grip/muzzle geometry, non-gun poses, standard/high-contrast palettes, activation semantics, every projectile subtype, bounded trails, transitions, weapon-specific impacts/audio, and reduced-motion alternatives for all fifteen weapons. Old Shoe uses a visible thrown and tumbling shoe lifecycle with a thud impact; Pocket Knife uses a one-handed slash and authoritative player-hit, terrain-block, or clean-miss feedback. Rockets, cannon shells, mortar shells, grenades, cluster parents and children, drills, beacon bombs, fork parents and children, shoes, siege rockets, and cryo capsules reconstruct from authoritative state; Pocket Knife, Scatter, and Teleporter use sequenced transient effects, while deployed mines, active beacons, and player freeze state reconstruct from persistent authoritative state. Same-match snapshots clear stale event effects while restoring selected weapons, live projectiles, mines, beacons, and frozen players without changing simulation collision outcomes.
 
 **Explicitly out of scope:** New weapon mechanics, balance changes solely to fit art, gameplay-affecting skins, cosmetic ownership, and simulation collision based on rendered sprite bounds.
 

@@ -400,6 +400,13 @@ describe('framework-independent weapons', () => {
       ).accepted,
     ).toBe(true)
     expect(close.state.players[1].health).toBe(64)
+    expect(close.drainEvents()).toContainEqual(
+      expect.objectContaining({
+        type: 'melee-struck',
+        targetPlayerId: 'player-2',
+        result: 'player',
+      }),
+    )
 
     const blocked = new MatchSimulation(config)
     const blockedSurface = blocked.getTerrain().surfaceY(400)!
@@ -414,7 +421,7 @@ describe('framework-independent weapons', () => {
     )
     expect(blocked.state.players[1].health).toBe(100)
     expect(blocked.drainEvents()).toContainEqual(
-      expect.objectContaining({ type: 'melee-struck', targetPlayerId: null }),
+      expect.objectContaining({ type: 'melee-struck', targetPlayerId: null, result: 'terrain' }),
     )
   })
 

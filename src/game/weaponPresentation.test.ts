@@ -10,6 +10,12 @@ import {
   transformLocalPoint,
   weaponModelScale,
 } from './weaponPresentation'
+import {
+  WEAPON_VISUALS,
+  getProjectileVisual,
+  getWeaponVisual,
+  resolveWeaponPalette,
+} from './weaponVisualRecipes'
 
 const isColor = (value: number) =>
   Number.isSafeInteger(value) && value >= 0 && value <= 0xffffff
@@ -138,5 +144,84 @@ describe('weapon motion policy', () => {
       getWeaponPresentation('scatter-shot').trail.sampleCount,
     )
     expect(scatterPolicy.transientDurationMs(240)).toBe(240)
+  })
+})
+
+describe('exhaustive weapon visual recipes', () => {
+  it('defines distinct held and compact icon geometry for every weapon', () => {
+    expect(Object.keys(WEAPON_VISUALS).sort()).toEqual([...WEAPON_ORDER].sort())
+    const held = new Set<string>()
+    const icons = new Set<string>()
+    for (const id of WEAPON_ORDER) {
+      const visual = getWeaponVisual(id)
+      expect(visual.held.primitives.length).toBeGreaterThan(0)
+      expect(visual.icon.primitives.length).toBeGreaterThan(0)
+      held.add(JSON.stringify(visual.held))
+      icons.add(JSON.stringify(visual.icon))
+      expect(visual.audio.fire).toBeTruthy()
+      expect(visual.audio.impact).toBeTruthy()
+    }
+    expect(held.size).toBe(WEAPON_ORDER.length)
+    expect(icons.size).toBe(WEAPON_ORDER.length)
+  })
+
+  it('covers every authoritative physical projectile subtype without generic fallback', () => {
+    const variants: Array<[WeaponId, 'primary' | 'cluster-child' | 'fork-child' | 'beacon-bomb']> = [
+      ['basic-rocket', 'primary'],
+      ['precision-cannon', 'primary'],
+      ['high-arc-mortar', 'primary'],
+      ['timed-grenade', 'primary'],
+      ['cluster-charge', 'primary'],
+      ['cluster-charge', 'cluster-child'],
+      ['terrain-boring-drill', 'primary'],
+      ['bomb-beacon', 'primary'],
+      ['bomb-beacon', 'beacon-bomb'],
+      ['fork-rocket', 'primary'],
+      ['fork-rocket', 'fork-child'],
+      ['old-shoe', 'primary'],
+      ['siege-bazooka', 'primary'],
+      ['cryo-shot', 'primary'],
+    ]
+    for (const [weaponId, kind] of variants) {
+      const projectile = getProjectileVisual(weaponId, kind)
+      expect(projectile?.shape.primitives.length, `${weaponId}:${kind}`).toBeGreaterThan(0)
+    }
+    expect(getProjectileVisual('pocket-knife', 'primary')).toBeNull()
+    expect(getProjectileVisual('scatter-shot', 'primary')).toBeNull()
+    expect(getProjectileVisual('teleporter', 'primary')).toBeNull()
+  })
+
+  it('gives non-gun weapons appropriate poses, effects, outcomes, and impact identity', () => {
+    const shoe = getWeaponVisual('old-shoe')
+    expect(shoe.pose).toBe('throw')
+    expect(shoe.activationEffect).toBe('throw')
+    expect(shoe.impactStyle).toBe('shoe-thud')
+    expect(shoe.audio.impact).toBe('shoe-impact')
+    expect(getProjectileVisual('old-shoe', 'primary')?.spinRadiansPerSecond).toBeGreaterThan(0)
+
+    const knife = getWeaponVisual('pocket-knife')
+    expect(knife.pose).toBe('one-hand')
+    expect(knife.activationEffect).toBe('slash')
+    expect(knife.meleeOutcomes).toMatchObject({
+      hit: { impactStyle: 'knife-strike', sound: 'knife-hit' },
+      miss: { impactStyle: 'knife-miss' },
+      blocked: { impactStyle: 'knife-blocked', sound: 'knife-block' },
+    })
+  })
+
+  it('provides color-independent high contrast and static reduced-motion recipes', () => {
+    for (const id of WEAPON_ORDER) {
+      const visual = getWeaponVisual(id)
+      const standard = resolveWeaponPalette(id, false)
+      const contrast = resolveWeaponPalette(id, true)
+      expect(contrast.ink).toBe(0x000000)
+      expect(contrast.primary).toBe(0xffffff)
+      expect(contrast.accent).not.toBe(standard.accent)
+      expect(visual.motion.reduced.spinRadiansPerSecond).toBe(0)
+      expect(visual.motion.reduced.bobAmplitude).toBe(0)
+      expect(visual.motion.reduced.trail.sampleCount).toBeLessThanOrEqual(
+        visual.motion.standard.trail.sampleCount,
+      )
+    }
   })
 })

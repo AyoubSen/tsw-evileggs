@@ -102,6 +102,7 @@ export type MatchEvent =
       origin: Vector
       endpoint: Vector
       targetPlayerId: string | null
+      result: 'player' | 'terrain' | 'miss'
     })
   | (EventEnvelope & {
       type: 'player-frozen'

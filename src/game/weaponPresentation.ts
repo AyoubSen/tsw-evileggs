@@ -35,6 +35,7 @@ export type ProjectileModelKind =
   | 'none'
 
 export type WeaponPresentation = Readonly<{
+  // Legacy labels retained for tuning/test compatibility; recipes own rendered geometry.
   heldModel: HeldModelKind
   colors: Readonly<{
     primary: number
