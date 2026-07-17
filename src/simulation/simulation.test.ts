@@ -22,6 +22,7 @@ import {
   nextTurnPhase,
   winningCharacterIndex,
 } from './turns/turnMachine'
+import { nextScheduledTurn, upcomingTurnIndices } from './turns/teamTurnOrder'
 import { TerrainMask } from '../terrain/TerrainMask'
 import { DEFAULT_POWER_PERCENT, FIXED_STEP_SECONDS, GRAVITY } from '../shared/constants'
 import {
@@ -200,6 +201,32 @@ describe('turn machine', () => {
     expect(hasTurnExpired('projectile', 0)).toBe(false)
     expect(nextActivePlayerIndex(0, 2)).toBe(1)
     expect(nextActivePlayerIndex(1, 2)).toBe(0)
+  })
+
+  it('projects the same canonical team timeline used by the live scheduler', () => {
+    const players = [
+      { teamId: 0 as const, alive: true },
+      { teamId: 1 as const, alive: true },
+      { teamId: 0 as const, alive: true },
+      { teamId: 1 as const, alive: true },
+      { teamId: 0 as const, alive: true },
+      { teamId: 1 as const, alive: true },
+    ]
+    expect(upcomingTurnIndices(players, 0, [1, 0], 6)).toEqual([0, 1, 2, 3, 4, 5])
+    const next = nextScheduledTurn(players, 0, [1, 0])
+    expect(next).toEqual({ playerIndex: 1, cursors: [1, 1] })
+  })
+
+  it('skips eliminated players in projected and authoritative turn order', () => {
+    const players = [
+      { teamId: 0 as const, alive: true },
+      { teamId: 1 as const, alive: false },
+      { teamId: 0 as const, alive: false },
+      { teamId: 1 as const, alive: true },
+      { teamId: 0 as const, alive: true },
+      { teamId: 1 as const, alive: true },
+    ]
+    expect(upcomingTurnIndices(players, 0, [1, 0], 4)).toEqual([0, 3, 4, 5])
   })
 })
 

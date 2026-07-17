@@ -3,7 +3,6 @@ import {
   createMapTerrain,
   type MapDefinition,
   type SpawnDefinition,
-  type TeamId,
 } from '../../maps/registry'
 import { validateMatchConfig, type LocalMatchConfig } from '../../match/config'
 import { GRAVITY, POWER_MAX_PERCENT, POWER_MIN_PERCENT } from '../../shared/constants'
@@ -47,6 +46,7 @@ import {
   type TerrainOperation,
 } from './MatchState'
 import { isDestructibleMaterial } from '../../terrain/materials'
+import { nextScheduledTurn } from '../turns/teamTurnOrder'
 
 const CHARACTER_RADIUS = 14
 const MOVE_SPEED = 105
@@ -1110,21 +1110,14 @@ export class MatchSimulation {
       this.state.turnNumber > this.activePlayer.frozenAppliedTurn
     )
       this.activePlayer.frozenTurnsRemaining -= 1
-    const targetTeam = (this.activePlayer.teamId === 0 ? 1 : 0) as TeamId
-    const teamPlayers = this.state.players
-      .map((player, index) => ({ player, index }))
-      .filter(({ player }) => player.teamId === targetTeam)
-    const start = this.state.teamTurnCursors[targetTeam] % teamPlayers.length
-    let next = teamPlayers[start]
-    for (let offset = 0; offset < teamPlayers.length; offset += 1) {
-      const candidate = teamPlayers[(start + offset) % teamPlayers.length]
-      if (!candidate.player.alive) continue
-      next = candidate
-      this.state.teamTurnCursors[targetTeam] =
-        (start + offset + 1) % teamPlayers.length
-      break
-    }
-    this.state.activePlayerIndex = next.index
+    const next = nextScheduledTurn(
+      this.state.players,
+      this.state.activePlayerIndex,
+      this.state.teamTurnCursors,
+    )
+    if (!next) return
+    this.state.activePlayerIndex = next.playerIndex
+    this.state.teamTurnCursors = next.cursors
     this.state.turnNumber += 1
     this.state.wind = windForTurn(this.state.seed, this.state.turnNumber)
     this.state.phase = 'input'

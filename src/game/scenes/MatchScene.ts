@@ -56,6 +56,7 @@ import {
   type ImpactStyle,
 } from '../weaponVisualRecipes'
 import { drawShapeRecipe } from '../weaponRenderer'
+import { upcomingTurnIndices } from '../../simulation/turns/teamTurnOrder'
 
 type BurstEffect = {
   kind: 'explosion' | 'teleport'
@@ -117,6 +118,12 @@ const ACTOR_VISUAL_SCALE = 0.9
 const ACTOR_COLORS = [0x2863b7, 0xed7090, 0x57b89e, 0xf39a55, 0x8267c7, 0xe2ad2f]
 const TEAM_COLORS = [0x17447f, 0xaa392b]
 const INK_COLOR = 0x24313a
+const HUD_PAPER = 0xfff1c9
+const HUD_PAPER_SHADE = 0xe8c982
+const HUD_SHADOW = 0x172126
+const HUD_HEALTHY = 0x57b89e
+const HUD_WARNING = 0xf7bd3f
+const HUD_DANGER = 0xe65d3d
 const MAX_PROJECTILE_TRAILS = 32
 const MAX_WEAPON_EFFECTS = 40
 const MAX_REFLECTION_EFFECTS = 24
@@ -142,6 +149,7 @@ export class MatchScene extends Phaser.Scene {
   private hudGraphics!: Phaser.GameObjects.Graphics
   private uiCamera!: Phaser.Cameras.Scene2D.Camera
   private playerHudTexts: Phaser.GameObjects.Text[] = []
+  private turnTimelineTexts: Phaser.GameObjects.Text[] = []
   private weaponHudTexts: Phaser.GameObjects.Text[] = []
   private bottomHud!: Phaser.GameObjects.Text
   private timerText!: Phaser.GameObjects.Text
@@ -220,7 +228,26 @@ export class MatchScene extends Phaser.Scene {
       color: '#fff8df',
       fontStyle: 'bold',
     }
-    this.playerHudTexts = Array.from({ length: 6 }, () => this.add.text(0, 0, '', hudStyle))
+    this.playerHudTexts = Array.from({ length: 6 }, () =>
+      this.add.text(0, 0, '', {
+        ...hudStyle,
+        fontSize: '9px',
+        stroke: '#172126',
+        strokeThickness: 2,
+      }),
+    )
+    this.turnTimelineTexts = Array.from({ length: 4 }, () =>
+      this.add
+        .text(0, 0, '', {
+          ...hudStyle,
+          fontSize: '8px',
+          color: '#fff1c9',
+          align: 'center',
+          stroke: '#172126',
+          strokeThickness: 2,
+        })
+        .setOrigin(0.5, 0),
+    )
     this.weaponHudTexts = Array.from({ length: WEAPON_ORDER.length }, () =>
       this.add.text(0, 0, '', {
         ...hudStyle,
@@ -230,22 +257,23 @@ export class MatchScene extends Phaser.Scene {
     )
     this.bottomHud = this.add.text(0, 0, '', hudStyle)
     this.timerText = this.add
-      .text(VIEWPORT_WIDTH / 2, 17, '', {
+      .text(VIEWPORT_WIDTH / 2, 29, '', {
         ...hudStyle,
-        fontSize: '17px',
-        stroke: '#473b31',
-        strokeThickness: 3,
+        fontSize: '16px',
+        color: '#24313a',
+        align: 'center',
+        stroke: '#fff1c9',
+        strokeThickness: 2,
       })
-      .setOrigin(0.5, 0)
+      .setOrigin(0.5)
     this.windText = this.add
-      .text(VIEWPORT_WIDTH / 2, 59, '', {
+      .text(VIEWPORT_WIDTH / 2, 60, '', {
         ...hudStyle,
-        fontSize: '12px',
-        color: '#473b31',
-        backgroundColor: '#fff3c7',
-        padding: { x: 8, y: 3 },
+        fontSize: '9px',
+        color: '#24313a',
+        letterSpacing: 0.5,
       })
-      .setOrigin(0.5, 0)
+      .setOrigin(0.5)
     this.bannerText = this.add
       .text(VIEWPORT_WIDTH / 2, VIEWPORT_HEIGHT / 2 - 18, '', {
         ...hudStyle,
@@ -256,7 +284,7 @@ export class MatchScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
     this.cameraModeText = this.add
-      .text(VIEWPORT_WIDTH / 2, 88, '', {
+      .text(VIEWPORT_WIDTH / 2, 78, '', {
         ...hudStyle,
         fontSize: '11px',
         color: '#fff8df',
@@ -279,6 +307,7 @@ export class MatchScene extends Phaser.Scene {
     const hudObjects = [
       this.hudGraphics,
       ...this.playerHudTexts,
+      ...this.turnTimelineTexts,
       ...this.weaponHudTexts,
       this.bottomHud,
       this.timerText,
@@ -408,6 +437,7 @@ export class MatchScene extends Phaser.Scene {
   private applyTextResolution(): void {
     const texts = [
       ...this.playerHudTexts,
+      ...this.turnTimelineTexts,
       ...this.weaponHudTexts,
       this.bottomHud,
       this.timerText,
@@ -1558,40 +1588,11 @@ export class MatchScene extends Phaser.Scene {
       weaponRadius,
       weaponCenterY,
     } = this.weaponRackLayout()
-    this.hudGraphics.clear().fillStyle(0x473b31, 0.88)
-    this.hudGraphics.fillRoundedRect(VIEWPORT_WIDTH / 2 - 64, 9, 128, 47, 18)
-    state.players.forEach((player, index) => {
-      const cardX = player.teamId === 0 ? 12 : VIEWPORT_WIDTH - 237
-      const cardY = 10 + player.teamSlot * 52
-      this.hudGraphics.fillStyle(0x473b31, 0.88).fillRoundedRect(cardX, cardY, 225, 46, 10)
-      this.hudGraphics
-        .fillStyle(
-          this.preferences.highContrastHud
-            ? 0x72e58d
-            : ACTOR_COLORS[index % ACTOR_COLORS.length],
-        )
-        .fillRoundedRect(
-          player.teamId === 0 ? cardX + 20 : cardX + 55,
-          cardY + 30,
-          150 * ((this.displayedHealth[index] ?? player.health) / 100),
-          6,
-          3,
-        )
-      const text = this.playerHudTexts[index]
-      if (text)
-        text
-          .setVisible(true)
-          .setPosition(player.teamId === 0 ? cardX + 15 : cardX + 210, cardY + 7)
-          .setOrigin(player.teamId === 0 ? 0 : 1, 0)
-          .setText(
-            `${state.activePlayerIndex === index ? '◆ ' : ''}${player.name} · ${Math.ceil(player.health)}${player.frozenTurnsRemaining > 0 ? ' · FROZEN' : ''}`,
-          )
-    })
+    this.hudGraphics.clear()
+    state.players.forEach((player, index) => this.renderPlayerHudCard(player, index))
     for (let index = state.players.length; index < this.playerHudTexts.length; index += 1)
       this.playerHudTexts[index].setVisible(false)
-    this.hudGraphics
-      .fillStyle(this.source.timerRemainingSeconds <= 5 ? 0xe65d3d : 0xf7bd3f)
-      .fillCircle(VIEWPORT_WIDTH / 2, 31, 18)
+    this.renderTurnClock()
     this.hudGraphics
       .fillStyle(0x24313a, 0.94)
       .fillRoundedRect(rackX, rackY, rackWidth, rackHeight, rackHeight / 2)
@@ -1692,15 +1693,277 @@ export class MatchScene extends Phaser.Scene {
         )
         .setVisible(true)
     else this.bannerText.setVisible(false)
-    const remaining = Math.ceil(this.source.timerRemainingSeconds)
-    this.timerText.setText(
-      remaining <= 5 && state.phase === 'input' ? `! ${remaining}s !` : `${remaining}s`,
-    )
-    this.windText.setText(`${this.windLabel(state.wind)} · Turn ${state.turnNumber}`)
     this.cameraModeText.setText(
       `${this.preferences.cameraMode === 'fit' ? 'Fit map' : 'Follow action'} · C to switch`,
     )
     this.canvas.setAttribute('data-camera-mode', this.preferences.cameraMode)
+  }
+
+  private renderPlayerHudCard(player: SimPlayer, index: number): void {
+    const active = this.source.state.activePlayerIndex === index
+    const left = player.teamId === 0
+    const x = left ? 10 : VIEWPORT_WIDTH - 198
+    const y = 8 + player.teamSlot * 44
+    const width = 188
+    const height = 40
+    const alpha = player.alive ? 1 : 0.58
+    const teamColor = this.preferences.highContrastHud
+      ? player.teamId === 0
+        ? 0x00d9ff
+        : 0xff5b72
+      : TEAM_COLORS[player.teamId]
+    const portraitColor = this.preferences.highContrastHud
+      ? 0xffffff
+      : ACTOR_COLORS[index % ACTOR_COLORS.length]
+    const displayedHealth = Phaser.Math.Clamp(
+      this.displayedHealth[index] ?? player.health,
+      0,
+      100,
+    )
+    const healthRatio = displayedHealth / 100
+    const healthColor = this.preferences.highContrastHud
+      ? 0xffffff
+      : healthRatio > 0.6
+        ? HUD_HEALTHY
+        : healthRatio > 0.3
+          ? HUD_WARNING
+          : HUD_DANGER
+    const portraitX = left ? x + 20 : x + width - 20
+    const contentX = left ? x + 38 : x + 14
+    const contentWidth = 136
+    const barY = y + 26
+
+    this.hudGraphics
+      .fillStyle(HUD_SHADOW, 0.62 * alpha)
+      .fillRoundedRect(x + (left ? 2 : -2), y + 3, width, height, 10)
+      .fillStyle(teamColor, alpha)
+      .fillRoundedRect(x, y, width, height, 10)
+      .fillStyle(this.preferences.highContrastHud ? 0x101010 : INK_COLOR, alpha)
+      .fillRoundedRect(x + 3, y + 3, width - 6, height - 6, 8)
+      .fillStyle(this.preferences.highContrastHud ? 0x242424 : 0x31464d, alpha)
+      .fillRoundedRect(x + 6, y + 5, width - 12, height - 10, 6)
+
+    if (active) {
+      const pulse =
+        this.preferences.reducedMotion || this.source.state.phase !== 'input'
+          ? 0
+          : Math.sin(this.visualTime * 6) * 0.7
+      this.hudGraphics
+        .lineStyle(3 + pulse, HUD_WARNING, 1)
+        .strokeRoundedRect(x - 2, y - 2, width + 4, height + 4, 12)
+        .fillStyle(HUD_WARNING)
+        .fillTriangle(
+          left ? x + width + 3 : x - 3,
+          y + 11,
+          left ? x + width + 11 : x - 11,
+          y + 17,
+          left ? x + width + 3 : x - 3,
+          y + 23,
+        )
+    }
+
+    this.hudGraphics
+      .fillStyle(HUD_SHADOW, alpha)
+      .fillCircle(portraitX + (left ? 1 : -1), y + 21, 15)
+      .fillStyle(portraitColor, alpha)
+      .fillCircle(portraitX, y + 19, 13)
+      .lineStyle(2, HUD_PAPER, alpha)
+      .strokeCircle(portraitX, y + 19, 13)
+      .fillStyle(HUD_PAPER, alpha)
+      .fillEllipse(portraitX, y + 18, 15, 9)
+      .fillStyle(HUD_SHADOW, alpha)
+      .fillCircle(portraitX - 3, y + 17, 1.4)
+      .fillCircle(portraitX + 3, y + 17, 1.4)
+      .lineStyle(1.5, HUD_SHADOW, alpha)
+      .lineBetween(portraitX - 3, y + 24, portraitX + 3, y + (player.alive ? 24 : 21))
+
+    if (!player.alive)
+      this.hudGraphics
+        .lineStyle(3, HUD_DANGER, alpha)
+        .lineBetween(portraitX - 8, y + 11, portraitX + 8, y + 27)
+        .lineBetween(portraitX - 8, y + 27, portraitX + 8, y + 11)
+
+    this.hudGraphics
+      .fillStyle(HUD_SHADOW, 0.92 * alpha)
+      .fillRoundedRect(contentX - 2, barY - 2, contentWidth + 4, 10, 4)
+    const segmentGap = 2
+    const segmentWidth = (contentWidth - segmentGap * 9) / 10
+    for (let segment = 0; segment < 10; segment += 1) {
+      const segmentX = contentX + segment * (segmentWidth + segmentGap)
+      const fill = Phaser.Math.Clamp(healthRatio * 10 - segment, 0, 1)
+      this.hudGraphics
+        .fillStyle(this.preferences.highContrastHud ? 0x444444 : 0x18272c, alpha)
+        .fillRoundedRect(segmentX, barY, segmentWidth, 6, 2)
+      if (fill > 0)
+        this.hudGraphics
+          .fillStyle(healthColor, alpha)
+          .fillRoundedRect(segmentX, barY, segmentWidth * fill, 6, 2)
+    }
+
+    if (player.frozenTurnsRemaining > 0) {
+      const snowX = left ? x + width - 10 : x + 10
+      this.hudGraphics.lineStyle(2, 0x8ee8ff, alpha)
+      for (let spoke = 0; spoke < 3; spoke += 1) {
+        const angle = (spoke / 3) * Math.PI
+        this.hudGraphics.lineBetween(
+          snowX - Math.cos(angle) * 6,
+          y + 11 - Math.sin(angle) * 5,
+          snowX + Math.cos(angle) * 6,
+          y + 11 + Math.sin(angle) * 5,
+        )
+      }
+    }
+
+    const text = this.playerHudTexts[index]
+    const displayName =
+      player.name.length > 10 ? `${player.name.slice(0, 9).trimEnd()}…` : player.name
+    text
+      .setVisible(true)
+      .setPosition(left ? contentX : contentX + contentWidth, y + 6)
+      .setOrigin(left ? 0 : 1, 0)
+      .setAlpha(alpha)
+      .setColor(active ? '#fff1c9' : '#ffffff')
+      .setText(
+        player.alive
+          ? `${active ? '▶ ' : ''}${displayName}  ${Math.ceil(player.health)} HP${player.frozenTurnsRemaining > 0 ? '  ❄' : ''}`
+          : `OUT  ${displayName}`,
+      )
+  }
+
+  private renderTurnClock(): void {
+    const state = this.source.state
+    const centerX = VIEWPORT_WIDTH / 2
+    const tokenY = 28
+    const remaining = Math.max(0, Math.ceil(this.source.timerRemainingSeconds))
+    const duration = Math.max(1, state.config.turnDurationSeconds)
+    const ratio = Phaser.Math.Clamp(this.source.timerRemainingSeconds / duration, 0, 1)
+    const urgent = state.phase === 'input' && remaining <= 5
+    const visibleTurns = state.config.mode === '1v1' ? 2 : 4
+    const turnIndices = upcomingTurnIndices(
+      state.players,
+      state.activePlayerIndex,
+      state.teamTurnCursors,
+      visibleTurns,
+    )
+    const spacing = 52
+    const startX = centerX - ((turnIndices.length - 1) * spacing) / 2
+    const urgentPulse =
+      urgent && !this.preferences.reducedMotion ? 1 + Math.sin(this.visualTime * 10) * 0.08 : 1
+
+    const railLeft = startX - 29
+    const railRight = startX + Math.max(0, turnIndices.length - 1) * spacing + 24
+    this.hudGraphics
+      .fillStyle(HUD_SHADOW, 0.58)
+      .fillRoundedRect(railLeft + 2, 7, railRight - railLeft, 42, 20)
+      .fillStyle(HUD_PAPER_SHADE)
+      .fillRoundedRect(railLeft, 5, railRight - railLeft, 42, 20)
+      .lineStyle(2, HUD_SHADOW)
+      .strokeRoundedRect(railLeft, 5, railRight - railLeft, 42, 20)
+
+    for (let slot = 0; slot < turnIndices.length - 1; slot += 1) {
+      const fromX = startX + slot * spacing + (slot === 0 ? 24 : 16)
+      const toX = startX + (slot + 1) * spacing - 17
+      this.hudGraphics
+        .lineStyle(3, HUD_SHADOW, 0.72)
+        .lineBetween(fromX, tokenY, toX, tokenY)
+        .fillStyle(HUD_SHADOW, 0.86)
+        .fillTriangle(toX - 1, tokenY - 4, toX + 5, tokenY, toX - 1, tokenY + 4)
+    }
+
+    turnIndices.forEach((playerIndex, slot) => {
+      const player = state.players[playerIndex]
+      const x = startX + slot * spacing
+      const current = slot === 0
+      const teamColor = this.preferences.highContrastHud
+        ? player.teamId === 0
+          ? 0x00d9ff
+          : 0xff5b72
+        : TEAM_COLORS[player.teamId]
+      const portraitColor = this.preferences.highContrastHud
+        ? 0xffffff
+        : ACTOR_COLORS[playerIndex % ACTOR_COLORS.length]
+      const radius = current ? 22 * urgentPulse : 14
+      this.hudGraphics
+        .fillStyle(HUD_SHADOW, 0.74)
+        .fillCircle(x + 2, tokenY + 2, radius + 2)
+        .fillStyle(current ? (urgent ? HUD_DANGER : HUD_PAPER) : portraitColor)
+        .fillCircle(x, tokenY, radius)
+        .lineStyle(current ? 4 : 3, teamColor)
+        .strokeCircle(x, tokenY, radius)
+
+      if (current) {
+        if (ratio > 0)
+          this.hudGraphics
+            .lineStyle(5, urgent ? HUD_DANGER : teamColor, 1)
+            .beginPath()
+            .arc(x, tokenY, 24, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio)
+            .strokePath()
+        for (let tick = 0; tick < 8; tick += 1) {
+          const angle = -Math.PI / 2 + (tick / 8) * Math.PI * 2
+          this.hudGraphics
+            .lineStyle(1.5, HUD_SHADOW, 0.8)
+            .lineBetween(
+              x + Math.cos(angle) * 17,
+              tokenY + Math.sin(angle) * 17,
+              x + Math.cos(angle) * 20,
+              tokenY + Math.sin(angle) * 20,
+            )
+        }
+      } else {
+        this.hudGraphics
+          .fillStyle(HUD_PAPER)
+          .fillEllipse(x, tokenY, 15, 9)
+          .fillStyle(HUD_SHADOW)
+          .fillCircle(x - 3, tokenY - 1, 1.3)
+          .fillCircle(x + 3, tokenY - 1, 1.3)
+          .lineStyle(1.2, HUD_SHADOW)
+          .lineBetween(x - 3, tokenY + 4, x + 3, tokenY + 4)
+        for (let marker = 0; marker <= player.teamSlot; marker += 1)
+          this.hudGraphics
+            .fillStyle(teamColor)
+            .fillCircle(x - player.teamSlot * 2.2 + marker * 4.4, tokenY + 10, 1.4)
+      }
+
+      const label = this.turnTimelineTexts[slot]
+      const shortName =
+        player.name.length > 7 ? `${player.name.slice(0, 6).trimEnd()}…` : player.name
+      label
+        .setVisible(true)
+        .setPosition(x, 48)
+        .setColor(current ? '#24313a' : '#fff1c9')
+        .setStroke(current ? '#fff1c9' : '#172126', 2)
+        .setText(shortName)
+    })
+    for (let slot = turnIndices.length; slot < this.turnTimelineTexts.length; slot += 1)
+      this.turnTimelineTexts[slot].setVisible(false)
+
+    const ribbonY = 64
+    this.hudGraphics
+      .fillStyle(HUD_SHADOW, 0.64)
+      .fillTriangle(centerX - 91, ribbonY + 3, centerX - 76, ribbonY - 6, centerX - 76, ribbonY + 12)
+      .fillTriangle(centerX + 91, ribbonY + 3, centerX + 76, ribbonY - 6, centerX + 76, ribbonY + 12)
+      .fillStyle(HUD_PAPER_SHADE)
+      .fillRoundedRect(centerX - 80, ribbonY - 6, 160, 18, 6)
+      .lineStyle(2, HUD_SHADOW)
+      .strokeRoundedRect(centerX - 80, ribbonY - 6, 160, 18, 6)
+
+    const timerLabel =
+      state.phase === 'input'
+        ? String(remaining)
+        : state.phase === 'projectile'
+          ? 'LIVE'
+          : state.phase === 'settling'
+            ? 'SET'
+            : state.phase === 'victory'
+              ? 'END'
+              : '--'
+    this.timerText
+      .setPosition(startX, tokenY)
+      .setColor(urgent ? '#ffffff' : '#24313a')
+      .setStroke(urgent ? '#aa392b' : '#fff1c9', urgent ? 4 : 2)
+      .setText(timerLabel)
+    this.windText.setPosition(centerX, ribbonY + 3)
+    this.windText.setText(`TURN ${state.turnNumber}  •  ${this.windLabel(state.wind).toUpperCase()}`)
   }
 
   private consumeMatchEvent(event: MatchEvent): void {

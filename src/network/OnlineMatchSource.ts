@@ -97,6 +97,8 @@ type OnlineSchemaState = {
   simulationTick: number
   turnNumber: number
   activePlayerSeat: number
+  teamZeroTurnCursor: number
+  teamOneTurnCursor: number
   matchPhase: MatchState['phase']
   timerRemainingTicks: number
   wind: number
@@ -412,6 +414,11 @@ export class OnlineMatchSource implements MatchSource {
     state.tick = schema.simulationTick
     state.turnNumber = schema.turnNumber
     state.activePlayerIndex = schema.activePlayerSeat
+    if (
+      Number.isSafeInteger(schema.teamZeroTurnCursor) &&
+      Number.isSafeInteger(schema.teamOneTurnCursor)
+    )
+      state.teamTurnCursors = [schema.teamZeroTurnCursor, schema.teamOneTurnCursor]
     state.phase = schema.matchPhase
     state.paused = schema.phase !== 'playing'
     state.timerRemainingTicks = schema.timerRemainingTicks

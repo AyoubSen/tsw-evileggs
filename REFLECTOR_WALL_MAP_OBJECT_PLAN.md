@@ -10,11 +10,11 @@ Current baseline:
 - Twelve official maps complete.
 - Adaptive high-density rendering complete.
 - Map format: `2`.
-- Protocol: `private-room-8`.
+- Protocol: `private-room-9`.
 - Snapshot: `7`.
 - Map registry: `maps-7`.
 - Weapon registry: `weapons-4`.
-- Client build: `1.6.0`.
+- Client build: `1.7.0`.
 - Last full Vitest result: 22 files and 159 tests passed.
 - Production web/server build passes with only the existing large web chunk warning.
 

@@ -102,6 +102,8 @@ export const PrivateMatchState = schema({
   simulationTick: { type: 'uint32', default: 0 },
   turnNumber: { type: 'uint32', default: 0 },
   activePlayerSeat: { type: 'int8', default: -1 },
+  teamZeroTurnCursor: { type: 'uint8', default: 0 },
+  teamOneTurnCursor: { type: 'uint8', default: 0 },
   matchPhase: { type: 'string', default: '' },
   timerRemainingTicks: { type: 'uint32', default: 0 },
   wind: { type: 'int16', default: 0 },
@@ -183,6 +185,8 @@ export function projectSimulationState(state: PrivateMatchState, simulation: Mat
   state.simulationTick = simulation.tick
   state.turnNumber = simulation.turnNumber
   state.activePlayerSeat = simulation.activePlayerIndex
+  state.teamZeroTurnCursor = simulation.teamTurnCursors[0]
+  state.teamOneTurnCursor = simulation.teamTurnCursors[1]
   state.matchPhase = simulation.phase
   state.timerRemainingTicks = simulation.timerRemainingTicks
   state.wind = simulation.wind
