@@ -81,6 +81,7 @@ export const applyCloudAccountData = (current: Preferences, data: AccountData): 
   ...current,
   playerNames: current.playerNames.map((value, index) => index === 0 ? data.preferences.displayName : value),
   playerAppearances: current.playerAppearances.map((value, index) => index === 0 ? data.preferences.preferredAppearance : value),
+  cosmeticLoadout: data.preferences.cosmeticLoadout,
   outfitPresets: data.outfitPresets.filter((record) => record.deleted !== true),
   reducedMotion: data.preferences.reducedMotion, highContrastHud: data.preferences.highContrastHud,
   cameraShake: data.preferences.cameraShake, cameraMode: data.preferences.cameraMode,

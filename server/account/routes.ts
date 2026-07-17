@@ -36,6 +36,7 @@ export function installAccountRoutes(app: Application, environment: AccountEnvir
   const ticketLimit = fixedWindowRateLimit(20, 60_000, authenticatedUserKey)
   const readLimit = fixedWindowRateLimit(120, 60_000, authenticatedUserKey)
   const syncLimit = fixedWindowRateLimit(60, 60_000, authenticatedUserKey)
+  const purchaseLimit = fixedWindowRateLimit(30, 60_000, authenticatedUserKey)
   const deletionLimit = fixedWindowRateLimit(3, 60 * 60_000, authenticatedUserKey)
   const webhookLimit = fixedWindowRateLimit(300, 60_000, (request) => request.ip ?? 'unknown')
 
@@ -89,6 +90,21 @@ export function installAccountRoutes(app: Application, environment: AccountEnvir
     try {
       response.set('Cache-Control', 'no-store')
       response.json(await progression.getOverview(response.locals.accountUserId, 5))
+    } catch { accountUnavailable(response) }
+  })
+  router.post('/cosmetics/purchase', purchaseLimit, async (request, response) => {
+    if (!progression) { accountUnavailable(response); return }
+    const cosmeticId = request.body?.cosmeticId
+    if (typeof cosmeticId !== 'string') {
+      response.status(400).json({ error: { code: 'invalid-request', message: 'A cosmeticId is required.' } })
+      return
+    }
+    try {
+      const result = await progression.purchaseCosmetic(response.locals.accountUserId, cosmeticId)
+      if (result === 'not-found') { response.status(404).json({ error: { code: 'cosmetic-not-found', message: 'That cosmetic is unavailable.' } }); return }
+      if (result === 'insufficient-funds') { response.status(409).json({ error: { code: 'insufficient-funds', message: 'Not enough Scrap.' } }); return }
+      response.set('Cache-Control', 'no-store')
+      response.json({ result, progression: await progression.getOverview(response.locals.accountUserId, 5) })
     } catch { accountUnavailable(response) }
   })
   router.post('/sync', syncLimit, async (request, response) => {

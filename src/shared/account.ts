@@ -2,13 +2,15 @@ import { getMap, type MapId, type MatchMode } from '../maps/registry'
 import { DEFAULT_PLAYER_APPEARANCES, sanitizePlayerAppearance, type PlayerAppearance } from '../players/appearanceRegistry'
 import { MAX_OUTFIT_PRESETS, sanitizeOutfitPresetRecord, type OutfitPresetRecord } from '../profile/outfitPresets'
 import type { Preferences } from '../app/preferences'
+import { sanitizeCosmeticLoadout, type CosmeticLoadout } from '../cosmetics/cosmeticLoadout'
 
-export const ACCOUNT_PREFERENCES_VERSION = 1 as const
+export const ACCOUNT_PREFERENCES_VERSION = 2 as const
 
 export type AccountPreferences = {
   version: typeof ACCOUNT_PREFERENCES_VERSION
   displayName: string
   preferredAppearance: PlayerAppearance
+  cosmeticLoadout: CosmeticLoadout
   reducedMotion: boolean
   highContrastHud: boolean
   cameraShake: boolean
@@ -54,6 +56,7 @@ export function sanitizeAccountPreferences(value: unknown): AccountPreferences {
     version: ACCOUNT_PREFERENCES_VERSION,
     displayName: cleanName(source.displayName),
     preferredAppearance: sanitizePlayerAppearance(source.preferredAppearance),
+    cosmeticLoadout: sanitizeCosmeticLoadout(source.cosmeticLoadout),
     reducedMotion: source.reducedMotion === true,
     highContrastHud: source.highContrastHud === true,
     cameraShake: source.cameraShake !== false,
@@ -100,6 +103,7 @@ export function projectAccountPreferences(preferences: Readonly<Preferences>): A
     preferences: {
       displayName: preferences.playerNames[0],
       preferredAppearance: preferences.playerAppearances[0] ?? DEFAULT_PLAYER_APPEARANCES[0],
+      cosmeticLoadout: preferences.cosmeticLoadout,
       reducedMotion: preferences.reducedMotion,
       highContrastHud: preferences.highContrastHud,
       cameraShake: preferences.cameraShake,

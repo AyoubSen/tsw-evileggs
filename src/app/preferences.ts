@@ -17,12 +17,14 @@ import {
   type OutfitPreset,
 } from '../profile/outfitPresets'
 import { cloneArsenalRules, DEFAULT_ARSENAL_RULES, type ArsenalRules } from '../match/arsenal'
+import { DEFAULT_COSMETIC_LOADOUT, sanitizeCosmeticLoadout, type CosmeticLoadout } from '../cosmetics/cosmeticLoadout'
 
 export type Preferences = {
-  version: 5
+  version: 6
   playerNames: string[]
   playerAppearances: PlayerAppearance[]
   outfitPresets: OutfitPreset[]
+  cosmeticLoadout: CosmeticLoadout
   lastMode: MatchMode
   lastMapId: MapId
   turnDurationSeconds: TurnDuration
@@ -40,10 +42,11 @@ export type Preferences = {
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
-  version: 5,
+  version: 6,
   playerNames: [...DEFAULT_PLAYER_NAMES],
   playerAppearances: DEFAULT_PLAYER_APPEARANCES.map((appearance) => ({ ...appearance })),
   outfitPresets: [],
+  cosmeticLoadout: DEFAULT_COSMETIC_LOADOUT,
   lastMode: '1v1',
   lastMapId: 'rolling-hills',
   turnDurationSeconds: 30,
@@ -73,10 +76,10 @@ export function loadPreferences(
     if (
       !parsed ||
       typeof parsed !== 'object' ||
-      ![1, 2, 3, 4, 5].includes((parsed as { version?: number }).version ?? 0)
+      ![1, 2, 3, 4, 5, 6].includes((parsed as { version?: number }).version ?? 0)
     )
       return DEFAULT_PREFERENCES
-    const value = parsed as Partial<Preferences> & { version: 1 | 2 | 3 | 4 | 5 }
+    const value = parsed as Partial<Preferences> & { version: 1 | 2 | 3 | 4 | 5 | 6 }
     const playerNames = DEFAULT_PLAYER_NAMES.map((fallback, index) => {
       const name = value.playerNames?.[index]
       return typeof name === 'string' && name.trim() ? name.trim().slice(0, 18) : fallback
@@ -114,7 +117,8 @@ export function loadPreferences(
         repositoryRecords.length > 0
           ? repositoryRecords
           : migrateOutfitPresets(value.outfitPresets),
-      version: 5,
+      cosmeticLoadout: sanitizeCosmeticLoadout(value.cosmeticLoadout),
+      version: 6,
       lastMode: config.mode,
       lastMapId: getMap(config.mapId).id,
       projectileBoundaryMode: config.projectileBoundaryMode,

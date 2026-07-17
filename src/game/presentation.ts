@@ -1,4 +1,5 @@
 import type { MatchEvent } from '../simulation/match/MatchEvent'
+import type { CosmeticLoadout } from '../cosmetics/cosmeticLoadout'
 
 export type PresentationPreferences = {
   reducedMotion: boolean
@@ -7,6 +8,7 @@ export type PresentationPreferences = {
   cameraMode: 'fit' | 'follow'
   aimGuide: 'normal' | 'minimal'
   screenFlash: 'normal' | 'reduced' | 'off'
+  cosmeticLoadout: CosmeticLoadout
 }
 
 export class EventSequenceGuard {

@@ -1,4 +1,5 @@
-import { desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, sql } from 'drizzle-orm'
+import { PURCHASABLE_COSMETICS } from '../../src/cosmetics/cosmeticLoadout'
 import { sanitizeAccountPreferences } from '../../src/shared/account'
 import { progressionLevel, progressionReward, type MatchOutcome, type ProgressionOverview } from '../../src/shared/progression'
 import type { MapId, MatchMode, TeamId } from '../../src/maps/registry'
@@ -26,6 +27,7 @@ export function rewardForMatch(input: { winnerTeamId: TeamId | null; teamId: Tea
 export interface ProgressionRepository {
   recordCompletedMatch(match: CompletedOnlineMatch): Promise<boolean>
   getOverview(clerkUserId: string, recentLimit?: number): Promise<ProgressionOverview>
+  purchaseCosmetic(clerkUserId: string, cosmeticId: string): Promise<'purchased' | 'owned' | 'insufficient-funds' | 'not-found'>
 }
 
 export class DrizzleProgressionRepository implements ProgressionRepository {
@@ -83,6 +85,39 @@ export class DrizzleProgressionRepository implements ProgressionRepository {
       recentMatches: history.map(({ participant, match }) => ({ id: match.id, completedAt: match.completedAt.toISOString(), mode: match.mode as MatchMode, mapId: match.mapId as MapId, outcome: participant.outcome as MatchOutcome, reason: match.reason as 'normal' | 'forfeit', turnsTaken: match.turnsTaken, durationSeconds: match.durationSeconds, experienceEarned: participant.experienceEarned, currencyEarned: participant.currencyEarned })),
       entitlements: entitlements.map(({ id }) => id),
     }
+  }
+
+  async purchaseCosmetic(clerkUserId: string, cosmeticId: string): Promise<'purchased' | 'owned' | 'insufficient-funds' | 'not-found'> {
+    const cosmetic = PURCHASABLE_COSMETICS.find((item) => item.entitlementId === cosmeticId)
+    if (!cosmetic) return 'not-found'
+    return this.db.transaction(async (tx) => {
+      await tx.insert(profiles).values({ clerkUserId, preferences: sanitizeAccountPreferences(undefined) }).onConflictDoNothing()
+      const [profile] = await tx.select({ id: profiles.id }).from(profiles).where(eq(profiles.clerkUserId, clerkUserId)).limit(1)
+      if (!profile) throw new Error('Profile not found.')
+      await tx.insert(progressionProfiles).values({ profileId: profile.id }).onConflictDoNothing()
+      const granted = await tx.insert(cosmeticEntitlements).values({
+        profileId: profile.id, cosmeticId, source: 'workshop-purchase',
+      }).onConflictDoNothing().returning({ cosmeticId: cosmeticEntitlements.cosmeticId })
+      if (!granted.length) return 'owned'
+      const debited = await tx.update(progressionProfiles).set({
+        currencyBalance: sql`${progressionProfiles.currencyBalance} - ${cosmetic.price}`,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(progressionProfiles.profileId, profile.id),
+        gte(progressionProfiles.currencyBalance, cosmetic.price),
+      )).returning({ profileId: progressionProfiles.profileId })
+      if (!debited.length) {
+        await tx.delete(cosmeticEntitlements).where(and(
+          eq(cosmeticEntitlements.profileId, profile.id),
+          eq(cosmeticEntitlements.cosmeticId, cosmeticId),
+        ))
+        return 'insufficient-funds'
+      }
+      await tx.insert(currencyLedger).values({
+        profileId: profile.id, amount: -cosmetic.price, reason: 'cosmetic-purchase', referenceId: cosmeticId,
+      })
+      return 'purchased'
+    })
   }
 }
 

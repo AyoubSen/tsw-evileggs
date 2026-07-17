@@ -58,8 +58,14 @@ import {
 } from '../profile/outfitPresets'
 import { AccountAvatar, useOptionalAuth } from '../account/auth'
 import { useAccountSync } from '../account/sync'
-import { createGameTicket, getAccountCapabilities, getProgression } from '../account/client'
+import { createGameTicket, getAccountCapabilities, getProgression, purchaseCosmetic } from '../account/client'
 import { progressionReward, type ProgressionOverview } from '../shared/progression'
+import {
+  WEAPON_SKINS,
+  entitlementAwareLoadout,
+  isCosmeticOwned,
+  type CosmeticLoadout,
+} from '../cosmetics/cosmeticLoadout'
 
 type Screen =
   | 'menu'
@@ -72,6 +78,7 @@ type Screen =
   | 'settings'
   | 'profile'
   | 'customize'
+  | 'workshop'
   | 'credits'
   | 'editor'
   | 'match'
@@ -628,38 +635,42 @@ function PresetNameEditor({ preset, onSave }: { preset: OutfitPreset; onSave: (n
 }
 
 function CustomizePlayer({
-  appearances,
-  presets,
+  appearances: initialAppearances,
+  presets: initialPresets,
   selectedSlot,
   onSelectSlot,
-  onChange,
-  onPresetsChange,
+  cosmeticLoadout: initialCosmeticLoadout,
+  entitlements,
+  onSave,
+  onOpenWorkshop,
   onBack,
 }: {
   appearances: readonly PlayerAppearance[]
   presets: readonly OutfitPreset[]
   selectedSlot: number
   onSelectSlot: (slot: number) => void
-  onChange: (slot: number, appearance: PlayerAppearance) => void
-  onPresetsChange: (presets: OutfitPreset[]) => void
+  cosmeticLoadout: CosmeticLoadout
+  entitlements: readonly string[]
+  onSave: (changes: { appearances: PlayerAppearance[]; presets: OutfitPreset[]; cosmeticLoadout: CosmeticLoadout }) => void
+  onOpenWorkshop: () => void
   onBack: () => void
 }) {
   const [previewContrast, setPreviewContrast] = useState<'normal' | 'high'>('normal')
   const [previewState, setPreviewState] = useState<'idle' | 'aiming' | 'firing' | 'hurt' | 'frozen' | 'defeated' | 'victory'>('aiming')
   const [previewFacing, setPreviewFacing] = useState<-1 | 1>(1)
   const [previewWeapon, setPreviewWeapon] = useState<WeaponId>('basic-rocket')
+  const [appearances, setAppearances] = useState(() => initialAppearances.map((appearance) => ({ ...appearance })))
+  const [presets, setPresets] = useState(() => initialPresets.map((preset) => ({ ...preset, appearance: { ...preset.appearance } })))
+  const [cosmeticLoadout, setCosmeticLoadout] = useState(initialCosmeticLoadout)
+  const [previewCosmeticLoadout, setPreviewCosmeticLoadout] = useState(initialCosmeticLoadout)
   const [presetName, setPresetName] = useState('')
+  const onChange = (slot: number, nextAppearance: PlayerAppearance) => setAppearances((current) => current.map((appearance, index) => index === slot ? nextAppearance : appearance))
+  const onPresetsChange = setPresets
+  const onCosmeticLoadoutChange = setCosmeticLoadout
   const appearance = appearances[selectedSlot] ?? DEFAULT_PLAYER_APPEARANCES[selectedSlot]
   const readability = analyzeAppearanceReadability(appearance)
   const previewPose: PlayerPoseId = previewState === 'aiming' || previewState === 'frozen' ? 'aim' : previewState === 'firing' ? 'fire' : previewState === 'hurt' ? 'idle' : previewState
-  const previewWeapons: readonly { id: WeaponId; label: string }[] = [
-    { id: 'basic-rocket', label: 'Two-hand launcher' },
-    { id: 'pocket-knife', label: 'One-hand melee' },
-    { id: 'old-shoe', label: 'Thrown weapon' },
-    { id: 'deployable-mine', label: 'Placement tool' },
-    { id: 'siege-bazooka', label: 'Heavy weapon' },
-    { id: 'teleporter', label: 'Device' },
-  ]
+  const previewWeapons: readonly { id: WeaponId; label: string }[] = WEAPON_ORDER.map((id) => ({ id, label: WEAPONS[id].displayName }))
   const uniquePresetId = () => {
     let id: string
     do id = globalThis.crypto?.randomUUID?.() ?? `outfit-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -705,14 +716,14 @@ function CustomizePlayer({
           </div>
           <div className="team-preview-grid" aria-label="Appearance on both team backgrounds">
             {PLAYER_PREVIEW_BACKGROUNDS.map((background) => <figure className="large-avatar-preview" key={background.teamId}>
-              <PlayerAvatar appearance={appearance} teamId={background.teamId} teamBackground highContrast={previewContrast === 'high'} label={`${background.label} preview`} pose={previewPose} facing={previewFacing} weaponId={previewState === 'idle' || previewState === 'defeated' || previewState === 'victory' ? undefined : previewWeapon} hurt={previewState === 'hurt'} frozen={previewState === 'frozen'} />
+              <PlayerAvatar appearance={appearance} teamId={background.teamId} teamBackground highContrast={previewContrast === 'high'} label={`${background.label} preview`} pose={previewPose} facing={previewFacing} weaponId={previewState === 'idle' || previewState === 'defeated' || previewState === 'victory' ? undefined : previewWeapon} weaponSkinId={previewCosmeticLoadout.weaponSkin} projectileSkinId={previewCosmeticLoadout.projectileSkin} hurt={previewState === 'hurt'} frozen={previewState === 'frozen'} />
               <figcaption>{background.label} · {readability.backgroundContrast.find((item) => item.teamId === background.teamId)!.ratio.toFixed(1)}:1</figcaption>
             </figure>)}
           </div>
           <div className="combat-preview-controls">
             <label>Combat state<select value={previewState} onChange={(event) => setPreviewState(event.target.value as typeof previewState)}>{['idle', 'aiming', 'firing', 'hurt', 'frozen', 'defeated', 'victory'].map((state) => <option key={state} value={state}>{state[0].toUpperCase() + state.slice(1)}</option>)}</select></label>
             <label>Facing<select value={previewFacing} onChange={(event) => setPreviewFacing(Number(event.target.value) as -1 | 1)}><option value={1}>Right</option><option value={-1}>Left</option></select></label>
-            <label className="combat-weapon-control">Representative weapon<select value={previewWeapon} onChange={(event) => setPreviewWeapon(event.target.value as WeaponId)}>{previewWeapons.map((weapon) => <option key={weapon.id} value={weapon.id}>{weapon.label}</option>)}</select></label>
+            <label className="combat-weapon-control">Representative weapon<select value={previewWeapon} onChange={(event) => { setPreviewWeapon(event.target.value as WeaponId); setPreviewState('aiming') }}>{previewWeapons.map((weapon) => <option key={weapon.id} value={weapon.id}>{weapon.label}</option>)}</select></label>
           </div>
           <div className="compact-hud-preview"><PlayerAvatar appearance={appearance} teamId={selectedSlot % 2} teamBackground highContrast={previewContrast === 'high'} compact label="Compact HUD and timeline portrait preview" /><span><strong>P{selectedSlot + 1} · HUD / timeline</strong><i><b /></i></span></div>
           <fieldset className="preview-contrast-toggle"><legend>Preview contrast</legend><button type="button" aria-pressed={previewContrast === 'normal'} onClick={() => setPreviewContrast('normal')}>Normal</button><button type="button" aria-pressed={previewContrast === 'high'} onClick={() => setPreviewContrast('high')}>High contrast</button></fieldset>
@@ -750,6 +761,14 @@ function CustomizePlayer({
           </section>
         </aside>
         <div className="appearance-galleries">
+          <fieldset className="appearance-group owned-finish-group">
+            <legend>Weapon finish</legend>
+            {previewWeapon === 'old-shoe' && <p>The shoe is the payload itself, so its held and thrown look uses the equipped weapon finish.</p>}
+            <div className="appearance-options owned-finish-options">{WEAPON_SKINS.filter((skin) => isCosmeticOwned('weapon', skin.id, entitlements)).map((skin) => {
+              const previewed = previewCosmeticLoadout.weaponSkin === skin.id
+              return <button type="button" key={skin.id} className={previewed ? 'selected' : ''} aria-pressed={previewed} onClick={() => { setPreviewState('aiming'); setPreviewCosmeticLoadout((current) => ({ ...current, weaponSkin: skin.id })); onCosmeticLoadoutChange({ ...cosmeticLoadout, weaponSkin: skin.id }) }}><WeaponIcon weaponId={previewWeapon} skinId={skin.id} /><span>{skin.label}{cosmeticLoadout.weaponSkin === skin.id ? ' · Equipped' : ''}</span></button>
+            })}</div><button type="button" className="button-quiet owned-finish-shop" onClick={onOpenWorkshop}>Browse weapon finishes</button>
+          </fieldset>
           {APPEARANCE_GROUPS.map((group) => (
             <fieldset className="appearance-group" key={group.field}>
               <legend>{group.label}</legend>
@@ -771,7 +790,66 @@ function CustomizePlayer({
           ))}
         </div>
       </div>
-      <button className="button-quiet customize-back" onClick={onBack}>Back</button>
+      <div className="actions customize-back">
+        <button className="button-primary" onClick={() => onSave({ appearances, presets, cosmeticLoadout })}>Save changes</button>
+        <button className="button-quiet" onClick={onBack}>Discard</button>
+      </div>
+    </section>
+  )
+}
+
+function CosmeticWorkshop({
+  appearance,
+  loadout,
+  progression,
+  signedIn,
+  onEquip,
+  onPurchase,
+  onBack,
+}: {
+  appearance: PlayerAppearance
+  loadout: CosmeticLoadout
+  progression: ProgressionOverview | null
+  signedIn: boolean
+  onEquip: (loadout: CosmeticLoadout) => void
+  onPurchase: (cosmeticId: string, loadout: CosmeticLoadout) => Promise<void>
+  onBack: () => void
+}) {
+  const [previewLoadout, setPreviewLoadout] = useState(loadout)
+  const [previewWeapon, setPreviewWeapon] = useState<WeaponId>('basic-rocket')
+  const [purchaseBusy, setPurchaseBusy] = useState<string | null>(null)
+  const [purchaseError, setPurchaseError] = useState<string | null>(null)
+  const entitlements = progression?.entitlements ?? []
+  const balance = progression?.summary.currencyBalance ?? 0
+  const buy = async (cosmeticId: string, next: CosmeticLoadout) => {
+    setPurchaseBusy(cosmeticId)
+    setPurchaseError(null)
+    try {
+      await onPurchase(cosmeticId, next)
+      setPreviewLoadout(next)
+    } catch (caught) {
+      setPurchaseError(caught instanceof Error ? caught.message : 'Purchase failed.')
+    } finally {
+      setPurchaseBusy(null)
+    }
+  }
+  return (
+    <section className="panel workshop-panel">
+      <header className="screen-heading"><p className="eyebrow">SPEND SCRAP, SHINE BRIGHT</p><h2>Cosmetic workshop</h2><p>Preview every finish. Purchases are cosmetic only and equip immediately.</p></header>
+      <div className="workshop-balance"><strong>{balance} Scrap</strong><span>{signedIn ? 'Earn more in signed-in online matches.' : 'Sign in to earn and spend Scrap.'}</span></div>
+      <div className="workshop-stage">
+        <PlayerAvatar appearance={appearance} teamId={0} teamBackground label="Your player cosmetic preview" pose="aim" weaponId={previewWeapon} weaponSkinId={previewLoadout.weaponSkin} projectileSkinId={previewLoadout.projectileSkin} />
+        <label>Preview weapon<select value={previewWeapon} onChange={(event) => setPreviewWeapon(event.target.value as WeaponId)}>{WEAPON_ORDER.map((id) => <option value={id} key={id}>{WEAPONS[id].displayName}</option>)}</select></label>
+      </div>
+      <section className="workshop-shelf"><h3>Weapon finishes</h3><p>Each finish also colors that weapon's projectile or thrown object.</p><div className="workshop-grid">{WEAPON_SKINS.map((skin) => {
+        const owned = isCosmeticOwned('weapon', skin.id, entitlements)
+        const equipped = loadout.weaponSkin === skin.id
+        const previewed = previewLoadout.weaponSkin === skin.id
+        const next = { ...loadout, weaponSkin: skin.id }
+        return <article className={`workshop-card ${previewed ? 'previewing' : ''}`} key={skin.id}><button type="button" className="workshop-preview" aria-pressed={previewed} onClick={() => setPreviewLoadout(next)}><span className="workshop-item-preview weapon"><WeaponIcon weaponId={previewWeapon} skinId={next.weaponSkin} /></span><strong>{skin.label}</strong><small>{skin.description}</small><span className={`workshop-status ${owned ? 'owned' : 'locked'}`}>{owned ? 'Owned' : `${skin.price} Scrap`}</span></button>{owned ? <button type="button" disabled={equipped} onClick={() => { onEquip(next); setPreviewLoadout(next) }}>{equipped ? 'Equipped' : 'Equip'}</button> : skin.entitlementId && <button type="button" disabled={!signedIn || !progression || purchaseBusy !== null || balance < skin.price} onClick={() => void buy(skin.entitlementId, next)}>{purchaseBusy === skin.entitlementId ? 'Buying...' : 'Buy & equip'}</button>}</article>
+      })}</div></section>
+      {purchaseError && <p className="form-error" role="alert">{purchaseError}</p>}
+      <button className="button-quiet" onClick={onBack}>Back</button>
     </section>
   )
 }
@@ -793,6 +871,7 @@ export function App() {
   const [customizeReturnScreen, setCustomizeReturnScreen] = useState<
     'menu' | 'setup' | 'online-create' | 'online-join' | 'profile'
   >('menu')
+  const [workshopReturnScreen, setWorkshopReturnScreen] = useState<'menu' | 'customize'>('menu')
   const [config, setConfig] = useState<LocalMatchConfig>(() =>
     validateMatchConfig(loadPreferences()),
   )
@@ -835,6 +914,7 @@ export function App() {
     cameraMode: preferences.cameraMode,
     aimGuide: preferences.aimGuide,
     screenFlash: preferences.screenFlash,
+    cosmeticLoadout: entitlementAwareLoadout(preferences.cosmeticLoadout, progression?.entitlements ?? []),
   }))
   const isMatchCallbackCurrent = useEffectEvent((sessionGeneration: number | null) =>
     Boolean(
@@ -888,7 +968,10 @@ export function App() {
     return () => { active = false }
   }, [auth.configured])
   useEffect(() => {
-    if (screen !== 'profile' || !auth.signedIn || cloudAccountAvailable === false) return
+    if (!auth.signedIn || !auth.user || cloudAccountAvailable === false) {
+      setProgression(null)
+      return
+    }
     let active = true
     setProgressionLoading(true)
     void getProgression(auth.getToken)
@@ -896,7 +979,7 @@ export function App() {
       .catch(() => { if (active) setProgression(null) })
       .finally(() => { if (active) setProgressionLoading(false) })
     return () => { active = false }
-  }, [screen, auth.signedIn, cloudAccountAvailable])
+  }, [auth.signedIn, auth.user?.id, cloudAccountAvailable])
   useEffect(() => {
     screenRef.current = screen
   }, [screen])
@@ -907,7 +990,7 @@ export function App() {
       soundEffectsVolume: preferences.soundEffectsVolume,
     })
     gameRef.current?.setPresentationPreferences(getVisualPreferences())
-  }, [preferences])
+  }, [preferences, progression])
   useEffect(() => {
     const sessionGuard = sessionGuardRef.current
     let operation: ReturnType<typeof beginOnlineOperation> | null = null
@@ -1319,18 +1402,6 @@ export function App() {
     playerNames[index] = name
     setConfig({ ...config, playerNames })
   }
-  const updatePlayerAppearance = (index: number, appearance: PlayerAppearance) => {
-    const playerAppearances = preferences.playerAppearances.map((current, slot) =>
-      slot === index ? appearance : current,
-    )
-    setPreferences({ ...preferences, playerAppearances })
-    setConfig((current) => ({
-      ...current,
-      playerAppearances: current.playerAppearances.map((item, slot) =>
-        slot === index ? appearance : item,
-      ),
-    }))
-  }
   const openCustomize = (
     returnScreen: 'menu' | 'setup' | 'online-create' | 'online-join' | 'profile',
     slot = 0,
@@ -1386,6 +1457,9 @@ export function App() {
               <button className="button-quiet button-play button-customize" onClick={() => openCustomize('menu')}>
                 Customize Players <span>›</span>
               </button>
+              <button className="button-quiet button-play" onClick={() => { setWorkshopReturnScreen('menu'); setScreen('workshop') }}>
+                Cosmetic Workshop <span>›</span>
+              </button>
               <div className="menu-links">
                 <button className="button-quiet" onClick={() => setScreen('how-to')}>
                   How to Play
@@ -1421,9 +1495,31 @@ export function App() {
           presets={preferences.outfitPresets}
           selectedSlot={customizeSlot}
           onSelectSlot={setCustomizeSlot}
-          onChange={updatePlayerAppearance}
-          onPresetsChange={(outfitPresets) => setPreferences((current) => ({ ...current, outfitPresets }))}
+          cosmeticLoadout={entitlementAwareLoadout(preferences.cosmeticLoadout, progression?.entitlements ?? [])}
+          entitlements={progression?.entitlements ?? []}
+          onSave={({ appearances, presets, cosmeticLoadout }) => {
+            setPreferences((current) => ({ ...current, playerAppearances: appearances, outfitPresets: presets, cosmeticLoadout }))
+            setConfig((current) => ({ ...current, playerAppearances: current.playerAppearances.map((appearance, index) => appearances[index] ?? appearance) }))
+            setScreen(customizeReturnScreen)
+          }}
+          onOpenWorkshop={() => { setWorkshopReturnScreen('customize'); setScreen('workshop') }}
           onBack={() => setScreen(customizeReturnScreen)}
+        />
+      )
+    if (screen === 'workshop')
+      return (
+        <CosmeticWorkshop
+          appearance={preferences.playerAppearances[0]}
+          loadout={entitlementAwareLoadout(preferences.cosmeticLoadout, progression?.entitlements ?? [])}
+          progression={progression}
+          signedIn={auth.signedIn}
+          onEquip={(cosmeticLoadout) => setPreferences((current) => ({ ...current, cosmeticLoadout }))}
+          onPurchase={async (cosmeticId, cosmeticLoadout) => {
+            const nextProgression = await purchaseCosmetic(auth.getToken, cosmeticId)
+            setProgression(nextProgression)
+            setPreferences((current) => ({ ...current, cosmeticLoadout }))
+          }}
+          onBack={() => setScreen(workshopReturnScreen)}
         />
       )
     if (screen === 'online')
@@ -1998,8 +2094,8 @@ export function App() {
             <div className="profile-import-choice">
               <strong>Choose which toybox wins</strong>
               <p>This choice replaces the other version of your primary player, preferences, and outfit presets.</p>
-              <button onClick={() => accountSync.chooseInitial(true)}>Upload this device to cloud</button>
-              <button className="secondary" onClick={() => accountSync.chooseInitial(false)}>Replace this device with cloud</button>
+               <button className="button-primary" onClick={() => accountSync.chooseInitial(true)}>Upload this device to cloud</button>
+               <button className="button-quiet" onClick={() => accountSync.chooseInitial(false)}>Replace this device with cloud</button>
             </div>
           )}
           {accountActionError && <p className="form-error">{accountActionError}</p>}
@@ -2015,12 +2111,12 @@ export function App() {
                 <strong>Delete account permanently?</strong>
                  <p>This permanently deletes your account and all saved online data, including progression, preferences, and presets. Local guest data on this device remains.</p>
                 <label><span>Type DELETE to confirm</span><input autoFocus value={accountDeletionText} onChange={(event) => setAccountDeletionText(event.target.value)} autoComplete="off" /></label>
-                <button className="danger" disabled={accountActionBusy || accountDeletionText !== 'DELETE'} onClick={() => {
+                 <button className="button-primary danger" disabled={accountActionBusy || accountDeletionText !== 'DELETE'} onClick={() => {
                   setAccountActionBusy(true)
                   setAccountActionError(null)
                   void accountSync.deleteData().catch((caught) => setAccountActionError(caught instanceof Error ? caught.message : 'Account could not be deleted.')).finally(() => setAccountActionBusy(false))
                 }}>{accountActionBusy ? 'Deleting account...' : 'Delete account permanently'}</button>
-                <button className="secondary" disabled={accountActionBusy} onClick={() => setConfirmAccountDeletion(false)}>Cancel</button>
+                 <button className="button-quiet" disabled={accountActionBusy} onClick={() => setConfirmAccountDeletion(false)}>Cancel</button>
               </div>
             )}
           </div>

@@ -139,9 +139,12 @@ textarea:focus-visible {
 }
 .button-primary,
 .button-quiet {
+  min-height: 44px;
+  padding: 10px 16px;
   border: 2px solid var(--line);
   border-radius: 14px 17px 12px 16px;
   box-shadow: 0 5px 0 var(--line);
+  font-size: .9rem;
   font-weight: 900;
   transition:
     transform 0.14s ease,
@@ -210,6 +213,9 @@ textarea:focus-visible {
 }
 .menu-stack {
   width: min(340px, 100%);
+}
+.menu-stack > .button-play + .button-play {
+  margin-top: 12px;
 }
 .button-play {
   display: flex;
@@ -711,10 +717,17 @@ textarea:focus-visible {
   border: 2px solid var(--line);
   border-radius: 50%;
 }
+.owned-finish-group { padding: 10px 12px; }
+.owned-finish-options { grid-template-columns: repeat(auto-fit, minmax(100px, 140px)); justify-content: start; }
+.owned-finish-options button { min-height: 88px; }
+.owned-finish-options .weapon-icon,
+.owned-finish-options .projectile-icon { width: 96px; max-width: 100%; height: 58px; }
+.owned-finish-shop { margin-top: 12px; background: #eee3fa; color: #594495; }
 .customize-back {
   margin-top: 24px;
   padding: 11px 18px;
 }
+.customize-back button { min-width: 150px; min-height: 50px; font-size: 1rem; }
 .battle-setup,
 .panel {
   width: min(1080px, 100%);
@@ -937,6 +950,24 @@ select {
 .progression-stats span { display: grid; padding: 8px; border: 1px solid #b49b72; border-radius: 10px; text-align: center; font-size: .75rem; }
 .progression-stats b { font-size: 1.1rem; }
 .profile-progression h3 { margin: 0 0 8px; }
+.workshop-balance { display: flex; justify-content: space-between; gap: 16px; margin: 14px 0; padding: 12px 16px; border: 2px solid var(--line); border-radius: 14px; background: #fff3bd; }
+.workshop-stage { display: flex; align-items: center; justify-content: center; gap: 24px; min-height: 180px; padding: 20px; border-radius: 18px; background: linear-gradient(135deg, #25233a, #51466f); color: white; }
+.workshop-stage .player-avatar { width: 150px; height: 150px; }
+.workshop-stage label { display: grid; gap: 6px; }
+.workshop-shelf { margin: 24px 0; }
+.workshop-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+.workshop-card { display: grid; padding: 8px; overflow: hidden; border: 2px solid var(--line); border-radius: 18px 14px 20px 15px; background: #fffdf5; box-shadow: 0 4px 0 #bba57d; }
+.workshop-card.previewing { outline: 3px solid var(--sun); outline-offset: 2px; transform: translateY(-2px); }
+.workshop-card .workshop-preview { display: grid; justify-items: stretch; gap: 7px; min-height: 250px; padding: 0 0 8px; border: 0; box-shadow: none; background: transparent; text-align: left; }
+.workshop-item-preview { display: grid; min-height: 145px; place-items: center; overflow: hidden; border: 2px solid var(--line); border-radius: 12px; background: #cce8ee; }
+.workshop-item-preview.projectile { background: #f8d4d9; }
+.workshop-item-preview .weapon-icon { width: 155px; max-width: 82%; height: 105px; overflow: visible; filter: drop-shadow(0 5px 0 rgb(36 49 58 / .2)); }
+.workshop-card .workshop-preview strong { padding: 0 5px; font-size: 1rem; }
+.workshop-card .workshop-preview small { min-height: 2.6em; padding: 0 5px; color: #66584a; font-size: .72rem; font-weight: 700; line-height: 1.3; }
+.workshop-status { width: fit-content; margin-left: 5px; padding: 4px 8px; border-radius: 999px; background: #e7dcc3; font-size: .68rem; font-weight: 900; }
+.workshop-status.owned { background: #ccebd8; color: #205b3b; }
+.workshop-status.locked { background: #fff0b8; color: #69450d; }
+.workshop-card > button:last-child { margin-top: 7px; }
 .recent-match-list { display: grid; gap: 6px; }
 .recent-match-row { display: grid; grid-template-columns: 52px 1fr auto; gap: 8px; padding: 8px 10px; border-radius: 9px; background: #eee5d2; font-size: .78rem; }
 .recent-match-row strong { text-transform: uppercase; }
@@ -2221,14 +2252,14 @@ footer {
   font-weight: 900;
 }
 .account-button {
-  min-height: 34px;
-  padding: 6px 12px;
+  min-height: 42px;
+  padding: 9px 16px;
   border: 2px solid var(--line);
   border-radius: 999px;
   background: var(--paper);
   color: var(--ink);
   box-shadow: 0 3px 0 var(--line);
-  font-size: .78rem;
+  font-size: .86rem;
   font-weight: 900;
   line-height: 1;
   transition: transform .14s ease, box-shadow .14s ease, filter .14s ease;
@@ -2263,10 +2294,13 @@ footer {
 .account-sync-state { display: grid; gap: .3rem; padding: .75rem; border: 2px solid #789b8c; border-radius: .7rem; background: #eff9f3; }
 .account-sync-state small { color: #66584a; }
 .account-sync-state.has-error, .danger { color: #8e251d; }
+.button-primary.danger { background: #b7372c; color: #fff8e6; text-shadow: 0 2px 0 #7b201a; }
 .profile-import-choice, .account-delete-confirm { padding: 1rem; border: 2px solid currentColor; border-radius: .7rem; background: #fffaf0; }
 .account-delete-confirm label { display: block; margin: .8rem 0; }
-.profile-import-choice button, .account-delete-confirm button { margin: .25rem .4rem .25rem 0; }
+.profile-import-choice button, .account-delete-confirm button { margin: .35rem .5rem .35rem 0; }
 .profile-actions { display: grid; gap: .65rem; margin: 1rem 0; }
+.profile-actions > button { min-height: 50px; font-size: 1rem; }
+.workshop-card > button:last-child { min-height: 42px; padding: 8px 12px; border: 2px solid var(--line); border-radius: 10px; background: var(--paper-deep); color: var(--ink); box-shadow: 0 3px 0 var(--line); font-weight: 900; }
 
 @media (max-width: 600px) {
   .account-controls { justify-content: flex-end; }

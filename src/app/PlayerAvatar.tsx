@@ -2,12 +2,13 @@ import { useId } from 'react'
 import { PLAYER_ACCENT_COLORS, PLAYER_PRIMARY_COLORS, type PlayerAppearance } from '../players/appearanceRegistry'
 import { getCompactPlayerRecipe, playerPathData, resolvePlayerComposition, type PlayerPoseId, type PlayerVisualPrimitive, type PlayerVisualRole } from '../players/playerVisualRecipes'
 import type { WeaponId } from '../weapons/registry'
-import { getWeaponVisual, resolveWeaponPalette, type ShapeRecipe } from '../game/weaponVisualRecipes'
+import { getProjectileVisual, getWeaponVisual, resolveWeaponPalette, type ShapeRecipe } from '../game/weaponVisualRecipes'
+import { applyHeldObjectSkin, applyProjectileSkin, type ProjectileSkinId, type WeaponSkinId } from '../cosmetics/cosmeticLoadout'
 
-type PlayerAvatarProps = { appearance: Readonly<PlayerAppearance>; label?: string; teamId?: number; teamBackground?: boolean; highContrast?: boolean; className?: string; pose?: PlayerPoseId; facing?: -1 | 1; weaponId?: WeaponId; hurt?: boolean; frozen?: boolean; compact?: boolean }
+type PlayerAvatarProps = { appearance: Readonly<PlayerAppearance>; label?: string; teamId?: number; teamBackground?: boolean; highContrast?: boolean; className?: string; pose?: PlayerPoseId; facing?: -1 | 1; weaponId?: WeaponId; weaponSkinId?: WeaponSkinId; projectileSkinId?: ProjectileSkinId; hurt?: boolean; frozen?: boolean; compact?: boolean }
 
-function WeaponSvg({ recipe, weaponId }: { recipe: ShapeRecipe; weaponId: WeaponId }) {
-  const palette = resolveWeaponPalette(weaponId)
+function WeaponSvg({ recipe, weaponId, skinId = 'standard', projectileSkinId = 'standard' }: { recipe: ShapeRecipe; weaponId: WeaponId; skinId?: WeaponSkinId; projectileSkinId?: ProjectileSkinId }) {
+  const palette = applyHeldObjectSkin(resolveWeaponPalette(weaponId), weaponId, { weaponSkin: skinId, projectileSkin: projectileSkinId })
   const color = (role: keyof typeof palette) => `#${palette[role].toString(16).padStart(6, '0')}`
   return <>{recipe.primitives.map((item, index) => {
     if (item.kind === 'polygon') return <polygon key={index} points={item.points.map((point) => `${point.x},${point.y}`).join(' ')} fill={item.fill ? color(item.fill) : 'none'} stroke={item.stroke ? color(item.stroke) : undefined} strokeWidth={item.strokeWidth} />
@@ -52,7 +53,7 @@ function weaponRecipeViewBox(recipe: ShapeRecipe): string {
   return `${minX - padding} ${minY - padding} ${width + padding * 2} ${height + padding * 2}`
 }
 
-export function WeaponIcon({ weaponId, className = '' }: { weaponId: WeaponId; className?: string }) {
+export function WeaponIcon({ weaponId, className = '', skinId = 'standard' }: { weaponId: WeaponId; className?: string; skinId?: WeaponSkinId }) {
   const weapon = getWeaponVisual(weaponId)
   return (
     <svg
@@ -62,12 +63,25 @@ export function WeaponIcon({ weaponId, className = '' }: { weaponId: WeaponId; c
       aria-hidden="true"
       focusable="false"
     >
-      <WeaponSvg recipe={weapon.held} weaponId={weaponId} />
+      <WeaponSvg recipe={weapon.held} weaponId={weaponId} skinId={skinId} />
     </svg>
   )
 }
 
-export function PlayerAvatar({ appearance, label = 'Player appearance', teamId = 0, teamBackground = false, highContrast = false, className = '', pose = 'idle', facing = 1, weaponId, hurt = false, frozen = false, compact = false }: PlayerAvatarProps) {
+export function ProjectileIcon({ weaponId, skinId = 'standard' }: { weaponId: WeaponId; skinId?: ProjectileSkinId }) {
+  const projectile = getProjectileVisual(weaponId, 'primary')
+  if (!projectile) return null
+  const palette = applyProjectileSkin(resolveWeaponPalette(weaponId), skinId)
+  const color = (role: keyof typeof palette) => `#${palette[role].toString(16).padStart(6, '0')}`
+  return <svg className="weapon-icon" viewBox={weaponRecipeViewBox(projectile.shape)} preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false">{projectile.shape.primitives.map((item, index) => {
+    if (item.kind === 'polygon') return <polygon key={index} points={item.points.map((point) => `${point.x},${point.y}`).join(' ')} fill={item.fill ? color(item.fill) : 'none'} stroke={item.stroke ? color(item.stroke) : undefined} strokeWidth={item.strokeWidth} />
+    if (item.kind === 'line') return <line key={index} x1={item.from.x} y1={item.from.y} x2={item.to.x} y2={item.to.y} stroke={color(item.color)} strokeWidth={item.width} />
+    if (item.kind === 'circle') return <circle key={index} cx={item.center.x} cy={item.center.y} r={item.radius} fill={item.fill ? color(item.fill) : 'none'} stroke={item.stroke ? color(item.stroke) : undefined} strokeWidth={item.strokeWidth} />
+    return <ellipse key={index} cx={item.center.x} cy={item.center.y} rx={item.radiusX} ry={item.radiusY} fill={item.fill ? color(item.fill) : 'none'} stroke={item.stroke ? color(item.stroke) : undefined} strokeWidth={item.strokeWidth} />
+  })}</svg>
+}
+
+export function PlayerAvatar({ appearance, label = 'Player appearance', teamId = 0, teamBackground = false, highContrast = false, className = '', pose = 'idle', facing = 1, weaponId, weaponSkinId = 'standard', projectileSkinId = 'standard', hurt = false, frozen = false, compact = false }: PlayerAvatarProps) {
   const clipId = `${useId().replace(/:/g, '')}-body`
   const primary = PLAYER_PRIMARY_COLORS.find((entry) => entry.id === appearance.primaryColor)!.color
   const accent = PLAYER_ACCENT_COLORS.find((entry) => entry.id === appearance.accentColor)!.color
@@ -98,7 +112,7 @@ export function PlayerAvatar({ appearance, label = 'Player appearance', teamId =
       <g transform={bodyTransform}>{primitive(compact ? compactRecipe.body : recipe.body, 'body')}<g clipPath={`url(#${clipId})`}>{(compact ? compactRecipe.patternMarks : recipe.pattern).map((item, index) => primitive(item, `pattern-${index}`))}</g>{!compact && recipe.face.map((item, index) => primitive(item, `face-${index}`))}</g>
       <g transform={bodyTransform}>{(compact ? compactRecipe.accessoryMarks : recipe.frontAccessories).map((item, index) => primitive(item, `front-accessory-${index}`))}</g>
       {weapon && resolvedPose.frontArm && arm(resolvedPose.frontArm.shoulder, resolvedPose.frontArm.hand, 'front-arm')}
-      {weapon && <g transform={`translate(${resolvedPose.weaponOrigin.x} ${resolvedPose.weaponOrigin.y}) rotate(${resolvedPose.weaponRotation * 180 / Math.PI}) scale(${weapon.heldScale * 0.62})`}><WeaponSvg recipe={weapon.held} weaponId={weaponId!} /></g>}
+      {weapon && <g transform={`translate(${resolvedPose.weaponOrigin.x} ${resolvedPose.weaponOrigin.y}) rotate(${resolvedPose.weaponRotation * 180 / Math.PI}) scale(${weapon.heldScale * 0.62})`}><WeaponSvg recipe={weapon.held} weaponId={weaponId!} skinId={weaponSkinId} projectileSkinId={projectileSkinId} /></g>}
       {frozen && <g className="avatar-frozen-overlay"><rect x="28" y="22" width="72" height="82" rx="24" /><path d="M38 36 L91 91 M91 36 L38 91" /></g>}
       {pose === 'victory' && <path className="avatar-victory-overlay" d="M48 27 L53 8 L63 20 L70 5 L78 20 L89 8 L85 30 Z" />}
     </g>

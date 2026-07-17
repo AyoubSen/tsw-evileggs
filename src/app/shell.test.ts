@@ -78,4 +78,12 @@ describe('preferences', () => {
       soundEffectsVolume: 0.35,
     })
   })
+
+  it('migrates and sanitizes cosmetic loadouts', () => {
+    const key = `${BRAND.storageNamespace}:preferences`
+    expect(loadPreferences(memoryStorage({ [key]: JSON.stringify({ version: 5 }) })).cosmeticLoadout)
+      .toEqual(DEFAULT_PREFERENCES.cosmeticLoadout)
+    expect(loadPreferences(memoryStorage({ [key]: JSON.stringify({ ...DEFAULT_PREFERENCES, cosmeticLoadout: { weaponSkin: 'sunset-brass', projectileSkin: 'future' } }) })).cosmeticLoadout)
+      .toEqual({ version: 1, weaponSkin: 'sunset-brass', projectileSkin: 'standard' })
+  })
 })

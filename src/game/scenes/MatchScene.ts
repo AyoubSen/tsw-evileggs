@@ -73,6 +73,7 @@ import {
   type PlayerVisualPrimitive,
   type PlayerVisualRole,
 } from '../../players/playerVisualRecipes'
+import { DEFAULT_COSMETIC_LOADOUT, applyHeldObjectSkin, applyWeaponSkin } from '../../cosmetics/cosmeticLoadout'
 
 type BurstEffect = {
   kind: 'explosion' | 'teleport'
@@ -168,6 +169,7 @@ export class MatchScene extends Phaser.Scene {
     cameraMode: 'fit',
     aimGuide: 'normal',
     screenFlash: 'normal',
+    cosmeticLoadout: DEFAULT_COSMETIC_LOADOUT,
   }
   private audio!: AudioDirector
   private backgroundGraphics!: Phaser.GameObjects.Graphics
@@ -442,6 +444,14 @@ export class MatchScene extends Phaser.Scene {
         trail.points = trail.points.slice(-1)
       this.actionFocusUntil = this.visualTime
     }
+  }
+
+  private weaponPalette(weaponId: WeaponId) {
+    return applyHeldObjectSkin(resolveWeaponPalette(weaponId, this.preferences.highContrastHud), weaponId, this.preferences.cosmeticLoadout)
+  }
+
+  private projectilePalette(weaponId: WeaponId) {
+    return applyWeaponSkin(resolveWeaponPalette(weaponId, this.preferences.highContrastHud), this.preferences.cosmeticLoadout.weaponSkin)
   }
 
   public setRenderScale(nextScale: number): void {
@@ -1328,7 +1338,7 @@ export class MatchScene extends Phaser.Scene {
       this.drawAppearance(this.actorGraphics, player, x, y, 34 * scale, facing, hurt, defeated, 1, undefined, 'rear-accessories')
       if (!defeated)
         this.renderHeldWeapon(
-          { x, y }, weaponPose.direction, weaponPose.weaponId, reaction, facing,
+          { x, y }, player, weaponPose.direction, weaponPose.weaponId, reaction, facing,
           player.appearance, 'rear',
         )
       this.drawAppearance(
@@ -1354,7 +1364,7 @@ export class MatchScene extends Phaser.Scene {
           .lineStyle(2, INK_COLOR)
           .lineBetween(x - 10, y - 22, x + 10, y - 22)
       if (player.frozenTurnsRemaining > 0) {
-        const cryoPalette = resolveWeaponPalette('cryo-shot', this.preferences.highContrastHud)
+        const cryoPalette = this.projectilePalette('cryo-shot')
         this.actorGraphics
           .lineStyle(3, cryoPalette.flash, 0.9)
           .strokeRoundedRect(x - 19 * scale, y - 15 * scale, 38 * scale, 35 * scale, 13 * scale)
@@ -1370,6 +1380,7 @@ export class MatchScene extends Phaser.Scene {
       if (!defeated)
         this.renderHeldWeapon(
           { x, y },
+          player,
           weaponPose.direction,
           weaponPose.weaponId,
           reaction,
@@ -1420,13 +1431,14 @@ export class MatchScene extends Phaser.Scene {
     const presentation = getWeaponPresentation(equippedWeapon)
     const elevation = (presentation.restElevation * Math.PI) / 180
     return {
-      direction: { x: Math.cos(elevation) * player.facing, y: Math.sin(elevation) },
+      direction: { x: Math.cos(elevation) * player.facing, y: -Math.sin(elevation) },
       weaponId: equippedWeapon,
     }
   }
 
   private renderHeldWeapon(
     actorCenter: Vector,
+    player: SimPlayer,
     direction: Vector,
     weaponId: WeaponId,
     reaction: Reaction | undefined,
@@ -1436,7 +1448,7 @@ export class MatchScene extends Phaser.Scene {
   ): void {
     const presentation = getWeaponPresentation(weaponId)
     const visual = getWeaponVisual(weaponId)
-    const palette = resolveWeaponPalette(weaponId, this.preferences.highContrastHud)
+    const palette = this.weaponPalette(weaponId)
     const policy = this.weaponMotionPolicy(weaponId)
     const firedAge = this.visualTime - (reaction?.firedAt ?? -Infinity)
     const recoilProgress =
@@ -1469,13 +1481,29 @@ export class MatchScene extends Phaser.Scene {
       y: actorCenter.y + (point.y - 60) * bodyScale,
     })
     const weaponAnchor = bodyPoint(baseComposition.pose.weaponOrigin)
+    const modelScale = weaponModelScale(weaponId) * visual.heldScale
+    const handedness = heldWeaponHandedness(forward, facing)
+    const physicalProjectile = getProjectileVisual(weaponId, 'primary') !== null
+    const desiredMuzzle = physicalProjectile
+      ? {
+          x: player.position.x + forward.x * (player.radius + 10),
+          y: player.position.y + forward.y * (player.radius + 10),
+        }
+      : transformLocalPoint(weaponAnchor, forward, {
+          x: presentation.muzzle.x * modelScale,
+          y: presentation.muzzle.y * modelScale * handedness,
+        })
+    const muzzleOffset = transformLocalPoint({ x: 0, y: 0 }, forward, {
+      x: presentation.muzzle.x * modelScale,
+      y: presentation.muzzle.y * modelScale * handedness,
+    })
     const origin = {
       x:
-        weaponAnchor.x -
+        desiredMuzzle.x - muzzleOffset.x -
         forward.x * recoil -
         (firing && visual.pose === 'throw' ? forward.x * (1 - recoilProgress) * 5 : 0),
       y:
-        weaponAnchor.y -
+        desiredMuzzle.y - muzzleOffset.y -
         forward.y * recoil +
         (!this.preferences.reducedMotion &&
         reaction?.equippedAt !== undefined &&
@@ -1483,8 +1511,6 @@ export class MatchScene extends Phaser.Scene {
           ? Math.max(0, 1 - (this.visualTime - reaction.equippedAt) / 0.16) * 7
           : 0),
     }
-    const modelScale = weaponModelScale(weaponId) * visual.heldScale
-    const handedness = heldWeaponHandedness(forward, facing)
     const posePoint = (x: number, y: number) =>
       transformLocalPoint(origin, forward, { x, y: y * handedness })
     const characterPose = resolvePlayerComposition({ appearance, origin, direction: forward, scale: modelScale, mirror: handedness < 0, weaponId, pose: poseId, progress: recoilProgress }).pose
@@ -1583,7 +1609,7 @@ export class MatchScene extends Phaser.Scene {
       const policy = this.weaponMotionPolicy(trail.weaponId)
       const points = trail.points.slice(-policy.trailSampleCount)
       if (points.length < 2) continue
-      const palette = resolveWeaponPalette(trail.weaponId, this.preferences.highContrastHud)
+      const palette = this.projectilePalette(trail.weaponId)
       const projectileVisual = getProjectileVisual(trail.weaponId, trail.kind)
       for (let index = 1; index < points.length; index += 1) {
         const alpha = (index / points.length) * 0.72
@@ -1607,7 +1633,7 @@ export class MatchScene extends Phaser.Scene {
         .strokeCircle(projectile.position.x, projectile.position.y, Math.max(2, projectile.radius))
       return
     }
-    const palette = resolveWeaponPalette(projectile.weaponId, this.preferences.highContrastHud)
+    const palette = this.projectilePalette(projectile.weaponId)
     const velocityDirection = normalizeDirection(projectile.velocity)
     const spin = this.preferences.reducedMotion ? 0 : visual.spinRadiansPerSecond * this.visualTime
     const cosine = Math.cos(spin)
@@ -1626,7 +1652,7 @@ export class MatchScene extends Phaser.Scene {
 
   private renderMines(): void {
     const visual = getWeaponVisual('deployable-mine')
-    const palette = resolveWeaponPalette('deployable-mine', this.preferences.highContrastHud)
+    const palette = this.projectilePalette('deployable-mine')
     for (const mine of this.source.state.mines) {
       const armed = this.source.state.turnNumber >= mine.armedTurn
       this.overlayGraphics
@@ -1649,7 +1675,7 @@ export class MatchScene extends Phaser.Scene {
 
   private renderBeacons(): void {
     const visual = getWeaponVisual('bomb-beacon')
-    const palette = resolveWeaponPalette('bomb-beacon', this.preferences.highContrastHud)
+    const palette = this.projectilePalette('bomb-beacon')
     for (const beacon of this.source.state.beacons) {
       const seconds = Math.max(0, beacon.remainingTicks / SIMULATION_HZ)
       const pulse = this.preferences.reducedMotion ? 0 : Math.sin(this.visualTime * 9) * 2
@@ -1669,7 +1695,7 @@ export class MatchScene extends Phaser.Scene {
 
   private renderMeleeGuide(origin: Vector, direction: Vector): void {
     const range = this.selectedWeapon().meleeRange ?? 0
-    const palette = resolveWeaponPalette('pocket-knife', this.preferences.highContrastHud)
+    const palette = this.weaponPalette('pocket-knife')
     const baseAngle = Math.atan2(direction.y, direction.x)
     let previous = origin
     this.overlayGraphics.lineStyle(4, palette.flash, 0.72)
@@ -1721,7 +1747,7 @@ export class MatchScene extends Phaser.Scene {
   private renderTeleportMarker(): void {
     if (!this.teleportTarget) return
     const valid = this.source.isValidTeleport(this.teleportTarget)
-    const palette = resolveWeaponPalette('teleporter', this.preferences.highContrastHud)
+    const palette = this.weaponPalette('teleporter')
     const radius = this.source.activePlayer.radius / this.logicalCameraZoom()
     this.overlayGraphics
       .lineStyle(3, valid ? palette.success : palette.impact)
@@ -1809,7 +1835,7 @@ export class MatchScene extends Phaser.Scene {
       const centerX =
         rackX + rackPadding + weaponRadius + index * (weaponDiameter + rackGap)
       const visual = getWeaponVisual(id)
-      const palette = resolveWeaponPalette(id, this.preferences.highContrastHud)
+      const palette = this.weaponPalette(id)
       const circleColor = selected
         ? 0xffe29a
         : available
@@ -2673,7 +2699,9 @@ export class MatchScene extends Phaser.Scene {
       const progress = Phaser.Math.Clamp(effect.age / effect.lifetime, 0, 1)
       const alpha = 1 - progress
       const visual = getWeaponVisual(effect.weaponId)
-      const palette = resolveWeaponPalette(effect.weaponId, this.preferences.highContrastHud)
+      const palette = effect.kind === 'bounce' || effect.kind === 'split' || effect.kind === 'bore' || effect.kind === 'freeze'
+        ? this.projectilePalette(effect.weaponId)
+        : this.weaponPalette(effect.weaponId)
       const policy = this.weaponMotionPolicy(effect.weaponId)
       const forward = normalizeDirection(effect.direction)
       const across = perpendicular(forward)
@@ -2824,10 +2852,7 @@ export class MatchScene extends Phaser.Scene {
     }
     for (const effect of this.burstEffects) {
       const progress = effect.age / effect.lifetime
-      const palette = resolveWeaponPalette(
-        effect.weaponId ?? 'teleporter',
-        this.preferences.highContrastHud,
-      )
+      const palette = this.projectilePalette(effect.weaponId ?? 'teleporter')
       const color = palette.impact
       const alpha = 1 - progress
       if (effect.style === 'shoe-thud') {
@@ -2976,7 +3001,9 @@ export class MatchScene extends Phaser.Scene {
     }
     for (const trace of this.traceEffects) {
       const alpha = 1 - trace.age / trace.lifetime
-      const palette = resolveWeaponPalette(trace.weaponId, this.preferences.highContrastHud)
+      const palette = trace.style === 'scatter'
+        ? this.projectilePalette(trace.weaponId)
+        : this.weaponPalette(trace.weaponId)
       if (trace.style === 'scatter') {
         this.overlayGraphics.lineStyle(2, palette.flash, alpha)
         for (const endpoint of trace.endpoints)

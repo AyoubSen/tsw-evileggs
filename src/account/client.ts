@@ -72,3 +72,14 @@ export async function getProgression(getToken: () => Promise<string | null>): Pr
     throw new Error('The progression service returned invalid data.')
   return value
 }
+
+export async function purchaseCosmetic(getToken: () => Promise<string | null>, cosmeticId: string): Promise<ProgressionOverview> {
+  const response = await request(getToken, '/api/me/cosmetics/purchase', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cosmeticId }),
+  })
+  const value = await response.json() as { progression?: ProgressionOverview; error?: { message?: string } }
+  if (!response.ok) throw new Error(value.error?.message ?? 'The cosmetic purchase could not be completed.')
+  if (!value.progression?.summary || !Array.isArray(value.progression.entitlements))
+    throw new Error('The workshop returned invalid data.')
+  return value.progression
+}

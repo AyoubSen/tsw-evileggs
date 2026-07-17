@@ -21,7 +21,7 @@ describe('browser-safe account data', () => {
       soundEffectsVolume: 3,
       defaultMatch: { mode: '4v4', mapId: 'future-map', turnDurationSeconds: 99, projectileBoundaryMode: 'future' },
     })).toMatchObject({
-      version: 1,
+      version: 2,
       displayName: 'Egg Lord',
       preferredAppearance: appearance,
       cameraShake: true,
