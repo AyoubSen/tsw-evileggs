@@ -981,6 +981,13 @@ export function App() {
     return () => { active = false }
   }, [auth.signedIn, auth.user?.id, cloudAccountAvailable])
   useEffect(() => {
+    if (!result || matchMode !== 'online' || !auth.signedIn) return
+    const refresh = setTimeout(() => {
+      void getProgression(auth.getToken).then(setProgression).catch(() => undefined)
+    }, 900)
+    return () => clearTimeout(refresh)
+  }, [result, matchMode, auth.signedIn])
+  useEffect(() => {
     screenRef.current = screen
   }, [screen])
   useEffect(() => {
@@ -1096,6 +1103,9 @@ export function App() {
           remainingHealth: view.result.remainingHealth,
           turnsTaken: view.result.turnsTaken,
           durationSeconds: view.result.durationSeconds,
+          playerRecaps: onlineSession.source.state.players.map((player) => ({
+            playerId: player.id, damageDealt: 0, selfDamage: 0, shots: 0, terrainDestroyed: 0, favoriteWeaponId: null,
+          })),
         })
       enterMatchWhenReady()
     })
@@ -2062,6 +2072,8 @@ export function App() {
               <div className="progression-meter" aria-label={`${progression.summary.levelExperience} of ${progression.summary.nextLevelExperience} experience`}><span style={{ width: `${(progression.summary.levelExperience / progression.summary.nextLevelExperience) * 100}%` }} /></div>
               <small>{progression.summary.levelExperience} / {progression.summary.nextLevelExperience} XP</small>
               <div className="progression-stats"><span><b>{progression.summary.matchesPlayed}</b> Matches</span><span><b>{progression.summary.wins}</b> Wins</span><span><b>{progression.summary.losses}</b> Losses</span><span><b>{progression.summary.draws}</b> Draws</span></div>
+              <h3>Progression goals</h3>
+              <div className="progression-goals">{progression.goals.map((goal) => <article className={goal.completed ? 'completed' : ''} key={goal.id}><header><strong>{goal.title}</strong><span>{goal.completed ? 'Complete' : `${goal.progress}/${goal.target}`}</span></header><p>{goal.description}</p><div className="progression-meter"><span style={{ width: `${(goal.progress / goal.target) * 100}%` }} /></div><small>{goal.reward.cosmeticId ? `Unlocks ${goal.reward.cosmeticId.split(':')[1].replaceAll('-', ' ')}` : `+${goal.reward.experience} XP · +${goal.reward.currency} Scrap`}</small></article>)}</div>
               <h3>Recent skirmishes</h3>
               {progression.recentMatches.length ? <div className="recent-match-list">{progression.recentMatches.map((match) => <div className={`recent-match-row ${match.outcome}`} key={match.id}><strong>{match.outcome}</strong><span>{getMap(match.mapId).displayName} · {match.mode}</span><small>+{match.experienceEarned} XP · +{match.currencyEarned} Scrap</small></div>)}</div> : <p>No signed-in online matches yet.</p>}
             </section>
@@ -2338,6 +2350,7 @@ export function App() {
               {getMap(result.config.mapId).displayName} · {projectileBoundaryLabel(result.config.projectileBoundaryMode)} boundaries · {result.remainingHealth} health remaining
               · {result.turnsTaken} turns · {result.durationSeconds}s
             </p>
+            <section className="match-recap"><h3>Match recap</h3><div className="match-recap-grid">{result.playerRecaps.map((recap, index) => <article key={recap.playerId}><PlayerAvatar appearance={result.config.playerAppearances[index]} compact label="" /><strong>{result.config.playerNames[index]}</strong><span><b>{recap.damageDealt}</b> damage</span><span><b>{recap.shots}</b> actions</span><span><b>{recap.terrainDestroyed.toLocaleString()}</b> terrain</span><small>{recap.favoriteWeaponId ? `Favorite: ${WEAPONS[recap.favoriteWeaponId].displayName}` : 'No weapon used'}{recap.selfDamage ? ` · ${recap.selfDamage} self damage` : ''}</small></article>)}</div></section>
             {matchMode === 'online' && auth.signedIn && typeof onlineSession?.source.localSeat === 'number' && (() => {
               const reward = progressionReward({
                 winnerTeamId: result.winnerTeamId,

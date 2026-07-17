@@ -163,6 +163,8 @@ export class MatchSimulation {
       nextTerrainSequence: 1,
       nextEventSequence: 1,
       lastCommandSequence: 0,
+      playerStats: Object.fromEntries(players.map((player) => [player.id, { damageDealt: 0, selfDamage: 0, terrainDestroyed: 0, shotsByWeapon: {} }])),
+      actionOwners: {},
     }
   }
 
@@ -429,6 +431,9 @@ export class MatchSimulation {
 
   private beginAction(player: SimPlayer, weaponId: WeaponId, direction?: Vector): string {
     const id = `action-${this.state.nextActionId++}`
+    this.state.actionOwners[id] = player.id
+    const stats = this.state.playerStats[player.id]
+    stats.shotsByWeapon[weaponId] = (stats.shotsByWeapon[weaponId] ?? 0) + 1
     this.state.activeAction = { id, playerId: player.id, weaponId }
     this.emit({
       type: 'weapon-fired',
@@ -1183,6 +1188,9 @@ export class MatchSimulation {
       sourceActionId: actionId,
     }
     this.state.terrainOperations.push(operation)
+    const ownerId = this.state.actionOwners[actionId]
+    if (ownerId && this.state.playerStats[ownerId])
+      this.state.playerStats[ownerId].terrainDestroyed += Math.round(Math.PI * radius * radius)
     this.terrain.removeCircle(center.x, center.y, radius)
     this.emit({ type: 'terrain-destroyed', operation })
   }
@@ -1196,10 +1204,16 @@ export class MatchSimulation {
     if (amount <= 0) return
     const previous = player.health
     player.health = Math.max(0, player.health - amount)
+    const applied = previous - player.health
+    const sourceStats = this.state.playerStats[sourcePlayerId]
+    if (sourceStats) {
+      if (sourcePlayerId === player.id) sourceStats.selfDamage += applied
+      else sourceStats.damageDealt += applied
+    }
     this.emit({
       type: 'player-damaged',
       playerId: player.id,
-      amount: previous - player.health,
+      amount: applied,
       sourceActionId,
       selfDamage: sourcePlayerId === player.id,
     })
@@ -1360,6 +1374,19 @@ export class MatchSimulation {
             ),
       turnsTaken: this.state.turnNumber,
       durationSeconds: Math.floor(this.state.durationTicks / SIMULATION_HZ),
+      playerRecaps: this.state.players.map((player) => {
+        const stats = this.state.playerStats[player.id]
+        const favoriteWeaponId = WEAPON_ORDER.reduce<WeaponId | null>((favorite, weaponId) =>
+          (stats.shotsByWeapon[weaponId] ?? 0) > (favorite ? stats.shotsByWeapon[favorite] ?? 0 : 0) ? weaponId : favorite, null)
+        return {
+          playerId: player.id,
+          damageDealt: Math.round(stats.damageDealt),
+          selfDamage: Math.round(stats.selfDamage),
+          shots: Object.values(stats.shotsByWeapon).reduce((total, count) => total + (count ?? 0), 0),
+          terrainDestroyed: stats.terrainDestroyed,
+          favoriteWeaponId,
+        }
+      }),
     }
   }
 

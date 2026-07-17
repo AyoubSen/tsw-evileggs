@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm'
 import { PURCHASABLE_COSMETICS } from '../../src/cosmetics/cosmeticLoadout'
 import { sanitizeAccountPreferences } from '../../src/shared/account'
-import { progressionLevel, progressionReward, type MatchOutcome, type ProgressionOverview } from '../../src/shared/progression'
+import { PROGRESSION_GOALS, progressionLevel, progressionReward, type MatchOutcome, type ProgressionOverview } from '../../src/shared/progression'
 import type { MapId, MatchMode, TeamId } from '../../src/maps/registry'
 import type { AccountDatabase } from '../db/client'
 import { cosmeticEntitlements, currencyLedger, matchParticipants, onlineMatches, profiles, progressionProfiles } from '../db/schema'
@@ -55,7 +55,7 @@ export class DrizzleProgressionRepository implements ProgressionRepository {
         await tx.insert(currencyLedger).values({
           profileId: profile.id, amount: reward.currency, reason: 'match-reward', referenceId: match.id,
         }).onConflictDoNothing()
-        await tx.update(progressionProfiles).set({
+        const [updated] = await tx.update(progressionProfiles).set({
           experience: sql`${progressionProfiles.experience} + ${reward.experience}`,
           currencyBalance: sql`${progressionProfiles.currencyBalance} + ${reward.currency}`,
           matchesPlayed: sql`${progressionProfiles.matchesPlayed} + 1`,
@@ -63,7 +63,23 @@ export class DrizzleProgressionRepository implements ProgressionRepository {
           losses: sql`${progressionProfiles.losses} + ${reward.outcome === 'loss' ? 1 : 0}`,
           draws: sql`${progressionProfiles.draws} + ${reward.outcome === 'draw' ? 1 : 0}`,
           updatedAt: new Date(),
-        }).where(eq(progressionProfiles.profileId, profile.id))
+        }).where(eq(progressionProfiles.profileId, profile.id)).returning({ matchesPlayed: progressionProfiles.matchesPlayed, wins: progressionProfiles.wins })
+        if (!updated) throw new Error('Progression could not be updated.')
+        for (const goal of PROGRESSION_GOALS) {
+          if (updated[goal.metric] < goal.target) continue
+          const claimedGoal = await tx.insert(currencyLedger).values({
+            profileId: profile.id, amount: goal.reward.currency, reason: 'goal-reward', referenceId: goal.id,
+          }).onConflictDoNothing().returning({ id: currencyLedger.id })
+          if (!claimedGoal.length) continue
+          await tx.update(progressionProfiles).set({
+            experience: sql`${progressionProfiles.experience} + ${goal.reward.experience}`,
+            currencyBalance: sql`${progressionProfiles.currencyBalance} + ${goal.reward.currency}`,
+            updatedAt: new Date(),
+          }).where(eq(progressionProfiles.profileId, profile.id))
+          if (goal.reward.cosmeticId) await tx.insert(cosmeticEntitlements).values({
+            profileId: profile.id, cosmeticId: goal.reward.cosmeticId, source: `goal:${goal.id}`,
+          }).onConflictDoNothing()
+        }
       }
       return true
     })
@@ -79,11 +95,13 @@ export class DrizzleProgressionRepository implements ProgressionRepository {
       .from(matchParticipants).innerJoin(onlineMatches, eq(matchParticipants.matchId, onlineMatches.id))
       .where(eq(matchParticipants.profileId, profile.id)).orderBy(desc(onlineMatches.completedAt)).limit(Math.max(1, Math.min(20, recentLimit)))
     const entitlements = await this.db.select({ id: cosmeticEntitlements.cosmeticId }).from(cosmeticEntitlements).where(eq(cosmeticEntitlements.profileId, profile.id))
+    const goalClaims = await this.db.select({ id: currencyLedger.referenceId }).from(currencyLedger).where(and(eq(currencyLedger.profileId, profile.id), eq(currencyLedger.reason, 'goal-reward')))
     const experience = summary?.experience ?? 0
     return {
       summary: { ...progressionLevel(experience), experience, currencyBalance: summary?.currencyBalance ?? 0, matchesPlayed: summary?.matchesPlayed ?? 0, wins: summary?.wins ?? 0, losses: summary?.losses ?? 0, draws: summary?.draws ?? 0 },
       recentMatches: history.map(({ participant, match }) => ({ id: match.id, completedAt: match.completedAt.toISOString(), mode: match.mode as MatchMode, mapId: match.mapId as MapId, outcome: participant.outcome as MatchOutcome, reason: match.reason as 'normal' | 'forfeit', turnsTaken: match.turnsTaken, durationSeconds: match.durationSeconds, experienceEarned: participant.experienceEarned, currencyEarned: participant.currencyEarned })),
       entitlements: entitlements.map(({ id }) => id),
+      goals: PROGRESSION_GOALS.map((goal) => ({ ...goal, progress: Math.min(goal.target, summary?.[goal.metric] ?? 0), completed: goalClaims.some(({ id }) => id === goal.id) })),
     }
   }
 

@@ -309,7 +309,7 @@ describe('weapons', () => {
 })
 
 describe('maps', () => {
-  it('registers the deterministic twelve-map roster with four safe maps per mode', () => {
+  it('registers the deterministic twenty-one-map roster with seven safe maps per mode', () => {
     expect(MAP_ORDER).toEqual([
       'rolling-hills',
       'twin-peaks',
@@ -323,11 +323,20 @@ describe('maps', () => {
       'sundered-crown',
       'lantern-vault',
       'fossil-wake',
+      'glasshouse-divide',
+      'iron-trestle',
+      'echo-caldera',
+      'salt-flats',
+      'split-orchard',
+      'tideworks',
+      'ember-steps',
+      'open-skyline',
+      'delta-spires',
     ])
-    expect(new Set(MAP_ORDER).size).toBe(12)
-    expect(mapIdsForMode('1v1')).toHaveLength(4)
-    expect(mapIdsForMode('2v2')).toHaveLength(4)
-    expect(mapIdsForMode('3v3')).toHaveLength(4)
+    expect(new Set(MAP_ORDER).size).toBe(21)
+    expect(mapIdsForMode('1v1')).toHaveLength(7)
+    expect(mapIdsForMode('2v2')).toHaveLength(7)
+    expect(mapIdsForMode('3v3')).toHaveLength(7)
     for (const id of MAP_ORDER) {
       const map = MAPS[id]
       expect(map.displayName.length).toBeGreaterThan(0)
@@ -337,7 +346,7 @@ describe('maps', () => {
       for (const spawn of map.spawnPoints) expect(terrain.surfaceY(spawn.x)).not.toBeNull()
     }
     expect(getMap('crater-basin').id).toBe('rolling-hills')
-    expect(MAPS['ruined-foundry']).toMatchObject({ revision: 2 })
+    expect(MAPS['ruined-foundry']).toMatchObject({ revision: 3 })
     expect(MAPS['ruined-foundry'].objects).toHaveLength(2)
     const reflectors = MAPS['ruined-foundry'].objects.filter(
       (object) => object.type === 'reflector-wall',
@@ -349,8 +358,8 @@ describe('maps', () => {
     expect(left.start.y).toBe(right.end.y)
     expect(left.end.y).toBe(right.start.y)
     expect(MAP_ORDER.filter((id) => MAPS[id].objects.length > 0)).toEqual([
-      'twin-peaks',
       'ruined-foundry',
+      'echo-caldera',
     ])
   })
 

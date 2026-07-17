@@ -13,6 +13,16 @@ export type SimulationMatchResult = {
   remainingHealth: number
   turnsTaken: number
   durationSeconds: number
+  playerRecaps: PlayerRecapStats[]
+}
+
+export type PlayerRecapStats = {
+  playerId: string
+  damageDealt: number
+  selfDamage: number
+  shots: number
+  terrainDestroyed: number
+  favoriteWeaponId: WeaponId | null
 }
 
 type EventEnvelope = { sequence: number; tick: number }

@@ -521,7 +521,7 @@ export function resolveMapDocument(value: unknown): ResolvedMap {
       terrainCells[supportY * terrainWidth + cellX] === TERRAIN_MATERIAL.empty ||
       terrainCells[headY * terrainWidth + cellX] !== TERRAIN_MATERIAL.empty
     )
-      throw new Error('Map spawn does not have safe support and headroom.')
+      throw new Error(`Map ${document.id} spawn ${index + 1} does not have safe support and headroom.`)
   }
   if (
     document.spawns.some((spawn, index) =>

@@ -153,6 +153,14 @@ const MAX_PROJECTILE_TRAILS = 32
 const MAX_WEAPON_EFFECTS = 40
 const MAX_REFLECTION_EFFECTS = 24
 
+const mixColor = (color: number, target: number, amount: number): number => {
+  const channel = (shift: number) =>
+    Math.round(
+      ((color >> shift) & 0xff) * (1 - amount) + ((target >> shift) & 0xff) * amount,
+    )
+  return (channel(16) << 16) | (channel(8) << 8) | channel(0)
+}
+
 type RenderAppearance = {
   primary: number
   accent: number
@@ -225,6 +233,7 @@ export class MatchScene extends Phaser.Scene {
   private renderedTerrainMatchId = ''
   private renderedTerrainOperationCount = -1
   private renderedTerrain: TerrainMask | null = null
+  private renderedBackdropKey = ''
   private renderedMapObjectsKey = ''
   private actionFocus: Vector | null = null
   private actionFocusUntil = 0
@@ -1004,16 +1013,294 @@ export class MatchScene extends Phaser.Scene {
   private renderBackdrop(): void {
     const map = getMap(this.source.state.mapId)
     const { width, height, theme } = map
-    this.backgroundGraphics.clear().fillStyle(theme.sky).fillRect(0, 0, width, height)
-    this.backgroundGraphics.fillStyle(theme.sun, 0.72).fillCircle(width - width * 0.11, height * 0.19, 46)
+    const cacheKey = `${map.id}:${map.revision}:${map.contentHash}`
+    if (cacheKey === this.renderedBackdropKey) return
+    this.renderedBackdropKey = cacheKey
+    this.backgroundGraphics.clear()
+    const skyBrightness = (((theme.sky >> 16) & 0xff) * 0.299 + ((theme.sky >> 8) & 0xff) * 0.587 + (theme.sky & 0xff) * 0.114) / 255
+    const night = skyBrightness < 0.38
+    const horizon = mixColor(theme.sky, night ? theme.backHill : theme.sun, night ? 0.16 : 0.2)
+
+    for (let band = 0; band < 12; band += 1) {
+      const top = height * band / 12
+      this.backgroundGraphics
+        .fillStyle(mixColor(theme.sky, horizon, band / 15))
+        .fillRect(0, top, width, height / 12 + 1)
+    }
+
+    const sunX = width * (0.82 + (map.contentHash.charCodeAt(0) % 7) * 0.01)
+    const sunY = height * 0.18
     this.backgroundGraphics
-      .fillStyle(theme.backHill, 0.45)
-      .fillEllipse(width * 0.18, height * 0.63, width * 0.45, height * 0.29)
-      .fillEllipse(width * 0.81, height * 0.61, width * 0.49, height * 0.31)
-    this.backgroundGraphics
-      .fillStyle(0xffffff, 0.62)
-      .fillEllipse(width * 0.14, height * 0.21, 115, 20)
-      .fillEllipse(width * 0.68, height * 0.27, 145, 25)
+      .fillStyle(theme.sun, night ? 0.05 : 0.09)
+      .fillCircle(sunX, sunY, 78)
+      .fillStyle(theme.sun, night ? 0.13 : 0.16)
+      .fillCircle(sunX, sunY, 58)
+      .fillStyle(theme.sun, night ? 0.85 : 0.78)
+      .fillCircle(sunX, sunY, night ? 30 : 40)
+
+    if (skyBrightness < 0.38) {
+      for (let star = 0; star < 42; star += 1) {
+        const x = ((star * 193 + map.contentHash.charCodeAt(star % map.contentHash.length) * 17) % 997) / 997 * width
+        const y = ((star * 71 + 29) % 241) / 241 * height * 0.48
+        this.backgroundGraphics.fillStyle(star % 4 ? 0xfff1cf : theme.sun, 0.35 + (star % 3) * 0.18).fillCircle(x, y, star % 5 === 0 ? 1.8 : 1)
+      }
+    }
+
+    const seed = [...map.contentHash].reduce((value, character) => value + character.charCodeAt(0), 0)
+    const drawRidge = (baseY: number, amplitude: number, color: number, alpha: number, phase: number) => {
+      this.backgroundGraphics.fillStyle(color, alpha).beginPath().moveTo(0, height)
+      for (let step = 0; step <= 16; step += 1) {
+        const x = width * step / 16
+        const y = baseY - Math.sin(step * 0.72 + phase) * amplitude - Math.sin(step * 1.63 + phase * 2) * amplitude * 0.28
+        this.backgroundGraphics.lineTo(x, y)
+      }
+      this.backgroundGraphics.lineTo(width, height).closePath().fillPath()
+    }
+    drawRidge(height * 0.56, height * 0.055, mixColor(theme.backHill, theme.sky, 0.42), 0.42, seed * 0.013)
+    drawRidge(height * 0.65, height * 0.085, mixColor(theme.backHill, theme.sky, 0.18), 0.62, seed * 0.021 + 1.7)
+    drawRidge(height * 0.75, height * 0.07, mixColor(theme.backHill, 0x172126, 0.12), 0.78, seed * 0.033 + 3.1)
+
+    if (!night)
+      for (let cloud = 0; cloud < 4; cloud += 1) {
+        const x = width * (0.08 + ((seed + cloud * 29) % 79) / 100)
+        const y = height * (0.13 + ((seed + cloud * 17) % 22) / 100)
+        const size = 28 + ((seed + cloud * 31) % 24)
+        this.backgroundGraphics
+          .fillStyle(0xffffff, 0.3)
+          .fillEllipse(x, y, size * 2.8, size * 0.62)
+          .fillCircle(x - size * 0.55, y - size * 0.12, size * 0.38)
+          .fillCircle(x + size * 0.2, y - size * 0.2, size * 0.48)
+      }
+
+    this.renderBackdropLandmarks(map.id, width, height, theme.backHill, theme.sun)
+    this.renderBackdropAtmosphere(width, height, seed, night, theme.sun)
+  }
+
+  private renderBackdropLandmarks(
+    mapId: string,
+    width: number,
+    height: number,
+    baseColor: number,
+    lightColor: number,
+  ): void {
+    const graphics = this.backgroundGraphics
+    const ink = mixColor(baseColor, 0x10181c, 0.48)
+    const pale = mixColor(baseColor, 0xffffff, 0.3)
+    const groundY = height * 0.72
+    const line = (width: number, color = ink, alpha = 0.42) => graphics.lineStyle(width, color, alpha)
+    const quadratic = (start: Vector, control: Vector, end: Vector) => {
+      let previous = start
+      for (let step = 1; step <= 12; step += 1) {
+        const t = step / 12
+        const inverse = 1 - t
+        const point = {
+          x: inverse * inverse * start.x + 2 * inverse * t * control.x + t * t * end.x,
+          y: inverse * inverse * start.y + 2 * inverse * t * control.y + t * t * end.y,
+        }
+        graphics.lineBetween(previous.x, previous.y, point.x, point.y)
+        previous = point
+      }
+    }
+
+    if (mapId === 'rolling-hills') {
+      line(3, ink, 0.3)
+      for (let x = width * 0.05; x < width; x += width * 0.09) {
+        graphics.lineBetween(x, groundY - 10, x, groundY + 10)
+        graphics.fillStyle(ink, 0.24).fillCircle(x, groundY - 15, 9).fillCircle(x + 7, groundY - 12, 7)
+      }
+      const millX = width * 0.7
+      graphics.fillStyle(ink, 0.35).fillRect(millX - 3, groundY - 58, 6, 58)
+      line(3, pale, 0.48)
+      for (let arm = 0; arm < 4; arm += 1) {
+        const angle = arm * Math.PI / 2 + 0.3
+        graphics.lineBetween(millX, groundY - 58, millX + Math.cos(angle) * 26, groundY - 58 + Math.sin(angle) * 26)
+      }
+      return
+    }
+
+    if (mapId === 'twin-peaks' || mapId === 'triad-reach') {
+      const count = mapId === 'twin-peaks' ? 2 : 3
+      graphics.fillStyle(ink, 0.26)
+      for (let peak = 0; peak < count; peak += 1) {
+        const center = width * (peak + 1) / (count + 1)
+        const halfWidth = width * (mapId === 'twin-peaks' ? 0.13 : 0.1)
+        graphics.beginPath().moveTo(center - halfWidth * 1.5, groundY)
+          .lineTo(center - halfWidth, groundY - 54 - peak * 7)
+          .lineTo(center + halfWidth * 0.6, groundY - 54 - peak * 7)
+          .lineTo(center + halfWidth * 1.5, groundY).closePath().fillPath()
+      }
+      line(2, pale, 0.25)
+      graphics.lineBetween(width * 0.12, groundY - 28, width * 0.88, groundY - 28)
+      return
+    }
+
+    if (mapId === 'broken-crossing') {
+      line(8, ink, 0.3)
+      graphics.lineBetween(width * 0.08, groundY - 48, width * 0.43, groundY - 48)
+      graphics.lineBetween(width * 0.59, groundY - 48, width * 0.92, groundY - 48)
+      line(5, ink, 0.26)
+      for (const x of [0.14, 0.31, 0.68, 0.85]) {
+        graphics.lineBetween(width * x, groundY - 48, width * x, groundY + 28)
+        graphics.strokeCircle(width * x, groundY + 9, width * 0.055)
+      }
+      line(2, pale, 0.4)
+      graphics.lineBetween(width * 0.43, groundY - 48, width * 0.48, groundY - 35)
+      graphics.lineBetween(width * 0.59, groundY - 48, width * 0.54, groundY - 29)
+      return
+    }
+
+    if (mapId === 'sunken-garden') {
+      for (let tier = 0; tier < 4; tier += 1) {
+        const inset = width * (0.08 + tier * 0.08)
+        graphics.fillStyle(ink, 0.1 + tier * 0.04).fillRect(inset, groundY - 12 + tier * 13, width - inset * 2, 8)
+      }
+      for (const x of [0.18, 0.3, 0.7, 0.82]) {
+        graphics.fillStyle(ink, 0.28).fillRect(width * x - 2, groundY - 44, 4, 44)
+        graphics.fillStyle(baseColor, 0.5).fillCircle(width * x, groundY - 50, 18).fillCircle(width * x - 10, groundY - 43, 12)
+      }
+      graphics.fillStyle(lightColor, 0.13).fillEllipse(width * 0.5, groundY + 28, width * 0.2, 16)
+      return
+    }
+
+    if (mapId === 'canopy-rift') {
+      graphics.fillStyle(ink, 0.32)
+      for (const x of [0.04, 0.17, 0.79, 0.93]) {
+        const trunkWidth = width * (x === 0.04 || x === 0.93 ? 0.045 : 0.028)
+        graphics.fillRect(width * x, height * 0.12, trunkWidth, groundY - height * 0.12)
+        graphics.fillCircle(width * x + trunkWidth / 2, height * 0.16, trunkWidth * 1.8)
+      }
+      graphics.fillStyle(baseColor, 0.52)
+      for (let crown = 0; crown < 11; crown += 1)
+        graphics.fillCircle(width * (0.02 + crown * 0.1), height * (0.08 + (crown % 3) * 0.035), width * 0.075)
+      line(8, ink, 0.22)
+      quadratic({ x: 0, y: groundY }, { x: width * 0.22, y: groundY - 65 }, { x: width * 0.43, y: groundY })
+      quadratic({ x: width, y: groundY }, { x: width * 0.78, y: groundY - 65 }, { x: width * 0.57, y: groundY })
+      return
+    }
+
+    if (mapId === 'ruined-foundry' || mapId === 'iron-trestle') {
+      graphics.fillStyle(ink, 0.3)
+      for (const x of mapId === 'ruined-foundry' ? [0.11, 0.19, 0.76, 0.86] : [0.08, 0.88]) {
+        const stackHeight = height * (0.16 + (x * 7 % 0.09))
+        graphics.fillRect(width * x, groundY - stackHeight, width * 0.025, stackHeight)
+        graphics.fillRect(width * x - 3, groundY - stackHeight, width * 0.025 + 6, 5)
+      }
+      line(mapId === 'iron-trestle' ? 5 : 3, ink, 0.36)
+      const bridgeY = groundY - 34
+      graphics.lineBetween(width * 0.08, bridgeY, width * 0.92, bridgeY)
+      graphics.lineBetween(width * 0.08, bridgeY + 34, width * 0.92, bridgeY + 34)
+      for (let x = width * 0.1; x < width * 0.9; x += width * 0.08) {
+        graphics.lineBetween(x, bridgeY, x + width * 0.08, bridgeY + 34)
+        graphics.lineBetween(x, bridgeY + 34, x + width * 0.08, bridgeY)
+      }
+      return
+    }
+
+    if (mapId === 'switchback-quarry') {
+      line(5, ink, 0.24)
+      for (let tier = 0; tier < 4; tier += 1) {
+        const y = groundY - 62 + tier * 22
+        graphics.lineBetween(width * (0.05 + tier * 0.07), y, width * (0.95 - tier * 0.07), y)
+      }
+      const craneX = width * 0.72
+      line(3, ink, 0.44)
+      graphics.lineBetween(craneX, groundY - 96, craneX, groundY)
+      graphics.lineBetween(craneX - 35, groundY - 96, craneX + 72, groundY - 96)
+      graphics.lineBetween(craneX, groundY - 96, craneX + 45, groundY - 60)
+      graphics.lineBetween(craneX + 58, groundY - 96, craneX + 58, groundY - 57)
+      return
+    }
+
+    if (mapId === 'dry-aqueduct') {
+      line(8, ink, 0.3)
+      graphics.lineBetween(width * 0.04, groundY - 64, width * 0.96, groundY - 64)
+      line(5, ink, 0.27)
+      for (let arch = 0; arch < 8; arch += 1) {
+        const x = width * (0.1 + arch * 0.115)
+        graphics.strokeCircle(x, groundY - 8, width * 0.05)
+        graphics.lineBetween(x - width * 0.05, groundY - 8, x - width * 0.05, groundY - 64)
+        graphics.lineBetween(x + width * 0.05, groundY - 8, x + width * 0.05, groundY - 64)
+      }
+      return
+    }
+
+    if (mapId === 'sundered-crown') {
+      graphics.fillStyle(ink, 0.3)
+      const center = width * 0.5
+      graphics.fillRect(center - width * 0.18, groundY - 58, width * 0.36, 58)
+      for (let tooth = -2; tooth <= 2; tooth += 1) {
+        const x = center + tooth * width * 0.07
+        graphics.beginPath().moveTo(x - 18, groundY - 58).lineTo(x, groundY - 94 + Math.abs(tooth) * 9).lineTo(x + 18, groundY - 58).closePath().fillPath()
+      }
+      graphics.fillStyle(mixColor(ink, 0x000000, 0.2), 0.42).fillCircle(center, groundY - 5, width * 0.055)
+      return
+    }
+
+    if (mapId === 'lantern-vault') {
+      graphics.fillStyle(ink, 0.48).fillRect(0, 0, width, height * 0.12)
+      for (let spike = 0; spike < 14; spike += 1) {
+        const x = width * (spike + 0.5) / 14
+        const length = height * (0.04 + (spike % 4) * 0.018)
+        graphics.fillTriangle(x - 8, height * 0.12, x + 8, height * 0.12, x, height * 0.12 + length)
+      }
+      for (const x of [0.25, 0.5, 0.75]) {
+        graphics.fillStyle(lightColor, 0.06).fillTriangle(width * x - 52, height * 0.12, width * x + 52, height * 0.12, width * x, groundY)
+        graphics.fillStyle(lightColor, 0.72).fillCircle(width * x, height * 0.29, 4)
+        graphics.fillStyle(lightColor, 0.12).fillCircle(width * x, height * 0.29, 19)
+      }
+      return
+    }
+
+    if (mapId === 'fossil-wake') {
+      line(6, pale, 0.38)
+      quadratic({ x: width * 0.23, y: groundY + 8 }, { x: width * 0.5, y: groundY - 105 }, { x: width * 0.77, y: groundY + 8 })
+      for (let rib = 0; rib < 9; rib += 1) {
+        const x = width * (0.3 + rib * 0.05)
+        const rise = 65 - Math.abs(4 - rib) * 8
+        quadratic({ x, y: groundY }, { x: x - 20, y: groundY - rise }, { x: x + (rib - 4) * 4, y: groundY - rise - 15 })
+      }
+      line(2, ink, 0.32)
+      graphics.strokeRect(width * 0.12, groundY - 42, width * 0.13, 42).strokeRect(width * 0.76, groundY - 55, width * 0.12, 55)
+      return
+    }
+
+    if (mapId === 'glasshouse-divide') {
+      line(4, ink, 0.3)
+      for (const center of [width * 0.25, width * 0.75]) {
+        const half = width * 0.18
+        graphics.strokeRect(center - half, groundY - 58, half * 2, 58)
+        graphics.beginPath().moveTo(center - half, groundY - 58).lineTo(center, groundY - 105).lineTo(center + half, groundY - 58).strokePath()
+        for (let pane = -2; pane <= 2; pane += 1)
+          graphics.lineBetween(center + pane * half * 0.35, groundY - 58, center + pane * half * 0.35, groundY)
+        graphics.fillStyle(pale, 0.08).fillTriangle(center - half + 4, groundY - 60, center, groundY - 101, center - 8, groundY - 60)
+      }
+      return
+    }
+
+    if (mapId === 'echo-caldera') {
+      graphics.fillStyle(lightColor, 0.05).fillEllipse(width * 0.5, groundY + 12, width * 0.62, height * 0.23)
+      graphics.fillStyle(lightColor, 0.12).fillEllipse(width * 0.5, groundY + 18, width * 0.38, height * 0.1)
+      line(7, ink, 0.44)
+      graphics.beginPath().moveTo(0, groundY - 14).lineTo(width * 0.18, groundY - 55).lineTo(width * 0.35, groundY - 23)
+        .lineTo(width * 0.5, groundY - 72).lineTo(width * 0.66, groundY - 21).lineTo(width * 0.84, groundY - 58).lineTo(width, groundY - 12).strokePath()
+    }
+  }
+
+  private renderBackdropAtmosphere(
+    width: number,
+    height: number,
+    seed: number,
+    night: boolean,
+    lightColor: number,
+  ): void {
+    const graphics = this.backgroundGraphics
+    graphics.fillStyle(lightColor, night ? 0.045 : 0.035).fillRect(0, height * 0.55, width, height * 0.18)
+    for (let particle = 0; particle < (night ? 18 : 10); particle += 1) {
+      const x = ((seed * 13 + particle * 127) % 997) / 997 * width
+      const y = height * (0.28 + ((seed * 7 + particle * 43) % 420) / 1000)
+      const radius = 0.7 + ((seed + particle * 11) % 3) * 0.45
+      graphics.fillStyle(lightColor, night ? 0.22 : 0.09).fillCircle(x, y, radius)
+    }
   }
 
   private renderTerrain(): void {
@@ -1030,6 +1317,8 @@ export class MatchScene extends Phaser.Scene {
     this.renderedTerrain = terrain
     const map = getMap(state.mapId)
     this.terrainGraphics.clear()
+
+    // The mask remains the source of truth; these passes only give its materials visual depth.
     for (let x = 0; x < terrain.width; x += 1) {
       let start = 0
       let material = TERRAIN_MATERIAL.empty as TerrainMaterialId
@@ -1053,19 +1342,41 @@ export class MatchScene extends Phaser.Scene {
         }
       }
     }
+
+    const cellAt = (x: number, y: number): TerrainMaterialId =>
+      x < 0 || y < 0 || x >= terrain.width || y >= terrain.height
+        ? TERRAIN_MATERIAL.empty
+        : (terrain.cells[y * terrain.width + x] as TerrainMaterialId)
+
     for (let y = 0; y < terrain.height; y += 1)
       for (let x = 0; x < terrain.width; x += 1) {
         const material = terrain.cells[y * terrain.width + x] as TerrainMaterialId
-        const above = y === 0 ? TERRAIN_MATERIAL.empty : terrain.cells[(y - 1) * terrain.width + x]
-        if (material !== TERRAIN_MATERIAL.empty && above === TERRAIN_MATERIAL.empty)
+        if (material === TERRAIN_MATERIAL.empty) continue
+        const worldX = x * terrain.scale
+        const worldY = y * terrain.scale
+        const base = this.terrainMaterialColor(material)
+        const above = cellAt(x, y - 1)
+        const below = cellAt(x, y + 1)
+        const left = cellAt(x - 1, y)
+        const right = cellAt(x + 1, y)
+
+        if (above === TERRAIN_MATERIAL.empty) {
           this.terrainGraphics
-            .fillStyle(
-              material === TERRAIN_MATERIAL.soil
-                ? map.theme.surface
-                : this.terrainMaterialColor(material),
-              0.95,
-            )
-            .fillRect(x * terrain.scale, y * terrain.scale - 1, terrain.scale, 2)
+            .fillStyle(material === TERRAIN_MATERIAL.soil ? map.theme.surface : mixColor(base, 0xffffff, 0.22))
+            .fillRect(worldX, worldY, terrain.scale, Math.min(2, terrain.scale))
+        }
+        if (left === TERRAIN_MATERIAL.empty)
+          this.terrainGraphics
+            .fillStyle(mixColor(base, 0xffffff, 0.1), 0.9)
+            .fillRect(worldX, worldY, 1, terrain.scale)
+        if (right === TERRAIN_MATERIAL.empty)
+          this.terrainGraphics
+            .fillStyle(mixColor(base, 0x10181c, 0.42), 0.92)
+            .fillRect(worldX + terrain.scale - 1, worldY, 1, terrain.scale)
+        if (below === TERRAIN_MATERIAL.empty)
+          this.terrainGraphics
+            .fillStyle(mixColor(base, 0x10181c, 0.55), 0.95)
+            .fillRect(worldX, worldY + terrain.scale - 1, terrain.scale, 1)
       }
   }
 

@@ -526,6 +526,9 @@ export class OnlineMatchSource implements MatchSource {
         remainingHealth: schema.result.remainingHealth,
         turnsTaken: schema.result.turnsTaken,
         durationSeconds: schema.result.durationSeconds,
+        playerRecaps: state.players.map((player) => ({
+          playerId: player.id, damageDealt: 0, selfDamage: 0, shots: 0, terrainDestroyed: 0, favoriteWeaponId: null,
+        })),
       })
     }
     for (const listener of this.stateListeners) listener(state)

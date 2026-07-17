@@ -96,7 +96,7 @@ describe('online protocol validation', () => {
   it('reports explicit compatibility failures', () => {
     expect(CURRENT_COMPATIBILITY).toMatchObject({
       protocol: 'private-room-16',
-      snapshot: 12,
+      snapshot: 13,
       maps: 'maps-9',
       weapons: 'weapons-5',
       appearances: 'appearances-3.0.3',

@@ -32,14 +32,22 @@ export type MapId =
   | 'sundered-crown'
   | 'lantern-vault'
   | 'fossil-wake'
+  | 'glasshouse-divide'
+  | 'iron-trestle'
+  | 'echo-caldera'
+  | 'salt-flats'
+  | 'split-orchard'
+  | 'tideworks'
+  | 'ember-steps'
+  | 'open-skyline'
+  | 'delta-spires'
   | 'custom-draft'
 
-export const MAP_REGISTRY_VERSION = 'maps-9'
+export const MAP_REGISTRY_VERSION = 'maps-12'
 export type MapDefinition = Omit<ResolvedMap, 'id'> & { id: MapId }
 export type { MapDocument, MapTheme, MatchMode, SpawnDefinition, TeamId } from './mapDocument'
 
 const TERRAIN_SCALE = 2
-const CLASSIC_WIDTH = 960
 const CLASSIC_HEIGHT = 540
 const DEFAULT_THEME: MapTheme = {
   sky: 0x9edce5,
@@ -217,19 +225,24 @@ const heightMap = (source: {
 const maps: Record<MapId, MapDefinition> = {
   'rolling-hills': heightMap({
     id: 'rolling-hills',
-    revision: 1,
+    revision: 2,
     mode: '1v1',
     displayName: 'Rolling Hills',
     description: 'Broad slopes and forgiving long arcs.',
     label: 'Open lanes',
-    width: CLASSIC_WIDTH,
+    width: 1120,
     height: CLASSIC_HEIGHT,
-    spawnXs: [175, 785],
-    surfaceAt: (x) => 385 + Math.sin(x / 105) * 25 + Math.sin(x / 43) * 10,
+    spawnXs: [190, 930],
+    surfaceAt: (x) => {
+      if (Math.abs(x - 190) < 65 || Math.abs(x - 930) < 65) return 382
+      const centerRidge = 52 * Math.exp(-(((x - 560) / 82) ** 2))
+      const sideValleys = 24 * Math.exp(-(((x - 350) / 78) ** 2)) + 24 * Math.exp(-(((x - 770) / 78) ** 2))
+      return 392 - centerRidge + sideValleys + Math.sin(x / 150) * 8
+    },
   }),
   'twin-peaks': createRasterMap({
     id: 'twin-peaks',
-    revision: 3,
+    revision: 4,
     mode: '1v1',
     displayName: 'Twin Peaks',
     description: 'Reinforced mesas meet at a destructible central saddle.',
@@ -237,42 +250,24 @@ const maps: Record<MapId, MapDefinition> = {
     width: 1280,
     height: 720,
     theme: theme({ terrain: 0x8b6948, surface: 0x667c50, dust: 0xb99a6e }),
-    spawns: canonicalSpawns([[230, 280], [1050, 280]]),
-    objects: [
-      {
-        id: 'central-transit-pair',
-        type: 'projectile-portal',
-        entrance: {
-          start: { x: 500, y: 380 },
-          end: { x: 610, y: 380 },
-          thickness: 12,
-        },
-        exit: {
-          start: { x: 780, y: 270 },
-          end: { x: 780, y: 380 },
-          thickness: 12,
-        },
-        velocityRetention: 0.9,
-      },
-    ],
-    paint: ({ surface, rect, ramp, ellipse }) => {
-      surface((x) => 570 - 54 * Math.cos((x - 640) / 205), TERRAIN_MATERIAL.soil)
-      ellipse(230, 500, 230, 220, TERRAIN_MATERIAL.soil)
-      ellipse(1050, 500, 230, 220, TERRAIN_MATERIAL.soil)
-      ellipse(230, 530, 155, 185, TERRAIN_MATERIAL.stone)
-      ellipse(1050, 530, 155, 185, TERRAIN_MATERIAL.stone)
-      rect(150, 280, 160, 24, TERRAIN_MATERIAL.stone)
-      rect(970, 280, 160, 24, TERRAIN_MATERIAL.stone)
-      ramp(300, 322, 540, 430, 24, TERRAIN_MATERIAL.brick)
-      rect(540, 430, 200, 24, TERRAIN_MATERIAL.brick)
-      ramp(740, 430, 980, 322, 24, TERRAIN_MATERIAL.brick)
-      ramp(70, 430, 165, 310, 20, TERRAIN_MATERIAL.stone)
-      ramp(1115, 310, 1210, 430, 20, TERRAIN_MATERIAL.stone)
+    spawns: canonicalSpawns([[230, 330], [1050, 330]]),
+    paint: ({ surface, rect, ramp, ellipse, carveRect }) => {
+      surface((x) => 590 - 30 * Math.cos((x - 640) / 220), TERRAIN_MATERIAL.soil)
+      ellipse(230, 535, 180, 190, TERRAIN_MATERIAL.soil)
+      ellipse(1050, 535, 180, 190, TERRAIN_MATERIAL.soil)
+      ellipse(230, 575, 108, 125, TERRAIN_MATERIAL.stone)
+      ellipse(1050, 575, 108, 125, TERRAIN_MATERIAL.stone)
+      rect(165, 330, 130, 22, TERRAIN_MATERIAL.soil)
+      rect(985, 330, 130, 22, TERRAIN_MATERIAL.soil)
+      ramp(295, 370, 500, 470, 22, TERRAIN_MATERIAL.brick)
+      rect(500, 470, 280, 22, TERRAIN_MATERIAL.brick)
+      ramp(780, 470, 985, 370, 22, TERRAIN_MATERIAL.brick)
+      carveRect(570, 490, 140, 120)
     },
   }),
   'broken-crossing': createRasterMap({
     id: 'broken-crossing',
-    revision: 2,
+    revision: 3,
     mode: '1v1',
     displayName: 'Broken Crossing',
     description: 'A fractured upper causeway hangs over a dependable lower route.',
@@ -280,28 +275,28 @@ const maps: Record<MapId, MapDefinition> = {
     width: 1280,
     height: 720,
     theme: theme({ sky: 0xa8d5d5, backHill: 0x6ca58d, brick: 0x9d4f3d }),
-    spawns: canonicalSpawns([[190, 300], [1090, 300]]),
+    spawns: canonicalSpawns([[220, 326], [1060, 326]]),
     paint: ({ surface, rect, ramp }) => {
       surface((x) => 585 + Math.sin(x / 94) * 12, TERRAIN_MATERIAL.soil)
       ramp(0, 566, 360, 548, 28, TERRAIN_MATERIAL.stone)
       ramp(360, 548, 640, 586, 28, TERRAIN_MATERIAL.soil)
       ramp(640, 586, 920, 548, 28, TERRAIN_MATERIAL.soil)
       ramp(920, 548, 1280, 566, 28, TERRAIN_MATERIAL.stone)
-      rect(105, 300, 230, 26, TERRAIN_MATERIAL.brick)
-      ramp(335, 300, 470, 330, 24, TERRAIN_MATERIAL.brick)
-      rect(500, 346, 150, 24, TERRAIN_MATERIAL.brick)
-      rect(688, 346, 92, 24, TERRAIN_MATERIAL.brick)
-      ramp(810, 330, 945, 300, 24, TERRAIN_MATERIAL.brick)
-      rect(945, 300, 230, 26, TERRAIN_MATERIAL.brick)
-      rect(145, 326, 22, 222, TERRAIN_MATERIAL.steel)
-      rect(1113, 326, 22, 222, TERRAIN_MATERIAL.steel)
-      ramp(285, 326, 400, 500, 18, TERRAIN_MATERIAL.stone)
-      ramp(880, 500, 995, 326, 18, TERRAIN_MATERIAL.stone)
+      rect(130, 326, 180, 24, TERRAIN_MATERIAL.brick)
+      ramp(310, 326, 455, 355, 22, TERRAIN_MATERIAL.brick)
+      rect(500, 370, 120, 22, TERRAIN_MATERIAL.brick)
+      rect(660, 370, 120, 22, TERRAIN_MATERIAL.brick)
+      ramp(825, 355, 970, 326, 22, TERRAIN_MATERIAL.brick)
+      rect(970, 326, 180, 24, TERRAIN_MATERIAL.brick)
+      rect(260, 440, 18, 108, TERRAIN_MATERIAL.steel)
+      rect(1002, 440, 18, 108, TERRAIN_MATERIAL.steel)
+      ramp(300, 500, 405, 390, 18, TERRAIN_MATERIAL.brick)
+      ramp(875, 390, 980, 500, 18, TERRAIN_MATERIAL.brick)
     },
   }),
   'sunken-garden': createRasterMap({
     id: 'sunken-garden',
-    revision: 2,
+    revision: 3,
     mode: '1v1',
     displayName: 'Sunken Garden',
     description: 'Terraced ramps descend into a sheltered garden floor.',
@@ -316,33 +311,29 @@ const maps: Record<MapId, MapDefinition> = {
       surface: 0x6e9a5c,
       dust: 0xb39665,
     }),
-    spawns: canonicalSpawns([[210, 390], [1230, 390]]),
+    spawns: canonicalSpawns([[250, 440], [1190, 440]]),
     paint: ({ surface, rect, ramp, ellipse }) => {
       surface((x) => {
         const edge = Math.min(x, 1440 - x)
-        if (edge < 280) return 390
-        if (edge < 500) return 390 + (edge - 280) * 0.82
-        if (edge < 620) return 570 + (edge - 500) * 0.58
-        return 640
+        if (edge < 320) return 440
+        if (edge < 560) return 440 + (edge - 320) * 0.58
+        return 580
       }, TERRAIN_MATERIAL.soil)
-      rect(80, 390, 245, 24, TERRAIN_MATERIAL.stone)
-      rect(1115, 390, 245, 24, TERRAIN_MATERIAL.stone)
-      ramp(280, 414, 500, 594, 22, TERRAIN_MATERIAL.stone)
-      ramp(940, 594, 1160, 414, 22, TERRAIN_MATERIAL.stone)
-      rect(500, 570, 130, 22, TERRAIN_MATERIAL.brick)
-      rect(810, 570, 130, 22, TERRAIN_MATERIAL.brick)
-      ramp(620, 592, 700, 640, 20, TERRAIN_MATERIAL.brick)
-      ramp(740, 640, 820, 592, 20, TERRAIN_MATERIAL.brick)
-      ellipse(720, 690, 145, 48, TERRAIN_MATERIAL.stone)
-      rect(405, 522, 46, 48, TERRAIN_MATERIAL.brick)
-      rect(989, 522, 46, 48, TERRAIN_MATERIAL.brick)
-      rect(650, 602, 42, 38, TERRAIN_MATERIAL.brick)
-      rect(748, 602, 42, 38, TERRAIN_MATERIAL.brick)
+      rect(160, 440, 180, 22, TERRAIN_MATERIAL.soil)
+      rect(1100, 440, 180, 22, TERRAIN_MATERIAL.soil)
+      ramp(320, 462, 560, 602, 22, TERRAIN_MATERIAL.brick)
+      ramp(880, 602, 1120, 462, 22, TERRAIN_MATERIAL.brick)
+      rect(500, 550, 110, 20, TERRAIN_MATERIAL.brick)
+      rect(830, 550, 110, 20, TERRAIN_MATERIAL.brick)
+      ellipse(650, 600, 58, 28, TERRAIN_MATERIAL.soil)
+      ellipse(790, 600, 58, 28, TERRAIN_MATERIAL.soil)
+      rect(400, 548, 64, 32, TERRAIN_MATERIAL.brick)
+      rect(976, 548, 64, 32, TERRAIN_MATERIAL.brick)
     },
   }),
   'canopy-rift': createRasterMap({
     id: 'canopy-rift',
-    revision: 2,
+    revision: 3,
     mode: '2v2',
     displayName: 'Canopy Rift',
     description: 'Mirrored root shelves trade exposed crests for protected inner ground.',
@@ -357,8 +348,8 @@ const maps: Record<MapId, MapDefinition> = {
       surface: 0x4e8a58,
       dust: 0x9c835f,
     }),
-    spawns: canonicalSpawns([[210, 390], [1390, 390], [510, 620], [1090, 620]]),
-    paint: ({ surface, rect, ramp, ellipse }) => {
+    spawns: canonicalSpawns([[210, 390], [1390, 390], [540, 620], [1060, 620]]),
+    paint: ({ surface, rect, ramp, ellipse, carveEllipse }) => {
       surface((x) => {
         const edge = Math.min(x, 1600 - x)
         if (edge < 280) return 390
@@ -366,24 +357,28 @@ const maps: Record<MapId, MapDefinition> = {
         if (edge < 720) return 620 + (edge - 510) * 0.66
         return 760
       }, TERRAIN_MATERIAL.soil)
-      ellipse(250, 625, 230, 235, TERRAIN_MATERIAL.stone)
-      ellipse(1350, 625, 230, 235, TERRAIN_MATERIAL.stone)
+      ellipse(250, 625, 175, 185, TERRAIN_MATERIAL.stone)
+      ellipse(1350, 625, 175, 185, TERRAIN_MATERIAL.stone)
       ellipse(430, 780, 260, 150, TERRAIN_MATERIAL.soil)
       ellipse(1170, 780, 260, 150, TERRAIN_MATERIAL.soil)
       rect(145, 390, 140, 24, TERRAIN_MATERIAL.soil)
       rect(1315, 390, 140, 24, TERRAIN_MATERIAL.soil)
-      ramp(280, 414, 510, 644, 24, TERRAIN_MATERIAL.stone)
-      ramp(1090, 644, 1320, 414, 24, TERRAIN_MATERIAL.stone)
-      rect(450, 620, 125, 24, TERRAIN_MATERIAL.brick)
-      rect(1025, 620, 125, 24, TERRAIN_MATERIAL.brick)
-      ramp(575, 644, 735, 748, 22, TERRAIN_MATERIAL.brick)
-      ramp(865, 748, 1025, 644, 22, TERRAIN_MATERIAL.brick)
+      ramp(280, 414, 510, 644, 24, TERRAIN_MATERIAL.brick)
+      ramp(1090, 644, 1320, 414, 24, TERRAIN_MATERIAL.brick)
+      rect(455, 620, 170, 24, TERRAIN_MATERIAL.brick)
+      rect(975, 620, 170, 24, TERRAIN_MATERIAL.brick)
+      ramp(625, 644, 735, 748, 22, TERRAIN_MATERIAL.brick)
+      ramp(865, 748, 975, 644, 22, TERRAIN_MATERIAL.brick)
+      rect(690, 690, 80, 20, TERRAIN_MATERIAL.soil)
+      rect(830, 690, 80, 20, TERRAIN_MATERIAL.soil)
+      carveEllipse(350, 520, 58, 70)
+      carveEllipse(1250, 520, 58, 70)
     },
   }),
   'ruined-foundry': registeredMap(resolveMapDocument(
     createShapeMapDocument({
       id: 'ruined-foundry',
-      revision: 2,
+      revision: 3,
       mode: '2v2',
       displayName: 'Ruined Foundry',
       description: 'Brick workshops, steel frames, interior floors, and a shattered central span.',
@@ -405,23 +400,23 @@ const maps: Record<MapId, MapDefinition> = {
       spawns: [
         { x: 220, y: 320, teamId: 0, teamSlot: 0, facing: 1 },
         { x: 1220, y: 320, teamId: 1, teamSlot: 0, facing: -1 },
-        { x: 390, y: 456, teamId: 0, teamSlot: 1, facing: 1 },
-        { x: 1050, y: 456, teamId: 1, teamSlot: 1, facing: -1 },
+        { x: 430, y: 476, teamId: 0, teamSlot: 1, facing: 1 },
+        { x: 1010, y: 476, teamId: 1, teamSlot: 1, facing: -1 },
       ],
       objects: [
         {
           id: 'central-left-plate',
           type: 'reflector-wall',
-          start: { x: 630, y: 472 },
-          end: { x: 690, y: 400 },
+          start: { x: 610, y: 500 },
+          end: { x: 670, y: 430 },
           thickness: 14,
           velocityRetention: 0.82,
         },
         {
           id: 'central-right-plate',
           type: 'reflector-wall',
-          start: { x: 750, y: 400 },
-          end: { x: 810, y: 472 },
+          start: { x: 770, y: 430 },
+          end: { x: 830, y: 500 },
           thickness: 14,
           velocityRetention: 0.82,
         },
@@ -430,26 +425,20 @@ const maps: Record<MapId, MapDefinition> = {
         { x: 0, y: 650, width: 1440, height: 160, material: TERRAIN_MATERIAL.soil },
         { x: 70, y: 620, width: 460, height: 30, material: TERRAIN_MATERIAL.stone },
         { x: 910, y: 620, width: 460, height: 30, material: TERRAIN_MATERIAL.stone },
-        { x: 110, y: 320, width: 400, height: 25, material: TERRAIN_MATERIAL.brick },
-        { x: 120, y: 345, width: 25, height: 275, material: TERRAIN_MATERIAL.brick },
-        { x: 475, y: 345, width: 25, height: 275, material: TERRAIN_MATERIAL.brick },
-        { x: 145, y: 456, width: 330, height: 20, material: TERRAIN_MATERIAL.brick },
-        { x: 930, y: 320, width: 400, height: 25, material: TERRAIN_MATERIAL.brick },
-        { x: 940, y: 345, width: 25, height: 275, material: TERRAIN_MATERIAL.brick },
-        { x: 1295, y: 345, width: 25, height: 275, material: TERRAIN_MATERIAL.brick },
-        { x: 965, y: 456, width: 330, height: 20, material: TERRAIN_MATERIAL.brick },
-        { x: 510, y: 520, width: 150, height: 18, material: TERRAIN_MATERIAL.brick },
-        { x: 780, y: 520, width: 150, height: 18, material: TERRAIN_MATERIAL.brick },
-        { x: 300, y: 345, width: 14, height: 275, material: TERRAIN_MATERIAL.steel },
-        { x: 1126, y: 345, width: 14, height: 275, material: TERRAIN_MATERIAL.steel },
-        { x: 545, y: 538, width: 14, height: 112, material: TERRAIN_MATERIAL.steel },
-        { x: 880, y: 538, width: 14, height: 112, material: TERRAIN_MATERIAL.steel },
+        { x: 130, y: 320, width: 180, height: 24, material: TERRAIN_MATERIAL.brick },
+        { x: 1130, y: 320, width: 180, height: 24, material: TERRAIN_MATERIAL.brick },
+        { x: 335, y: 476, width: 190, height: 22, material: TERRAIN_MATERIAL.brick },
+        { x: 915, y: 476, width: 190, height: 22, material: TERRAIN_MATERIAL.brick },
+        { x: 120, y: 344, width: 20, height: 276, material: TERRAIN_MATERIAL.brick },
+        { x: 1300, y: 344, width: 20, height: 276, material: TERRAIN_MATERIAL.brick },
+        { x: 540, y: 540, width: 100, height: 18, material: TERRAIN_MATERIAL.brick },
+        { x: 800, y: 540, width: 100, height: 18, material: TERRAIN_MATERIAL.brick },
       ],
     }),
   )),
   'switchback-quarry': createRasterMap({
     id: 'switchback-quarry',
-    revision: 1,
+    revision: 2,
     mode: '2v2',
     displayName: 'Switchback Quarry',
     description: 'Open quarry benches switch back around a permanent central outcrop.',
@@ -465,13 +454,14 @@ const maps: Record<MapId, MapDefinition> = {
       dust: 0xb99369,
     }),
     spawns: canonicalSpawns([[180, 380], [1420, 380], [590, 650], [1010, 650]]),
-    paint: ({ surface, rect, ramp, ellipse }) => {
+    paint: ({ surface, rect, ramp, ellipse, carveRect }) => {
       surface((x) => {
         const edge = Math.min(x, 1600 - x)
         if (edge < 260) return 380
-        if (edge < 400) return 460
-        if (edge < 560) return 650
-        if (edge < 700) return 735
+        if (edge < 440) return 380 + (edge - 260) * 0.44
+        if (edge < 560) return 460 + (edge - 440) * 1.58
+        if (edge < 680) return 650
+        if (edge < 700) return 650 + (edge - 680) * 4.25
         return 775
       }, TERRAIN_MATERIAL.soil)
       rect(70, 380, 220, 24, TERRAIN_MATERIAL.stone)
@@ -480,20 +470,20 @@ const maps: Record<MapId, MapDefinition> = {
       ramp(1200, 460, 1340, 404, 24, TERRAIN_MATERIAL.brick)
       rect(350, 460, 180, 24, TERRAIN_MATERIAL.brick)
       rect(1070, 460, 180, 24, TERRAIN_MATERIAL.brick)
-      ramp(400, 484, 560, 650, 24, TERRAIN_MATERIAL.stone)
-      ramp(1040, 650, 1200, 484, 24, TERRAIN_MATERIAL.stone)
-      rect(470, 650, 180, 24, TERRAIN_MATERIAL.soil)
-      rect(950, 650, 180, 24, TERRAIN_MATERIAL.soil)
+      ramp(400, 484, 560, 650, 24, TERRAIN_MATERIAL.brick)
+      ramp(1040, 650, 1200, 484, 24, TERRAIN_MATERIAL.brick)
+      rect(500, 650, 180, 24, TERRAIN_MATERIAL.soil)
+      rect(920, 650, 180, 24, TERRAIN_MATERIAL.soil)
       ramp(620, 674, 730, 735, 22, TERRAIN_MATERIAL.brick)
       ramp(870, 735, 980, 674, 22, TERRAIN_MATERIAL.brick)
-      ellipse(800, 700, 138, 196, TERRAIN_MATERIAL.stone)
-      rect(735, 510, 130, 24, TERRAIN_MATERIAL.steel)
-      ellipse(800, 650, 65, 42, TERRAIN_MATERIAL.soil)
+      ellipse(800, 720, 95, 135, TERRAIN_MATERIAL.stone)
+      rect(750, 585, 100, 20, TERRAIN_MATERIAL.brick)
+      carveRect(750, 660, 100, 120)
     },
   }),
   'dry-aqueduct': createRasterMap({
     id: 'dry-aqueduct',
-    revision: 1,
+    revision: 2,
     mode: '2v2',
     displayName: 'Dry Aqueduct',
     description: 'Broken upper decks cross stone arches above a continuous dry channel.',
@@ -509,32 +499,34 @@ const maps: Record<MapId, MapDefinition> = {
       dust: 0xc19c72,
       brick: 0xa65b42,
     }),
-    spawns: canonicalSpawns([[220, 390], [1316, 390], [560, 710], [976, 710]]),
+    spawns: canonicalSpawns([[250, 390], [1286, 390], [570, 650], [966, 650]]),
     paint: ({ surface, rect, ramp, ellipse, carveRect, carveEllipse }) => {
       surface((x) => 710 + 15 * Math.cos((x - 768) / 150), TERRAIN_MATERIAL.soil)
-      rect(0, 710, 1536, 30, TERRAIN_MATERIAL.soil)
-      rect(120, 390, 250, 26, TERRAIN_MATERIAL.brick)
-      rect(1166, 390, 250, 26, TERRAIN_MATERIAL.brick)
+      rect(0, 650, 1536, 90, TERRAIN_MATERIAL.soil)
+      rect(160, 390, 180, 26, TERRAIN_MATERIAL.brick)
+      rect(1196, 390, 180, 26, TERRAIN_MATERIAL.brick)
       rect(402, 420, 230, 24, TERRAIN_MATERIAL.brick)
       rect(904, 420, 230, 24, TERRAIN_MATERIAL.brick)
       rect(666, 455, 84, 22, TERRAIN_MATERIAL.brick)
       rect(786, 455, 84, 22, TERRAIN_MATERIAL.brick)
-      ramp(300, 416, 500, 686, 22, TERRAIN_MATERIAL.stone)
-      ramp(1036, 686, 1236, 416, 22, TERRAIN_MATERIAL.stone)
-      rect(174, 416, 28, 294, TERRAIN_MATERIAL.stone)
-      rect(1334, 416, 28, 294, TERRAIN_MATERIAL.stone)
-      rect(484, 444, 26, 266, TERRAIN_MATERIAL.stone)
-      rect(1026, 444, 26, 266, TERRAIN_MATERIAL.stone)
-      ellipse(768, 610, 170, 155, TERRAIN_MATERIAL.stone)
-      carveEllipse(768, 650, 105, 95)
-      carveRect(590, 620, 85, 80)
-      carveRect(861, 620, 85, 80)
-      rect(650, 700, 236, 18, TERRAIN_MATERIAL.steel)
+      ramp(300, 416, 500, 626, 22, TERRAIN_MATERIAL.brick)
+      ramp(1036, 626, 1236, 416, 22, TERRAIN_MATERIAL.brick)
+      rect(174, 500, 28, 150, TERRAIN_MATERIAL.stone)
+      rect(1334, 500, 28, 150, TERRAIN_MATERIAL.stone)
+      rect(484, 500, 26, 150, TERRAIN_MATERIAL.stone)
+      rect(1026, 500, 26, 150, TERRAIN_MATERIAL.stone)
+      ellipse(768, 565, 150, 125, TERRAIN_MATERIAL.stone)
+      carveEllipse(768, 590, 115, 90)
+      carveRect(570, 500, 120, 150)
+      carveRect(846, 500, 120, 150)
+      carveRect(718, 500, 100, 150)
+      rect(650, 650, 70, 18, TERRAIN_MATERIAL.stone)
+      rect(816, 650, 70, 18, TERRAIN_MATERIAL.stone)
     },
   }),
   'triad-reach': createRasterMap({
     id: 'triad-reach',
-    revision: 2,
+    revision: 3,
     mode: '3v3',
     displayName: 'Triad Reach',
     description: 'Three open ridge ranges descend toward broad central shelves.',
@@ -568,25 +560,29 @@ const maps: Record<MapId, MapDefinition> = {
       }, TERRAIN_MATERIAL.soil)
       rect(80, 470, 210, 22, TERRAIN_MATERIAL.soil)
       rect(1630, 470, 210, 22, TERRAIN_MATERIAL.soil)
-      ramp(250, 495, 480, 625, 20, TERRAIN_MATERIAL.stone)
-      ramp(1440, 625, 1670, 495, 20, TERRAIN_MATERIAL.stone)
+      ramp(250, 495, 480, 625, 20, TERRAIN_MATERIAL.brick)
+      ramp(1440, 625, 1670, 495, 20, TERRAIN_MATERIAL.brick)
       rect(410, 600, 150, 22, TERRAIN_MATERIAL.brick)
       rect(1360, 600, 150, 22, TERRAIN_MATERIAL.brick)
-      ramp(520, 625, 720, 765, 20, TERRAIN_MATERIAL.stone)
-      ramp(1200, 765, 1400, 625, 20, TERRAIN_MATERIAL.stone)
+      ramp(520, 625, 720, 765, 20, TERRAIN_MATERIAL.brick)
+      ramp(1200, 765, 1400, 625, 20, TERRAIN_MATERIAL.brick)
       rect(650, 740, 150, 22, TERRAIN_MATERIAL.soil)
       rect(1120, 740, 150, 22, TERRAIN_MATERIAL.soil)
       ramp(790, 765, 930, 798, 18, TERRAIN_MATERIAL.brick)
       ramp(990, 798, 1130, 765, 18, TERRAIN_MATERIAL.brick)
-      ramp(0, 515, 480, 645, 18, TERRAIN_MATERIAL.stone)
-      ramp(480, 645, 960, 828, 18, TERRAIN_MATERIAL.stone)
-      ramp(960, 828, 1440, 645, 18, TERRAIN_MATERIAL.stone)
-      ramp(1440, 645, 1920, 515, 18, TERRAIN_MATERIAL.stone)
+      rect(145, 492, 70, 18, TERRAIN_MATERIAL.stone)
+      rect(445, 622, 70, 18, TERRAIN_MATERIAL.stone)
+      rect(685, 762, 70, 18, TERRAIN_MATERIAL.stone)
+      rect(1165, 762, 70, 18, TERRAIN_MATERIAL.stone)
+      rect(1405, 622, 70, 18, TERRAIN_MATERIAL.stone)
+      rect(1705, 492, 70, 18, TERRAIN_MATERIAL.stone)
+      rect(850, 770, 70, 28, TERRAIN_MATERIAL.soil)
+      rect(1000, 770, 70, 28, TERRAIN_MATERIAL.soil)
     },
   }),
   'sundered-crown': createRasterMap({
     id: 'sundered-crown',
-    revision: 1,
+    revision: 2,
     mode: '3v3',
     displayName: 'Sundered Crown',
     description: 'A broken crown joins upper lanes above a permanent lower passage.',
@@ -602,14 +598,7 @@ const maps: Record<MapId, MapDefinition> = {
       dust: 0xaa846a,
       stone: 0x686570,
     }),
-    spawns: canonicalSpawns([
-      [180, 760],
-      [1740, 760],
-      [520, 500],
-      [1400, 500],
-      [720, 828],
-      [1200, 828],
-    ]),
+    spawns: canonicalSpawns([[180, 760], [1740, 760], [500, 520], [1420, 520], [670, 800], [1250, 800]]),
     paint: ({ surface, rect, ramp, ellipse, carveRect, carveEllipse }) => {
       surface((x) => {
         const edge = Math.min(x, 1920 - x)
@@ -621,25 +610,25 @@ const maps: Record<MapId, MapDefinition> = {
       rect(1610, 760, 250, 24, TERRAIN_MATERIAL.stone)
       ramp(280, 760, 500, 524, 24, TERRAIN_MATERIAL.brick)
       ramp(1420, 524, 1640, 760, 24, TERRAIN_MATERIAL.brick)
-      rect(450, 500, 180, 24, TERRAIN_MATERIAL.brick)
-      rect(1290, 500, 180, 24, TERRAIN_MATERIAL.brick)
-      ramp(620, 524, 820, 410, 22, TERRAIN_MATERIAL.stone)
-      ramp(1100, 410, 1300, 524, 22, TERRAIN_MATERIAL.stone)
-      ellipse(960, 650, 220, 292, TERRAIN_MATERIAL.stone)
-      rect(850, 370, 220, 26, TERRAIN_MATERIAL.steel)
-      ramp(800, 420, 920, 370, 22, TERRAIN_MATERIAL.brick)
-      ramp(1000, 370, 1120, 420, 22, TERRAIN_MATERIAL.brick)
-      carveEllipse(960, 795, 145, 100)
-      carveRect(730, 730, 105, 98)
-      carveRect(1085, 730, 105, 98)
-      rect(805, 828, 310, 22, TERRAIN_MATERIAL.steel)
-      rect(660, 700, 125, 24, TERRAIN_MATERIAL.soil)
-      rect(1135, 700, 125, 24, TERRAIN_MATERIAL.soil)
+      rect(420, 520, 160, 24, TERRAIN_MATERIAL.brick)
+      rect(1340, 520, 160, 24, TERRAIN_MATERIAL.brick)
+      ramp(580, 544, 800, 440, 22, TERRAIN_MATERIAL.brick)
+      ramp(1120, 440, 1340, 544, 22, TERRAIN_MATERIAL.brick)
+      ellipse(960, 665, 180, 230, TERRAIN_MATERIAL.stone)
+      rect(820, 425, 80, 24, TERRAIN_MATERIAL.brick)
+      rect(1020, 425, 80, 24, TERRAIN_MATERIAL.brick)
+      carveEllipse(960, 770, 165, 130)
+      carveRect(680, 690, 140, 140)
+      carveRect(1100, 690, 140, 140)
+      rect(810, 830, 50, 18, TERRAIN_MATERIAL.stone)
+      rect(1060, 830, 50, 18, TERRAIN_MATERIAL.stone)
+      rect(600, 800, 140, 22, TERRAIN_MATERIAL.soil)
+      rect(1180, 800, 140, 22, TERRAIN_MATERIAL.soil)
     },
   }),
   'lantern-vault': createRasterMap({
     id: 'lantern-vault',
-    revision: 1,
+    revision: 2,
     mode: '3v3',
     displayName: 'Lantern Vault',
     description: 'Cavern galleries climb through three broad ceiling shafts.',
@@ -662,38 +651,35 @@ const maps: Record<MapId, MapDefinition> = {
       [1740, 880],
       [460, 650],
       [1460, 650],
-      [720, 400],
-      [1200, 400],
+      [680, 420],
+      [1240, 420],
     ]),
-    paint: ({ surface, rect, ramp, ellipse, carveEllipse }) => {
-      surface(() => 880, TERRAIN_MATERIAL.stone)
-      rect(0, 0, 1920, 180, TERRAIN_MATERIAL.stone)
-      ellipse(270, 160, 290, 120, TERRAIN_MATERIAL.stone)
-      ellipse(960, 150, 350, 135, TERRAIN_MATERIAL.stone)
-      ellipse(1650, 160, 290, 120, TERRAIN_MATERIAL.stone)
-      carveEllipse(400, 115, 105, 150)
-      carveEllipse(960, 105, 130, 165)
-      carveEllipse(1520, 115, 105, 150)
+    paint: ({ surface, rect, ramp, ellipse }) => {
+      surface(() => 880, TERRAIN_MATERIAL.soil)
+      ellipse(180, 25, 180, 80, TERRAIN_MATERIAL.stone)
+      ellipse(960, 20, 210, 70, TERRAIN_MATERIAL.stone)
+      ellipse(1740, 25, 180, 80, TERRAIN_MATERIAL.stone)
       rect(70, 880, 250, 26, TERRAIN_MATERIAL.soil)
       rect(1600, 880, 250, 26, TERRAIN_MATERIAL.soil)
-      ramp(260, 880, 500, 650, 26, TERRAIN_MATERIAL.stone)
-      ramp(1420, 650, 1660, 880, 26, TERRAIN_MATERIAL.stone)
+      ramp(260, 880, 500, 650, 26, TERRAIN_MATERIAL.brick)
+      ramp(1420, 650, 1660, 880, 26, TERRAIN_MATERIAL.brick)
       rect(390, 650, 220, 26, TERRAIN_MATERIAL.brick)
       rect(1310, 650, 220, 26, TERRAIN_MATERIAL.brick)
       ramp(540, 650, 760, 400, 26, TERRAIN_MATERIAL.brick)
       ramp(1160, 400, 1380, 650, 26, TERRAIN_MATERIAL.brick)
-      rect(650, 400, 220, 26, TERRAIN_MATERIAL.stone)
-      rect(1050, 400, 220, 26, TERRAIN_MATERIAL.stone)
-      ramp(840, 426, 940, 520, 22, TERRAIN_MATERIAL.steel)
-      ramp(980, 520, 1080, 426, 22, TERRAIN_MATERIAL.steel)
-      rect(870, 520, 180, 24, TERRAIN_MATERIAL.brick)
+      rect(600, 420, 160, 26, TERRAIN_MATERIAL.brick)
+      rect(1160, 420, 160, 26, TERRAIN_MATERIAL.brick)
+      ramp(760, 446, 900, 550, 22, TERRAIN_MATERIAL.brick)
+      ramp(1020, 550, 1160, 446, 22, TERRAIN_MATERIAL.brick)
+      rect(900, 550, 40, 22, TERRAIN_MATERIAL.brick)
+      rect(980, 550, 40, 22, TERRAIN_MATERIAL.brick)
       rect(610, 690, 110, 22, TERRAIN_MATERIAL.brick)
       rect(1200, 690, 110, 22, TERRAIN_MATERIAL.brick)
     },
   }),
   'fossil-wake': createRasterMap({
     id: 'fossil-wake',
-    revision: 1,
+    revision: 2,
     mode: '3v3',
     displayName: 'Fossil Wake',
     description: 'Permanent fossil ribs rise through a destructible basin and broken scaffolds.',
@@ -713,35 +699,281 @@ const maps: Record<MapId, MapDefinition> = {
     spawns: canonicalSpawns([
       [180, 920],
       [1868, 920],
-      [560, 690],
-      [1488, 690],
-      [820, 500],
-      [1228, 500],
+      [520, 700],
+      [1528, 700],
+      [790, 540],
+      [1258, 540],
     ]),
-    paint: ({ surface, rect, ramp, ellipse, carveEllipse }) => {
+    paint: ({ surface, rect, ramp, ellipse, carveEllipse, carveRect }) => {
       surface((x) => 950 + 30 * Math.cos((x - 1024) / 250), TERRAIN_MATERIAL.soil)
       rect(70, 920, 240, 24, TERRAIN_MATERIAL.soil)
       rect(1738, 920, 240, 24, TERRAIN_MATERIAL.soil)
       ramp(260, 920, 600, 690, 28, TERRAIN_MATERIAL.stone)
       ramp(1448, 690, 1788, 920, 28, TERRAIN_MATERIAL.stone)
-      rect(490, 690, 220, 26, TERRAIN_MATERIAL.brick)
-      rect(1338, 690, 220, 26, TERRAIN_MATERIAL.brick)
-      ramp(650, 690, 860, 500, 28, TERRAIN_MATERIAL.stone)
-      ramp(1188, 500, 1398, 690, 28, TERRAIN_MATERIAL.stone)
-      rect(750, 500, 220, 26, TERRAIN_MATERIAL.brick)
-      rect(1078, 500, 220, 26, TERRAIN_MATERIAL.brick)
-      ellipse(1024, 830, 400, 235, TERRAIN_MATERIAL.stone)
-      carveEllipse(1024, 830, 335, 178)
-      ramp(625, 840, 860, 620, 22, TERRAIN_MATERIAL.stone)
-      ramp(860, 620, 1024, 560, 22, TERRAIN_MATERIAL.stone)
-      ramp(1024, 560, 1188, 620, 22, TERRAIN_MATERIAL.stone)
-      ramp(1188, 620, 1423, 840, 22, TERRAIN_MATERIAL.stone)
-      rect(365, 790, 105, 22, TERRAIN_MATERIAL.brick)
-      rect(500, 750, 80, 22, TERRAIN_MATERIAL.brick)
-      rect(1468, 750, 80, 22, TERRAIN_MATERIAL.brick)
-      rect(1578, 790, 105, 22, TERRAIN_MATERIAL.brick)
-      rect(920, 650, 86, 20, TERRAIN_MATERIAL.brick)
-      rect(1042, 650, 86, 20, TERRAIN_MATERIAL.brick)
+      rect(435, 700, 170, 26, TERRAIN_MATERIAL.brick)
+      rect(1443, 700, 170, 26, TERRAIN_MATERIAL.brick)
+      ramp(605, 700, 830, 540, 26, TERRAIN_MATERIAL.brick)
+      ramp(1218, 540, 1443, 700, 26, TERRAIN_MATERIAL.brick)
+      rect(710, 540, 160, 26, TERRAIN_MATERIAL.brick)
+      rect(1178, 540, 160, 26, TERRAIN_MATERIAL.brick)
+      ellipse(1024, 850, 330, 200, TERRAIN_MATERIAL.stone)
+      carveEllipse(1024, 850, 280, 150)
+      carveRect(630, 775, 150, 150)
+      carveRect(1268, 775, 150, 150)
+      ramp(700, 850, 880, 650, 20, TERRAIN_MATERIAL.brick)
+      ramp(1168, 650, 1348, 850, 20, TERRAIN_MATERIAL.brick)
+      rect(330, 790, 170, 22, TERRAIN_MATERIAL.brick)
+      rect(1548, 790, 170, 22, TERRAIN_MATERIAL.brick)
+    },
+  }),
+  'glasshouse-divide': createRasterMap({
+    id: 'glasshouse-divide',
+    revision: 2,
+    mode: '1v1',
+    displayName: 'Glasshouse Divide',
+    description: 'Break open mirrored conservatories or fight through the garden floor.',
+    label: 'Layered greenhouse',
+    width: 1280,
+    height: 720,
+    theme: theme({ sky: 0xbce7df, sun: 0xffe59a, backHill: 0x75aa8d, terrain: 0x806047, surface: 0x4f8a65, brick: 0xb86654, stone: 0x718083, steel: 0x38545b }),
+    spawns: canonicalSpawns([[220, 390], [1060, 390]]),
+    paint: ({ surface, rect, ramp, carveRect }) => {
+      surface((x) => 585 + 16 * Math.cos(x / 92), TERRAIN_MATERIAL.soil)
+      rect(130, 390, 180, 26, TERRAIN_MATERIAL.brick)
+      rect(970, 390, 180, 26, TERRAIN_MATERIAL.brick)
+      rect(110, 500, 20, 85, TERRAIN_MATERIAL.steel)
+      rect(1150, 500, 20, 85, TERRAIN_MATERIAL.steel)
+      ramp(110, 270, 170, 245, 20, TERRAIN_MATERIAL.brick)
+      ramp(1110, 245, 1170, 270, 20, TERRAIN_MATERIAL.brick)
+      rect(365, 500, 180, 24, TERRAIN_MATERIAL.brick)
+      rect(735, 500, 180, 24, TERRAIN_MATERIAL.brick)
+      carveRect(470, 520, 340, 160)
+      rect(560, 555, 60, 26, TERRAIN_MATERIAL.stone)
+      rect(660, 555, 60, 26, TERRAIN_MATERIAL.stone)
+    },
+  }),
+  'iron-trestle': createRasterMap({
+    id: 'iron-trestle',
+    revision: 2,
+    mode: '2v2',
+    displayName: 'Iron Trestle',
+    description: 'High bridge gunners and sheltered crews contest a broken industrial span.',
+    label: 'Broken steel bridge',
+    width: 1600,
+    height: 900,
+    theme: theme({ sky: 0xd4c4a5, sun: 0xffca66, backHill: 0x857b68, terrain: 0x735844, surface: 0x8b7650, brick: 0x9f4d3d, stone: 0x676765, steel: 0x304650 }),
+    spawns: canonicalSpawns([[230, 380], [1370, 380], [520, 650], [1080, 650]]),
+    paint: ({ surface, rect, ramp }) => {
+      surface((x) => 790 + 20 * Math.cos(x / 130), TERRAIN_MATERIAL.soil)
+      rect(140, 380, 180, 26, TERRAIN_MATERIAL.brick)
+      rect(1280, 380, 180, 26, TERRAIN_MATERIAL.brick)
+      rect(145, 620, 28, 170, TERRAIN_MATERIAL.steel)
+      rect(1427, 620, 28, 170, TERRAIN_MATERIAL.steel)
+      rect(420, 650, 200, 26, TERRAIN_MATERIAL.brick)
+      rect(980, 650, 200, 26, TERRAIN_MATERIAL.brick)
+      ramp(320, 430, 650, 510, 24, TERRAIN_MATERIAL.brick)
+      ramp(950, 510, 1280, 430, 24, TERRAIN_MATERIAL.brick)
+      rect(650, 510, 90, 22, TERRAIN_MATERIAL.brick)
+      rect(860, 510, 90, 22, TERRAIN_MATERIAL.brick)
+      ramp(560, 760, 720, 650, 22, TERRAIN_MATERIAL.brick)
+      ramp(880, 650, 1040, 760, 22, TERRAIN_MATERIAL.brick)
+    },
+  }),
+  'echo-caldera': createRasterMap({
+    id: 'echo-caldera',
+    revision: 2,
+    mode: '3v3',
+    displayName: 'Echo Caldera',
+    description: 'Six firing tiers surround a hollow stone heart and paired transit gates.',
+    label: 'Tiered volcanic bowl',
+    width: 2048,
+    height: 1152,
+    theme: theme({ sky: 0x302d45, sun: 0xff9f5c, backHill: 0x51445b, terrain: 0x745044, surface: 0xb16b4e, dust: 0xca8260, brick: 0x8e443f, stone: 0x56515b, steel: 0x29343d }),
+    spawns: canonicalSpawns([[170, 420], [1878, 420], [470, 650], [1578, 650], [860, 820], [1188, 820]]),
+    objects: [{
+      id: 'caldera-transit', type: 'projectile-portal',
+      entrance: { start: { x: 748, y: 760 }, end: { x: 748, y: 880 }, thickness: 12 },
+      exit: { start: { x: 1300, y: 760 }, end: { x: 1300, y: 880 }, thickness: 12 },
+      velocityRetention: 0.85,
+    }],
+    paint: ({ surface, rect, ramp, ellipse, carveEllipse, carveRect }) => {
+      surface((x) => 1010 + 34 * Math.cos((x - 1024) / 250), TERRAIN_MATERIAL.soil)
+      ellipse(1024, 855, 260, 235, TERRAIN_MATERIAL.stone)
+      carveEllipse(1024, 870, 215, 175)
+      carveRect(674, 755, 170, 140)
+      carveRect(1204, 755, 170, 140)
+      rect(80, 420, 240, 28, TERRAIN_MATERIAL.stone)
+      rect(1728, 420, 240, 28, TERRAIN_MATERIAL.stone)
+      ramp(280, 448, 610, 650, 28, TERRAIN_MATERIAL.brick)
+      ramp(1438, 650, 1768, 448, 28, TERRAIN_MATERIAL.brick)
+      rect(430, 650, 240, 28, TERRAIN_MATERIAL.brick)
+      rect(1378, 650, 240, 28, TERRAIN_MATERIAL.brick)
+      ramp(620, 678, 820, 820, 26, TERRAIN_MATERIAL.brick)
+      ramp(1228, 820, 1428, 678, 26, TERRAIN_MATERIAL.brick)
+      rect(700, 820, 200, 28, TERRAIN_MATERIAL.brick)
+      rect(1148, 820, 200, 28, TERRAIN_MATERIAL.brick)
+      rect(900, 610, 60, 24, TERRAIN_MATERIAL.brick)
+      rect(1088, 610, 60, 24, TERRAIN_MATERIAL.brick)
+      carveRect(736, 755, 24, 140)
+      carveRect(1288, 755, 24, 140)
+    },
+  }),
+  'salt-flats': createRasterMap({
+    id: 'salt-flats',
+    revision: 1,
+    mode: '1v1',
+    displayName: 'Salt Flats',
+    description: 'Long open shots cross low mineral shelves and a breakable center seam.',
+    label: 'Open duel',
+    width: 1120,
+    height: 630,
+    theme: theme({ sky: 0xb9dfe4, sun: 0xffe7a3, backHill: 0x8aaeb0, terrain: 0xa58468, surface: 0xd1c19a, dust: 0xd8b98a, stone: 0x817d78 }),
+    spawns: canonicalSpawns([[190, 410], [930, 410]]),
+    paint: ({ surface, rect, ramp, ellipse }) => {
+      surface((x) => 500 + 10 * Math.cos((x - 560) / 120), TERRAIN_MATERIAL.soil)
+      rect(120, 410, 140, 22, TERRAIN_MATERIAL.soil)
+      rect(860, 410, 140, 22, TERRAIN_MATERIAL.soil)
+      ramp(260, 432, 380, 485, 20, TERRAIN_MATERIAL.brick)
+      ramp(740, 485, 860, 432, 20, TERRAIN_MATERIAL.brick)
+      ellipse(495, 490, 45, 25, TERRAIN_MATERIAL.soil)
+      ellipse(625, 490, 45, 25, TERRAIN_MATERIAL.soil)
+      rect(535, 465, 50, 18, TERRAIN_MATERIAL.brick)
+      rect(155, 432, 70, 14, TERRAIN_MATERIAL.stone)
+      rect(895, 432, 70, 14, TERRAIN_MATERIAL.stone)
+    },
+  }),
+  'split-orchard': createRasterMap({
+    id: 'split-orchard',
+    revision: 1,
+    mode: '1v1',
+    displayName: 'Split Orchard',
+    description: 'Two garden terraces overlook a wide, destructible central hollow.',
+    label: 'Terrace duel',
+    width: 1280,
+    height: 720,
+    theme: theme({ sky: 0xaedbd0, sun: 0xffdc83, backHill: 0x6f9b79, terrain: 0x795b3e, surface: 0x56804c, dust: 0xad8d62, brick: 0x9e5e47 }),
+    spawns: canonicalSpawns([[210, 400], [1070, 400]]),
+    paint: ({ surface, rect, ramp, ellipse }) => {
+      surface((x) => 600 + 12 * Math.cos((x - 640) / 110), TERRAIN_MATERIAL.soil)
+      rect(120, 400, 180, 24, TERRAIN_MATERIAL.soil)
+      rect(980, 400, 180, 24, TERRAIN_MATERIAL.soil)
+      ramp(300, 424, 500, 560, 22, TERRAIN_MATERIAL.brick)
+      ramp(780, 560, 980, 424, 22, TERRAIN_MATERIAL.brick)
+      rect(440, 535, 120, 20, TERRAIN_MATERIAL.brick)
+      rect(720, 535, 120, 20, TERRAIN_MATERIAL.brick)
+      ellipse(570, 590, 55, 28, TERRAIN_MATERIAL.soil)
+      ellipse(710, 590, 55, 28, TERRAIN_MATERIAL.soil)
+      rect(600, 575, 80, 18, TERRAIN_MATERIAL.brick)
+    },
+  }),
+  'tideworks': createRasterMap({
+    id: 'tideworks',
+    revision: 1,
+    mode: '2v2',
+    displayName: 'Tideworks',
+    description: 'Open flood-control decks connect high banks to a broad lower channel.',
+    label: 'Open waterworks',
+    width: 1600,
+    height: 900,
+    theme: theme({ sky: 0x9fd3dc, sun: 0xffdc8c, backHill: 0x668f93, terrain: 0x75634d, surface: 0x67876b, dust: 0xb39a78, brick: 0x9b634d, stone: 0x6e7776, steel: 0x38545b }),
+    spawns: canonicalSpawns([[190, 400], [1410, 400], [520, 650], [1080, 650]]),
+    paint: ({ surface, rect, ramp }) => {
+      surface((x) => 790 + 12 * Math.cos((x - 800) / 150), TERRAIN_MATERIAL.soil)
+      rect(100, 400, 180, 24, TERRAIN_MATERIAL.brick)
+      rect(1320, 400, 180, 24, TERRAIN_MATERIAL.brick)
+      ramp(280, 424, 500, 650, 22, TERRAIN_MATERIAL.brick)
+      ramp(1100, 650, 1320, 424, 22, TERRAIN_MATERIAL.brick)
+      rect(430, 650, 180, 24, TERRAIN_MATERIAL.soil)
+      rect(990, 650, 180, 24, TERRAIN_MATERIAL.soil)
+      ramp(610, 674, 730, 750, 20, TERRAIN_MATERIAL.brick)
+      ramp(870, 750, 990, 674, 20, TERRAIN_MATERIAL.brick)
+      rect(690, 735, 80, 18, TERRAIN_MATERIAL.stone)
+      rect(830, 735, 80, 18, TERRAIN_MATERIAL.stone)
+      rect(170, 424, 40, 30, TERRAIN_MATERIAL.steel)
+      rect(1390, 424, 40, 30, TERRAIN_MATERIAL.steel)
+    },
+  }),
+  'ember-steps': createRasterMap({
+    id: 'ember-steps',
+    revision: 1,
+    mode: '2v2',
+    displayName: 'Ember Steps',
+    description: 'Staggered volcanic shelves provide clear arcs above a shallow center bowl.',
+    label: 'Staggered shelves',
+    width: 1664,
+    height: 936,
+    theme: theme({ sky: 0x514457, sun: 0xffa45f, backHill: 0x66505b, terrain: 0x735044, surface: 0xa9664c, dust: 0xca8563, brick: 0x8e453d, stone: 0x57515a }),
+    spawns: canonicalSpawns([[200, 410], [1464, 410], [560, 660], [1104, 660]]),
+    paint: ({ surface, rect, ramp, ellipse }) => {
+      surface((x) => 825 + 18 * Math.cos((x - 832) / 170), TERRAIN_MATERIAL.soil)
+      rect(110, 410, 180, 24, TERRAIN_MATERIAL.soil)
+      rect(1374, 410, 180, 24, TERRAIN_MATERIAL.soil)
+      ramp(290, 434, 520, 660, 22, TERRAIN_MATERIAL.brick)
+      ramp(1144, 660, 1374, 434, 22, TERRAIN_MATERIAL.brick)
+      rect(470, 660, 180, 24, TERRAIN_MATERIAL.brick)
+      rect(1014, 660, 180, 24, TERRAIN_MATERIAL.brick)
+      ramp(650, 684, 760, 780, 20, TERRAIN_MATERIAL.brick)
+      ramp(904, 780, 1014, 684, 20, TERRAIN_MATERIAL.brick)
+      ellipse(832, 810, 70, 36, TERRAIN_MATERIAL.soil)
+      rect(792, 760, 80, 18, TERRAIN_MATERIAL.stone)
+    },
+  }),
+  'open-skyline': createRasterMap({
+    id: 'open-skyline',
+    revision: 1,
+    mode: '3v3',
+    displayName: 'Open Skyline',
+    description: 'Six broad firing pads descend through open ridges with uninterrupted sky.',
+    label: 'Open 3v3',
+    width: 2016,
+    height: 1134,
+    theme: theme({ sky: 0x94cadb, sun: 0xffda8d, backHill: 0x607f86, terrain: 0x765e48, surface: 0x61885b, dust: 0xb18f6c }),
+    spawns: canonicalSpawns([[180, 430], [1836, 430], [530, 650], [1486, 650], [820, 830], [1196, 830]]),
+    paint: ({ surface, rect, ramp, ellipse }) => {
+      surface((x) => 1000 + 20 * Math.cos((x - 1008) / 220), TERRAIN_MATERIAL.soil)
+      rect(90, 430, 180, 24, TERRAIN_MATERIAL.soil)
+      rect(1746, 430, 180, 24, TERRAIN_MATERIAL.soil)
+      ramp(270, 454, 500, 650, 22, TERRAIN_MATERIAL.brick)
+      ramp(1516, 650, 1746, 454, 22, TERRAIN_MATERIAL.brick)
+      rect(440, 650, 180, 24, TERRAIN_MATERIAL.brick)
+      rect(1396, 650, 180, 24, TERRAIN_MATERIAL.brick)
+      ramp(620, 674, 790, 830, 22, TERRAIN_MATERIAL.brick)
+      ramp(1226, 830, 1396, 674, 22, TERRAIN_MATERIAL.brick)
+      rect(730, 830, 180, 24, TERRAIN_MATERIAL.soil)
+      rect(1106, 830, 180, 24, TERRAIN_MATERIAL.soil)
+      ellipse(958, 930, 65, 34, TERRAIN_MATERIAL.soil)
+      ellipse(1058, 930, 65, 34, TERRAIN_MATERIAL.soil)
+      rect(978, 900, 60, 18, TERRAIN_MATERIAL.stone)
+    },
+  }),
+  'delta-spires': createRasterMap({
+    id: 'delta-spires',
+    revision: 1,
+    mode: '3v3',
+    displayName: 'Delta Spires',
+    description: 'Three team terraces face narrow stone markers across a wide branching delta.',
+    label: 'Three open lanes',
+    width: 2112,
+    height: 1188,
+    theme: theme({ sky: 0xa6d5d3, sun: 0xffdf91, backHill: 0x678d83, terrain: 0x766149, surface: 0x5d8a64, dust: 0xb59670, brick: 0x9c654e, stone: 0x6d716b }),
+    spawns: canonicalSpawns([[180, 450], [1932, 450], [540, 690], [1572, 690], [850, 880], [1262, 880]]),
+    paint: ({ surface, rect, ramp, ellipse }) => {
+      surface((x) => 1050 + 24 * Math.cos((x - 1056) / 260), TERRAIN_MATERIAL.soil)
+      rect(90, 450, 180, 24, TERRAIN_MATERIAL.soil)
+      rect(1842, 450, 180, 24, TERRAIN_MATERIAL.soil)
+      ramp(270, 474, 510, 690, 22, TERRAIN_MATERIAL.brick)
+      ramp(1602, 690, 1842, 474, 22, TERRAIN_MATERIAL.brick)
+      rect(450, 690, 180, 24, TERRAIN_MATERIAL.brick)
+      rect(1482, 690, 180, 24, TERRAIN_MATERIAL.brick)
+      ramp(630, 714, 820, 880, 22, TERRAIN_MATERIAL.brick)
+      ramp(1292, 880, 1482, 714, 22, TERRAIN_MATERIAL.brick)
+      rect(760, 880, 180, 24, TERRAIN_MATERIAL.soil)
+      rect(1172, 880, 180, 24, TERRAIN_MATERIAL.soil)
+      ellipse(990, 980, 55, 42, TERRAIN_MATERIAL.stone)
+      ellipse(1122, 980, 55, 42, TERRAIN_MATERIAL.stone)
+      rect(1026, 940, 60, 18, TERRAIN_MATERIAL.brick)
+      rect(690, 930, 70, 20, TERRAIN_MATERIAL.soil)
+      rect(1352, 930, 70, 20, TERRAIN_MATERIAL.soil)
     },
   }),
   'custom-draft': registeredMap(resolveMapDocument(
@@ -780,6 +1012,15 @@ export const MAP_ORDER: MapId[] = [
   'sundered-crown',
   'lantern-vault',
   'fossil-wake',
+  'glasshouse-divide',
+  'iron-trestle',
+  'echo-caldera',
+  'salt-flats',
+  'split-orchard',
+  'tideworks',
+  'ember-steps',
+  'open-skyline',
+  'delta-spires',
 ]
 export const MAPS: Record<MapId, MapDefinition> = maps
 

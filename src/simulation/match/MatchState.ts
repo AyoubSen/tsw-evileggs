@@ -6,7 +6,7 @@ import type { PlayerAppearance } from '../../players/appearanceRegistry'
 
 export const SIMULATION_HZ = 60
 export const FIXED_TICK_SECONDS = 1 / SIMULATION_HZ
-export const SIMULATION_SNAPSHOT_VERSION = 12
+export const SIMULATION_SNAPSHOT_VERSION = 13
 
 export type MatchPhase = 'input' | 'projectile' | 'settling' | 'expired' | 'victory'
 
@@ -102,6 +102,8 @@ export type MatchState = {
   nextTerrainSequence: number
   nextEventSequence: number
   lastCommandSequence: number
+  playerStats: Record<string, { damageDealt: number; selfDamage: number; terrainDestroyed: number; shotsByWeapon: Partial<Record<WeaponId, number>> }>
+  actionOwners: Record<string, string>
 }
 
 export type SerializedMatchState = {

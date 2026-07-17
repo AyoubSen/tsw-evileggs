@@ -68,7 +68,7 @@ export async function getProgression(getToken: () => Promise<string | null>): Pr
   const response = await request(getToken, '/api/me/progression')
   if (!response.ok) throw new Error('Progression is temporarily unavailable.')
   const value = await response.json() as ProgressionOverview
-  if (!value?.summary || !Array.isArray(value.recentMatches) || !Array.isArray(value.entitlements))
+  if (!value?.summary || !Array.isArray(value.recentMatches) || !Array.isArray(value.entitlements) || !Array.isArray(value.goals))
     throw new Error('The progression service returned invalid data.')
   return value
 }
