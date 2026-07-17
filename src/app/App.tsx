@@ -787,7 +787,7 @@ function CustomizePlayer({
                     onClick={() => onChange(selectedSlot, { ...appearance, [group.field]: entry.id } as PlayerAppearance)}
                   >
                     {'color' in entry && <i style={{ backgroundColor: entry.color }} aria-hidden="true" />}
-                    {group.field === 'victoryStyle' && <PlayerAvatar appearance={{ ...appearance, victoryStyle: entry.id }} pose="victory" label={`${entry.label} victory preview`} />}
+                    {group.field === 'victoryStyle' && <PlayerAvatar appearance={{ ...appearance, victoryStyle: entry.id as PlayerAppearance['victoryStyle'] }} pose="victory" label={`${entry.label} victory preview`} />}
                     <span>{entry.label}</span>
                   </button>
                 ))}
