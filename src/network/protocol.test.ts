@@ -92,7 +92,7 @@ describe('online protocol validation', () => {
       protocol: 'private-room-6',
       snapshot: 6,
       weapons: 'weapons-4',
-      build: '1.4.0',
+      build: '1.4.1',
     })
     expect(compatibilityError(CURRENT_COMPATIBILITY)).toBeNull()
     expect(compatibilityError({ ...CURRENT_COMPATIBILITY, maps: 'maps-old' })).toMatch(

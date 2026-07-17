@@ -1106,10 +1106,11 @@ select {
   width: 100%;
   aspect-ratio: 16/9;
   overflow: hidden;
-  border: 4px solid var(--line);
   border-radius: 25px 34px 22px 30px;
   background: #89cfe1;
+  contain: layout paint;
   box-shadow:
+    0 0 0 4px var(--line),
     0 10px 0 var(--line),
     0 18px 34px var(--shadow);
 }
@@ -1138,6 +1139,7 @@ select {
 }
 .game-frame canvas {
   display: block;
+  image-rendering: auto;
 }
 .modal {
   position: fixed;

@@ -61,6 +61,7 @@ const finiteVector = (value: unknown): value is Vector =>
   value !== null &&
   Number.isFinite((value as Vector).x) &&
   Number.isFinite((value as Vector).y)
+type ProjectileImpact = { position: Vector; normal: Vector }
 
 export class MatchSimulation {
   private terrain: TerrainMask
@@ -500,19 +501,32 @@ export class MatchSimulation {
         continue
       }
       if (weapon.mechanic === 'timed-bounce') {
+        const normalVelocity =
+          next.velocity.x * impact.normal.x + next.velocity.y * impact.normal.y
+        const tangentVelocity = {
+          x: next.velocity.x - impact.normal.x * normalVelocity,
+          y: next.velocity.y - impact.normal.y * normalVelocity,
+        }
         nextProjectiles.push({
           ...projectile,
-          position: { x: impact.x, y: impact.y - 4 },
+          position: {
+            x: impact.position.x + impact.normal.x * (projectile.radius + 1),
+            y: impact.position.y + impact.normal.y * (projectile.radius + 1),
+          },
           velocity: {
-            x: next.velocity.x * weapon.bounceHorizontalRetention,
-            y: -Math.abs(next.velocity.y) * weapon.bounceRestitution,
+            x:
+              tangentVelocity.x * weapon.bounceHorizontalRetention -
+              impact.normal.x * normalVelocity * weapon.bounceRestitution,
+            y:
+              tangentVelocity.y * weapon.bounceHorizontalRetention -
+              impact.normal.y * normalVelocity * weapon.bounceRestitution,
           },
         })
         this.emit({
           type: 'projectile-bounced',
           projectileId: projectile.id,
           weaponId: projectile.weaponId,
-          position: { ...impact },
+          position: { ...impact.position },
         })
       } else if (weapon.mechanic === 'beacon' && projectile.kind === 'primary') {
         const beacon: SimBeacon = {
@@ -520,13 +534,17 @@ export class MatchSimulation {
           actionId: projectile.actionId,
           ownerId: projectile.ownerId,
           weaponId: 'bomb-beacon',
-          position: { ...impact },
+          position: { ...impact.position },
           remainingTicks: Math.ceil((weapon.beaconDelaySeconds ?? 0) * SIMULATION_HZ),
         }
         this.state.beacons.push(beacon)
         this.emit({ type: 'beacon-deployed', beacon: structuredClone(beacon) })
       } else if (weapon.mechanic === 'cluster' && projectile.kind === 'primary') {
-        this.emit({ type: 'cluster-split', actionId: projectile.actionId, position: { ...impact } })
+        this.emit({
+          type: 'cluster-split',
+          actionId: projectile.actionId,
+          position: { ...impact.position },
+        })
         const facing = Math.sign(projectile.velocity.x) || 1
         for (let child = 0; child < weapon.clusterChildCount; child += 1) {
           const angle =
@@ -539,7 +557,7 @@ export class MatchSimulation {
               projectile.ownerId,
               weapon.id,
               'cluster-child',
-              impact,
+              impact.position,
               {
                 x: Math.cos(angle) * weapon.clusterChildSpeed * facing,
                 y: -Math.sin(angle) * weapon.clusterChildSpeed - weapon.clusterChildLift,
@@ -548,9 +566,12 @@ export class MatchSimulation {
             ),
           )
         }
-      } else if (weapon.mechanic === 'drill' && this.terrain.isSolid(impact.x, impact.y))
-        this.boreDrill(projectile, impact, weapon)
-      else this.explode(impact, weapon, projectile.actionId, projectile.ownerId)
+      } else if (
+        weapon.mechanic === 'drill' &&
+        this.terrain.isSolid(impact.position.x, impact.position.y)
+      )
+        this.boreDrill(projectile, impact.position, weapon)
+      else this.explode(impact.position, weapon, projectile.actionId, projectile.ownerId)
     }
     this.state.projectiles = nextProjectiles
     if (
@@ -608,28 +629,95 @@ export class MatchSimulation {
   private projectileCollision(
     previous: Pick<SimProjectile, 'position' | 'radius'>,
     next: Pick<SimProjectile, 'position' | 'radius'>,
-  ): Vector | null {
+  ): ProjectileImpact | null {
     const distance = Math.hypot(
       next.position.x - previous.position.x,
       next.position.y - previous.position.y,
     )
     const samples = Math.max(1, Math.ceil(distance / 3))
+    let lastPoint = previous.position
+    const movement = {
+      x: next.position.x - previous.position.x,
+      y: next.position.y - previous.position.y,
+    }
     for (let sample = 1; sample <= samples; sample += 1) {
       const t = sample / samples
       const point = {
         x: previous.position.x + (next.position.x - previous.position.x) * t,
         y: previous.position.y + (next.position.y - previous.position.y) * t,
       }
-      const hitPlayer = this.state.players.some(
+      const hitPlayer = this.state.players.find(
         (player) =>
           player.alive &&
           Math.hypot(player.position.x - point.x, player.position.y - point.y) <
             player.radius + next.radius,
       )
-      if (this.terrain.isSolid(point.x, point.y) || hitPlayer || this.outOfBounds(point))
-        return point
+      if (this.outOfBounds(point))
+        return { position: point, normal: this.boundaryNormal(point, movement) }
+      if (hitPlayer) {
+        const dx = point.x - hitPlayer.position.x
+        const dy = point.y - hitPlayer.position.y
+        const length = Math.hypot(dx, dy)
+        return {
+          position: point,
+          normal:
+            length > Number.EPSILON
+              ? { x: dx / length, y: dy / length }
+              : this.oppositeDirection(movement),
+        }
+      }
+      if (this.terrain.isSolid(point.x, point.y))
+        return { position: point, normal: this.terrainImpactNormal(lastPoint, point, movement) }
+      lastPoint = point
     }
     return null
+  }
+
+  private boundaryNormal(point: Vector, movement: Vector): Vector {
+    let x = 0
+    let y = 0
+    if (point.x < 0) x = 1
+    else if (point.x > this.state.worldWidth) x = -1
+    if (point.y < 0) y = 1
+    else if (point.y > this.state.worldHeight) y = -1
+    const length = Math.hypot(x, y)
+    return length > Number.EPSILON ? { x: x / length, y: y / length } : this.oppositeDirection(movement)
+  }
+
+  private terrainImpactNormal(previous: Vector, point: Vector, movement: Vector): Vector {
+    const xBlocked = this.terrain.isSolid(point.x, previous.y)
+    const yBlocked = this.terrain.isSolid(previous.x, point.y)
+    let normal: Vector
+    if (xBlocked && !yBlocked) normal = { x: -Math.sign(movement.x), y: 0 }
+    else if (yBlocked && !xBlocked) normal = { x: 0, y: -Math.sign(movement.y) }
+    else {
+      const probe = this.terrain.scale
+      const gradient = {
+        x:
+          Number(this.terrain.isSolid(point.x - probe, point.y)) -
+          Number(this.terrain.isSolid(point.x + probe, point.y)),
+        y:
+          Number(this.terrain.isSolid(point.x, point.y - probe)) -
+          Number(this.terrain.isSolid(point.x, point.y + probe)),
+      }
+      const length = Math.hypot(gradient.x, gradient.y)
+      normal =
+        length > Number.EPSILON
+          ? { x: gradient.x / length, y: gradient.y / length }
+          : this.oppositeDirection(movement)
+    }
+    if (Math.hypot(normal.x, normal.y) <= Number.EPSILON)
+      return this.oppositeDirection(movement)
+    if (normal.x * movement.x + normal.y * movement.y > 0)
+      return { x: -normal.x, y: -normal.y }
+    return normal
+  }
+
+  private oppositeDirection(vector: Vector): Vector {
+    const length = Math.hypot(vector.x, vector.y)
+    return length > Number.EPSILON
+      ? { x: -vector.x / length, y: -vector.y / length }
+      : { x: 0, y: -1 }
   }
 
   private fireScatter(shooter: SimPlayer, direction: Vector, weapon: WeaponDefinition): void {

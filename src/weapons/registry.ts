@@ -451,7 +451,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     powerMode: 'variable',
     aimMode: 'directional',
     baseDamage: 8,
-    blastRadius: 20,
+    blastRadius: 44,
     terrainRadius: 0,
     projectileSpeed: 700,
     gravityScale: 1.1,

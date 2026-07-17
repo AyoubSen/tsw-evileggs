@@ -12,33 +12,25 @@ type TeleportContext = {
   weapon: WeaponDefinition
 }
 
-const finiteVector = (value: Vector): boolean =>
-  Number.isFinite(value.x) && Number.isFinite(value.y)
+const finiteVector = (value: unknown): value is Vector =>
+  typeof value === 'object' &&
+  value !== null &&
+  Number.isFinite((value as Vector).x) &&
+  Number.isFinite((value as Vector).y)
 
-const circleIntersectsTerrain = (
+const playerBodyIntersectsTerrain = (
   terrain: TerrainMask,
   center: Vector,
   radius: number,
-): boolean => {
-  const scale = terrain.scale
-  const minX = Math.max(0, Math.floor((center.x - radius) / scale))
-  const maxX = Math.min(terrain.width - 1, Math.floor((center.x + radius) / scale))
-  const minY = Math.max(0, Math.floor((center.y - radius) / scale))
-  const maxY = Math.min(terrain.height - 1, Math.floor((center.y + radius) / scale))
-  const radiusSquared = radius * radius
-
-  for (let y = minY; y <= maxY; y += 1)
-    for (let x = minX; x <= maxX; x += 1) {
-      if (terrain.cells[y * terrain.width + x] === 0) continue
-      const nearestX = Math.max(x * scale, Math.min(center.x, (x + 1) * scale))
-      const nearestY = Math.max(y * scale, Math.min(center.y, (y + 1) * scale))
-      const dx = center.x - nearestX
-      const dy = center.y - nearestY
-      // Tangency with the supporting cell is valid; only overlap blocks the landing.
-      if (dx * dx + dy * dy < radiusSquared - Number.EPSILON) return true
-    }
-  return false
-}
+): boolean =>
+  [
+    center,
+    { x: center.x, y: center.y - radius * 0.9 },
+    { x: center.x - radius * 0.75, y: center.y - radius * 0.45 },
+    { x: center.x + radius * 0.75, y: center.y - radius * 0.45 },
+    { x: center.x - radius * 0.9, y: center.y },
+    { x: center.x + radius * 0.9, y: center.y },
+  ].some((point) => terrain.isSolid(point.x, point.y))
 
 export const isTeleportDestinationValid = (
   destination: Vector,
@@ -57,7 +49,7 @@ export const isTeleportDestinationValid = (
   const surface = terrain.surfaceY(destination.x, destination.y)
   if (surface === null || Math.abs(destination.y - (surface - player.radius)) > 0.001)
     return false
-  if (circleIntersectsTerrain(terrain, destination, player.radius)) return false
+  if (playerBodyIntersectsTerrain(terrain, destination, player.radius)) return false
 
   return !players.some(
     (candidate) =>

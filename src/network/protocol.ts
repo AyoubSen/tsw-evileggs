@@ -16,7 +16,7 @@ import { WEAPON_ORDER, WEAPON_REGISTRY_VERSION } from '../weapons/registry'
 export const PRIVATE_MATCH_ROOM = 'private_match'
 export const PROTOCOL_VERSION = 'private-room-6'
 export const SIMULATION_SNAPSHOT_VERSION = 6
-export const CLIENT_BUILD_VERSION = '1.4.0'
+export const CLIENT_BUILD_VERSION = '1.4.1'
 export const ROOM_CODE_LENGTH = 6
 export const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/
 export const NETWORK_MESSAGE_TYPE = 'room'

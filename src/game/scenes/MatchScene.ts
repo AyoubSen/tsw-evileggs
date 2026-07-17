@@ -106,6 +106,7 @@ const MAX_WEAPON_EFFECTS = 40
 
 export class MatchScene extends Phaser.Scene {
   private source!: MatchSource
+  private renderScale = 1
   private eventsFromHost: GameEvents | null = null
   private preferences: PresentationPreferences = {
     reducedMotion: false,
@@ -176,11 +177,13 @@ export class MatchScene extends Phaser.Scene {
     events?: GameEvents
     preferences: PresentationPreferences
     audio: AudioDirector
+    renderScale?: number
   }): void {
     this.source = data.source
     this.eventsFromHost = data.events ?? null
     this.preferences = data.preferences
     this.audio = data.audio
+    this.renderScale = Math.max(1, data.renderScale ?? 1)
   }
 
   create(): void {
@@ -239,7 +242,11 @@ export class MatchScene extends Phaser.Scene {
         padding: { x: 7, y: 3 },
       })
       .setOrigin(0.5, 0)
-    this.uiCamera = this.cameras.add(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT)
+    this.uiCamera = this.cameras
+      .add(0, 0, VIEWPORT_WIDTH * this.renderScale, VIEWPORT_HEIGHT * this.renderScale)
+      .setOrigin(0, 0)
+      .setScroll(0, 0)
+      .setZoom(this.renderScale)
     const worldObjects = [
       this.backgroundGraphics,
       this.terrainGraphics,
@@ -258,7 +265,9 @@ export class MatchScene extends Phaser.Scene {
     ]
     this.uiCamera.ignore(worldObjects)
     this.cameras.main.ignore(hudObjects)
+    this.applyTextResolution()
     this.installInput()
+    this.updateRenderDiagnostics()
     this.resetPresentation()
     this.canvas.focus()
   }
@@ -345,6 +354,52 @@ export class MatchScene extends Phaser.Scene {
         trail.points = trail.points.slice(-1)
       this.actionFocusUntil = this.visualTime
     }
+  }
+
+  public setRenderScale(nextScale: number): void {
+    const renderScale = Math.max(1, nextScale)
+    if (renderScale === this.renderScale || !this.cameras?.main) return
+    const mainCamera = this.cameras.main
+    const center = { x: mainCamera.midPoint.x, y: mainCamera.midPoint.y }
+    const logicalZoom = mainCamera.zoom / this.renderScale
+    this.renderScale = renderScale
+    const width = VIEWPORT_WIDTH * renderScale
+    const height = VIEWPORT_HEIGHT * renderScale
+    mainCamera
+      .setViewport(0, 0, width, height)
+      .setZoom(logicalZoom * renderScale)
+      .centerOn(center.x, center.y)
+    this.uiCamera
+      .setViewport(0, 0, width, height)
+      .setOrigin(0, 0)
+      .setScroll(0, 0)
+      .setZoom(renderScale)
+    this.applyTextResolution()
+    this.updateRenderDiagnostics()
+  }
+
+  private applyTextResolution(): void {
+    const texts = [
+      ...this.playerHudTexts,
+      ...this.weaponHudTexts,
+      this.bottomHud,
+      this.timerText,
+      this.windText,
+      this.bannerText,
+      this.cameraModeText,
+    ]
+    for (const text of texts) text?.setResolution(this.renderScale)
+    for (const effect of this.damageEffects) effect.label.setResolution(this.renderScale)
+  }
+
+  private updateRenderDiagnostics(): void {
+    const canvas = this.canvas ?? this.game?.canvas
+    canvas?.setAttribute('data-render-scale', String(this.renderScale))
+    canvas?.setAttribute('data-backing-width', String(Math.round(VIEWPORT_WIDTH * this.renderScale)))
+    canvas?.setAttribute(
+      'data-backing-height',
+      String(Math.round(VIEWPORT_HEIGHT * this.renderScale)),
+    )
   }
 
   private resetPresentation(): void {
@@ -566,7 +621,7 @@ export class MatchScene extends Phaser.Scene {
     if (!this.dragging || !this.dragStart) return
     if (
       Math.hypot(pointer.x - this.dragStart.x, pointer.y - this.dragStart.y) *
-        this.cameras.main.zoom >=
+        this.logicalCameraZoom() >=
       DRAG_START_DISTANCE
     )
       this.dragPreview = dragAim(
@@ -574,7 +629,7 @@ export class MatchScene extends Phaser.Scene {
         pointer,
         POWER_MIN_PERCENT,
         POWER_MAX_PERCENT,
-        this.cameras.main.zoom,
+        this.logicalCameraZoom(),
         this.edgeAdjustedPullDistance(event, pointer),
       )
     event.preventDefault()
@@ -635,7 +690,10 @@ export class MatchScene extends Phaser.Scene {
 
   private pointerWorldPoint(event: PointerEvent): Vector {
     const viewportPoint = this.pointerViewportPoint(event)
-    return this.cameras.main.getWorldPoint(viewportPoint.x, viewportPoint.y)
+    return this.cameras.main.getWorldPoint(
+      viewportPoint.x * this.renderScale,
+      viewportPoint.y * this.renderScale,
+    )
   }
 
   private pointerViewportPoint(event: PointerEvent): Vector {
@@ -670,7 +728,7 @@ export class MatchScene extends Phaser.Scene {
 
   private edgeAdjustedPullDistance(event: PointerEvent, pointer: Vector): number {
     const origin = this.aimOrigin()
-    const zoom = this.cameras.main.zoom
+    const zoom = this.logicalCameraZoom()
     const pullX = (pointer.x - origin.x) * zoom
     const pullY = (pointer.y - origin.y) * zoom
     const rawDistance = Math.hypot(pullX, pullY)
@@ -757,7 +815,7 @@ export class MatchScene extends Phaser.Scene {
     return {
       direction: { x: Math.cos(radians) * facing, y: -Math.sin(radians) },
       power: DEFAULT_POWER_PERCENT,
-      distance: 112 / (this.cameras?.main?.zoom || 1),
+      distance: 112 / (this.cameras?.main ? this.logicalCameraZoom() : 1),
       worldAngle: facing === 1 ? DEFAULT_AIM_ELEVATION : 180 - DEFAULT_AIM_ELEVATION,
     }
   }
@@ -770,14 +828,24 @@ export class MatchScene extends Phaser.Scene {
     if (!this.source || !this.cameras?.main) return
     const { worldWidth, worldHeight } = this.source.state
     const camera = this.cameras.main
+    camera.setViewport(
+      0,
+      0,
+      VIEWPORT_WIDTH * this.renderScale,
+      VIEWPORT_HEIGHT * this.renderScale,
+    )
     camera.setBounds(0, 0, worldWidth, worldHeight)
-    camera.setZoom(this.fitCameraZoom())
+    camera.setZoom(this.fitCameraZoom() * this.renderScale)
     camera.centerOn(worldWidth / 2, worldHeight / 2)
   }
 
   private fitCameraZoom(): number {
     const { worldWidth, worldHeight } = this.source.state
     return Math.min(VIEWPORT_WIDTH / worldWidth, VIEWPORT_HEIGHT / worldHeight)
+  }
+
+  private logicalCameraZoom(): number {
+    return (this.cameras?.main?.zoom ?? this.renderScale) / this.renderScale
   }
 
   private updateWorldCamera(delta: number): void {
@@ -792,10 +860,10 @@ export class MatchScene extends Phaser.Scene {
         (this.visualTime < this.actionFocusUntil ? this.actionFocus : null) ??
         this.source.activePlayer.position)
     const easing = this.preferences.reducedMotion ? 1 : 1 - Math.exp(-delta * 6)
-    const zoom = Phaser.Math.Linear(camera.zoom, targetZoom, easing)
-    camera.setZoom(zoom)
-    const visibleWidth = VIEWPORT_WIDTH / zoom
-    const visibleHeight = VIEWPORT_HEIGHT / zoom
+    const logicalZoom = Phaser.Math.Linear(this.logicalCameraZoom(), targetZoom, easing)
+    camera.setZoom(logicalZoom * this.renderScale)
+    const visibleWidth = VIEWPORT_WIDTH / logicalZoom
+    const visibleHeight = VIEWPORT_HEIGHT / logicalZoom
     const targetScrollX = Phaser.Math.Clamp(
       focus.x - visibleWidth / 2,
       0,
@@ -806,8 +874,11 @@ export class MatchScene extends Phaser.Scene {
       0,
       Math.max(0, state.worldHeight - visibleHeight),
     )
-    camera.scrollX = Phaser.Math.Linear(camera.scrollX, targetScrollX, easing)
-    camera.scrollY = Phaser.Math.Linear(camera.scrollY, targetScrollY, easing)
+    const nextScrollX = Phaser.Math.Linear(camera.scrollX, targetScrollX, easing)
+    const nextScrollY = Phaser.Math.Linear(camera.scrollY, targetScrollY, easing)
+    const worldUnitsPerPixel = 1 / Math.max(camera.zoom, Number.EPSILON)
+    camera.scrollX = Math.round(nextScrollX / worldUnitsPerPixel) * worldUnitsPerPixel
+    camera.scrollY = Math.round(nextScrollY / worldUnitsPerPixel) * worldUnitsPerPixel
   }
 
   private render(): void {
@@ -1807,7 +1878,7 @@ export class MatchScene extends Phaser.Scene {
       .strokeCircle(
         this.teleportTarget.x,
         this.teleportTarget.y,
-        this.source.activePlayer.radius / this.cameras.main.zoom,
+        this.source.activePlayer.radius / this.logicalCameraZoom(),
       )
   }
 
@@ -2229,6 +2300,7 @@ export class MatchScene extends Phaser.Scene {
           })
           .setOrigin(0.5)
           .setDepth(20)
+          .setResolution(this.renderScale)
         this.uiCamera.ignore(label)
         this.damageEffects.push({
           playerId: event.playerId,

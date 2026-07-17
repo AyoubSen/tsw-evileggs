@@ -9,6 +9,7 @@ import {
   serializeMatchState,
 } from '../serialization/matchSerialization'
 import { replayChecksum, replayMatch, type MatchReplay } from '../replay/replay'
+import { TERRAIN_MATERIAL } from '../../terrain/materials'
 
 const config = {
   mode: '1v1' as const,
@@ -190,6 +191,39 @@ describe('framework-independent weapons', () => {
     }
   })
 
+  it('reflects Timed Grenades from terrain walls and ceilings', () => {
+    const launchedGrenade = () => {
+      const simulation = new MatchSimulation(config)
+      simulation.applyCommand(
+        command(simulation, { type: 'select-weapon', weaponId: 'timed-grenade' }),
+      )
+      expect(fireDown(simulation).accepted).toBe(true)
+      return simulation
+    }
+
+    const wall = launchedGrenade()
+    const wallTerrain = wall.getTerrain()
+    const wallCellX = Math.floor(400 / wallTerrain.scale)
+    for (let y = 0; y < wallTerrain.height; y += 1)
+      wallTerrain.cells[y * wallTerrain.width + wallCellX] = TERRAIN_MATERIAL.soil
+    wall.state.projectiles[0].position = { x: 397, y: 100 }
+    wall.state.projectiles[0].velocity = { x: 300, y: 0 }
+    wall.step()
+    expect(wall.state.projectiles[0].velocity.x).toBeLessThan(0)
+    expect(wall.state.projectiles[0].position.x).toBeLessThan(400)
+
+    const ceiling = launchedGrenade()
+    const ceilingTerrain = ceiling.getTerrain()
+    const ceilingCellY = Math.floor(80 / ceilingTerrain.scale)
+    for (let x = 0; x < ceilingTerrain.width; x += 1)
+      ceilingTerrain.cells[ceilingCellY * ceilingTerrain.width + x] = TERRAIN_MATERIAL.soil
+    ceiling.state.projectiles[0].position = { x: 400, y: 83 }
+    ceiling.state.projectiles[0].velocity = { x: 0, y: -300 }
+    ceiling.step()
+    expect(ceiling.state.projectiles[0].velocity.y).toBeGreaterThan(0)
+    expect(ceiling.state.projectiles[0].position.y).toBeGreaterThan(80)
+  })
+
   it('resolves scatter damage and cluster children inside simulation', () => {
     const scatter = new MatchSimulation(config)
     scatter.state.players[1].position = {
@@ -362,14 +396,20 @@ describe('framework-independent weapons', () => {
   })
 
   it('resolves an Old Shoe hit with low damage and knockback', () => {
-    const simulation = new MatchSimulation(config)
-    simulation.applyCommand(command(simulation, { type: 'select-weapon', weaponId: 'old-shoe' }))
-    fireDown(simulation)
-    placeActiveProjectileNextToPlayer(simulation, 1)
-    simulation.step()
-    expect(simulation.state.players[1].health).toBeLessThan(100)
-    expect(simulation.state.players[1].health).toBeGreaterThan(90)
-    expect(simulation.state.players[1].velocity.x).toBeGreaterThan(0)
+    const resolveHit = (weaponId: 'basic-rocket' | 'old-shoe') => {
+      const simulation = new MatchSimulation(config)
+      if (weaponId !== 'basic-rocket')
+        simulation.applyCommand(command(simulation, { type: 'select-weapon', weaponId }))
+      fireDown(simulation)
+      placeActiveProjectileNextToPlayer(simulation, 1)
+      simulation.step()
+      return simulation.state.players[1]
+    }
+    const rocketTarget = resolveHit('basic-rocket')
+    const shoeTarget = resolveHit('old-shoe')
+    expect(shoeTarget.health).toBeLessThan(100)
+    expect(shoeTarget.health).toBeGreaterThan(rocketTarget.health)
+    expect(shoeTarget.velocity.x).toBeGreaterThan(rocketTarget.velocity.x)
   })
 
   it('gives the Siege Bazooka a larger terrain effect than the Basic Rocket', () => {
