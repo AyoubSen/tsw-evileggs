@@ -28,7 +28,6 @@ export type ImpactStyle =
   | 'pellet-hit'
   | 'cluster-burst'
   | 'drill-burst'
-  | 'mine-blast'
   | 'knife-strike'
   | 'knife-miss'
   | 'knife-blocked'
@@ -143,7 +142,6 @@ type ProjectileKindsForWeapon<I extends WeaponId> = I extends 'cluster-charge'
       ? 'primary' | 'beacon-bomb'
       : I extends
             | 'scatter-shot'
-            | 'deployable-mine'
             | 'pocket-knife'
             | 'teleporter'
         ? never
@@ -670,28 +668,6 @@ export const WEAPON_VISUALS = {
         12,
       ),
     },
-  }),
-  'deployable-mine': defineWeapon('deployable-mine', {
-    held: shape(
-      polygon([[-7, -6], [17, -8], [28, -4], [28, 4], [17, 8], [-7, 6]], 'primary'),
-      line([5, -7], [5, 7], 3, 'accent'),
-      line([18, 0], [30, 0], 4, 'neutral'),
-      ellipse(33, 0, 4, 8, 'accent'),
-    ),
-    icon: shape(
-      ellipse(0, 4, 15, 7, 'primary', 'ink', 2.5),
-      line([-9, 0], [9, 0], 3, 'accent'),
-      circle(0, -4, 3.5, 'flash', 'ink', 1.5),
-      line([0, -8], [0, -13], 2, 'neutral'),
-    ),
-    heldScale: 1,
-    iconScale: 0.9,
-    pose: 'place',
-    activationEffect: 'place',
-    transitionStyle: 'drop',
-    impactStyle: 'mine-blast',
-    audio: { fire: 'mine-deploy', impact: 'mine-impact' },
-    projectiles: {},
   }),
   'pocket-knife': defineWeapon('pocket-knife', {
     held: shape(

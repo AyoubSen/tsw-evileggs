@@ -398,24 +398,6 @@ describe('framework-independent weapons', () => {
     ).toBe(1)
   })
 
-  it('persists an authoritative deployed mine through a snapshot restore', () => {
-    const simulation = new MatchSimulation(config)
-    simulation.applyCommand(
-      command(simulation, { type: 'select-weapon', weaponId: 'deployable-mine' }),
-    )
-    expect(
-      simulation.applyCommand(
-        command(simulation, { type: 'activate-weapon', activation: { kind: 'self' } }),
-      ).accepted,
-    ).toBe(true)
-    expect(simulation.state.mines).toHaveLength(1)
-    expect(simulation.state.nextMineId).toBe(2)
-
-    const restored = new MatchSimulation(undefined, { snapshot: simulation.snapshot() })
-    expect(restored.state.mines).toEqual(simulation.state.mines)
-    expect(restored.state.nextMineId).toBe(2)
-  })
-
   it('lets the Pocket Knife hit at close range but stops it at terrain', () => {
     const close = new MatchSimulation(config)
     const closeSurface = close.getTerrain().surfaceY(300)!

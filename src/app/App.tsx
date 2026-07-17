@@ -458,7 +458,7 @@ function Help() {
       <section className="tutorial-step">
         <span className="tutorial-icon weapon-icon">✦</span>
         <h3>4. Place tools</h3>
-        <p>Point the Teleporter at safe ground. Face a clear ledge for mines.</p>
+        <p>Point the Teleporter at safe ground. Face the target before using close-range tools.</p>
       </section>
       <section className="tutorial-step">
         <span className="tutorial-icon fire-icon">➤</span>

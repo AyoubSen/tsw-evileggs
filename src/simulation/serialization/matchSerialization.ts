@@ -30,7 +30,6 @@ export function deserializeMatchState(payload: string): SerializedMatchState {
     !Array.isArray(snapshot.state.config?.playerAppearances) ||
     snapshot.state.config.playerAppearances.length !== snapshot.state.players.length ||
     !snapshot.state.config.playerAppearances.every(validatePlayerAppearance) ||
-    !Array.isArray(snapshot.state.mines) ||
     !Array.isArray(snapshot.state.beacons) ||
     !Array.isArray(snapshot.state.teamTurnCursors) ||
     !Array.isArray(snapshot.state.terrainOperations) ||

@@ -17,7 +17,6 @@ const REJECTION_COPY: Record<CommandRejection, string> = {
   'no-ammunition': 'No ammunition',
   'cannot-jump': 'Cannot jump here',
   'invalid-target': 'Choose safe ground',
-  'invalid-placement': 'Mine needs a clear ledge',
   'cannot-trigger': 'Nothing left to split',
   'movement-locked': 'Frozen: movement locked',
 }
@@ -49,7 +48,6 @@ export function combatHudHint(input: {
   if (input.phase !== 'input') return 'Wait for the current action'
   if (input.movementLocked) return 'Frozen · aim and fire, but movement is locked'
   if (input.aimMode === 'target-position') return 'Point at safe ground · Space to warp'
-  if (input.aimMode === 'self') return 'Face a clear ledge · Space to deploy'
   if (input.remoteSplitSelected) return 'Fire, then press Space again to split'
   if (input.powerMode === 'fixed') return 'Short-range spread · Space to fire'
   return `Power ${input.power}% · drag toward target · Space to fire`

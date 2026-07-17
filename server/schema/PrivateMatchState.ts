@@ -2,7 +2,6 @@ import { MapSchema, schema, type SchemaType } from '@colyseus/schema'
 import type {
   MatchState,
   SimBeacon,
-  SimMine,
   SimPlayer,
   SimProjectile,
 } from '../../src/simulation/match/MatchState'
@@ -58,20 +57,6 @@ export const ProjectileState = schema({
 })
 export type ProjectileState = SchemaType<typeof ProjectileState>
 
-export const MineState = schema({
-  id: { type: 'string', default: '' },
-  actionId: { type: 'string', default: '' },
-  ownerId: { type: 'string', default: '' },
-  teamId: { type: 'uint8', default: 0 },
-  weaponId: { type: 'string', default: 'deployable-mine' },
-  x: { type: 'float64', default: 0 },
-  y: { type: 'float64', default: 0 },
-  radius: { type: 'float64', default: 0 },
-  triggerRadius: { type: 'float64', default: 0 },
-  armedTurn: { type: 'uint32', default: 0 },
-})
-export type MineState = SchemaType<typeof MineState>
-
 export const BeaconState = schema({
   id: { type: 'string', default: '' },
   actionId: { type: 'string', default: '' },
@@ -121,7 +106,6 @@ export const PrivateMatchState = schema({
   terrainSequence: { type: 'uint32', default: 0 },
   players: { map: RoomPlayerState, default: new MapSchema<RoomPlayerState>() },
   projectiles: { map: ProjectileState, default: new MapSchema<ProjectileState>() },
-  mines: { map: MineState, default: new MapSchema<MineState>() },
   beacons: { map: BeaconState, default: new MapSchema<BeaconState>() },
   result: { type: MatchResultState, default: new MatchResultState() },
 })
@@ -154,21 +138,6 @@ function projectPlayer(target: RoomPlayerState, source: SimPlayer): void {
   target.accessory = source.appearance.accessory
   for (const weaponId of WEAPON_ORDER)
     target.ammunition.set(weaponId, ammo(source.inventory[weaponId]))
-}
-
-function createMine(source: SimMine): MineState {
-  const target = new MineState()
-  target.id = source.id
-  target.actionId = source.actionId
-  target.ownerId = source.ownerId
-  target.teamId = source.teamId
-  target.weaponId = source.weaponId
-  target.x = source.position.x
-  target.y = source.position.y
-  target.radius = source.radius
-  target.triggerRadius = source.triggerRadius
-  target.armedTurn = source.armedTurn
-  return target
 }
 
 function createBeacon(source: SimBeacon): BeaconState {
@@ -224,11 +193,6 @@ export function projectSimulationState(state: PrivateMatchState, simulation: Mat
     target.fuseTicks = projectile.fuseTicks
     if (!state.projectiles.has(projectile.id)) state.projectiles.set(projectile.id, target)
   }
-
-  const activeMineIds = new Set(simulation.mines.map((mine) => mine.id))
-  for (const id of state.mines.keys()) if (!activeMineIds.has(id)) state.mines.delete(id)
-  for (const mine of simulation.mines)
-    if (!state.mines.has(mine.id)) state.mines.set(mine.id, createMine(mine))
 
   const activeBeaconIds = new Set(simulation.beacons.map((beacon) => beacon.id))
   for (const id of state.beacons.keys()) if (!activeBeaconIds.has(id)) state.beacons.delete(id)

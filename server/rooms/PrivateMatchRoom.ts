@@ -398,7 +398,6 @@ export class PrivateMatchRoom extends Room<{
     })
     this.balanceTracker = new MatchBalanceTracker()
     this.state.projectiles.clear()
-    this.state.mines.clear()
     this.state.beacons.clear()
     this.state.result = new MatchResultState()
     for (const player of this.state.players.values()) {

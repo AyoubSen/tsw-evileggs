@@ -82,7 +82,7 @@ describe('weapon presentation registry', () => {
     expect(new Set(heldModels).size).toBe(WEAPON_ORDER.length)
     expect(projectileModels).not.toContain('none')
     expect(new Set(projectileModels).size).toBe(launchedWeapons.length)
-    for (const id of ['deployable-mine', 'pocket-knife', 'teleporter'] as const)
+    for (const id of ['pocket-knife', 'teleporter'] as const)
       expect(getWeaponPresentation(id).projectileModel).toBe('none')
   })
 })

@@ -5,7 +5,6 @@ describe('combat presentation decisions', () => {
   it.each([
     ['no-ammunition', 'No ammunition'],
     ['invalid-target', 'Choose safe ground'],
-    ['invalid-placement', 'Mine needs a clear ledge'],
     ['movement-locked', 'Frozen: movement locked'],
     ['cannot-trigger', 'Nothing left to split'],
   ] as const)('explains %s', (reason, message) => {

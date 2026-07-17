@@ -10,7 +10,6 @@ export type HeldModelKind =
   | 'wide-scrap-blunderbuss'
   | 'heavy-segmented-cluster-canister'
   | 'spiral-borer-launcher'
-  | 'red-plunger-minelayer'
   | 'folding-pocket-knife'
   | 'signal-beacon-launcher'
   | 'twin-prong-fork-launcher'
@@ -178,23 +177,6 @@ export const WEAPON_PRESENTATIONS: Readonly<Record<WeaponId, WeaponPresentation>
     projectileModel: 'spinning-drill',
     trail: { color: 0xf08b35, sampleCount: 8, width: 3 },
     reducedMotionSafe: { recoil: false, trail: false, pulse: false, transient: true },
-  },
-  'deployable-mine': {
-    heldModel: 'red-plunger-minelayer',
-    colors: {
-      primary: 0x743f3c,
-      accent: 0xf05b4f,
-      flash: 0xffd45e,
-      impact: 0xd63f35,
-    },
-    body: { length: 27, width: 17 },
-    grip: { x: 6, y: 7 },
-    muzzle: { x: 29, y: 0 },
-    restElevation: 24,
-    recoil: { durationMs: 100, distance: 2 },
-    projectileModel: 'none',
-    trail: { color: 0xf05b4f, sampleCount: 0, width: 0 },
-    reducedMotionSafe: { recoil: true, trail: true, pulse: false, transient: true },
   },
   'pocket-knife': {
     heldModel: 'folding-pocket-knife',

@@ -6,7 +6,6 @@ export type WeaponId =
   | 'scatter-shot'
   | 'cluster-charge'
   | 'terrain-boring-drill'
-  | 'deployable-mine'
   | 'pocket-knife'
   | 'bomb-beacon'
   | 'fork-rocket'
@@ -14,7 +13,7 @@ export type WeaponId =
   | 'siege-bazooka'
   | 'cryo-shot'
   | 'teleporter'
-export const WEAPON_REGISTRY_VERSION = 'weapons-4'
+export const WEAPON_REGISTRY_VERSION = 'weapons-5'
 export type WeaponMechanic =
   | 'projectile'
   | 'timed-bounce'
@@ -22,7 +21,6 @@ export type WeaponMechanic =
   | 'cluster'
   | 'teleport'
   | 'drill'
-  | 'mine'
   | 'melee'
   | 'beacon'
   | 'remote-split'
@@ -34,7 +32,7 @@ export type WeaponDefinition = {
   description: string
   ammunition: number | 'unlimited'
   powerMode: 'variable' | 'fixed'
-  aimMode: 'directional' | 'target-position' | 'self'
+  aimMode: 'directional' | 'target-position'
   baseDamage: number
   blastRadius: number
   terrainRadius: number
@@ -74,7 +72,6 @@ export const WEAPON_ORDER: WeaponId[] = [
   'scatter-shot',
   'cluster-charge',
   'terrain-boring-drill',
-  'deployable-mine',
   'pocket-knife',
   'bomb-beacon',
   'fork-rocket',
@@ -306,38 +303,6 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     drillRadius: 11,
     mineRadius: 0,
     mineTriggerRadius: 0,
-    teleportEdgeMargin: 0,
-    teleportPlayerClearance: 0,
-  },
-  'deployable-mine': {
-    id: 'deployable-mine',
-    mechanic: 'mine',
-    displayName: 'Deployable Mine',
-    description: 'Persistent proximity trap that ignores allies',
-    ammunition: 3,
-    powerMode: 'fixed',
-    aimMode: 'self',
-    baseDamage: 68,
-    blastRadius: 66,
-    terrainRadius: 30,
-    projectileSpeed: 0,
-    gravityScale: 0,
-    windSensitivity: 0,
-    knockbackForce: 420,
-    fuseSeconds: 0,
-    bounceRestitution: 0,
-    bounceHorizontalRetention: 0,
-    pelletCount: 0,
-    pelletRange: 0,
-    pelletSpreadRadians: 0,
-    clusterChildCount: 0,
-    clusterChildDamage: 0,
-    clusterChildSpeed: 0,
-    clusterChildLift: 0,
-    drillDistance: 0,
-    drillRadius: 0,
-    mineRadius: 7,
-    mineTriggerRadius: 44,
     teleportEdgeMargin: 0,
     teleportPlayerClearance: 0,
   },
@@ -628,8 +593,6 @@ export function validateWeaponRegistry(): boolean {
         weapon.projectileSpeed > 0 ||
         weapon.pelletCount > 0 ||
         weapon.mechanic === 'melee') &&
-      (weapon.mechanic !== 'mine' ||
-        (weapon.aimMode === 'self' && weapon.mineRadius > 0 && weapon.mineTriggerRadius > 0)) &&
       (weapon.mechanic !== 'scatter' || (weapon.pelletCount > 0 && weapon.pelletRange > 0)) &&
       (weapon.mechanic !== 'cluster' ||
         (weapon.clusterChildCount > 0 &&

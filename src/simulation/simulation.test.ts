@@ -289,10 +289,10 @@ describe('weapons', () => {
     expect(canUseWeapon({ ...first, teleporter: 0 }, 'teleporter')).toBe(false)
   })
 
-  it('defines all fifteen arsenal entries with configured behaviour', () => {
+  it('defines all fourteen arsenal entries with configured behaviour', () => {
     expect(validateWeaponRegistry()).toBe(true)
     expect(Object.keys(WEAPONS)).toEqual(WEAPON_ORDER)
-    expect(WEAPON_ORDER).toHaveLength(15)
+    expect(WEAPON_ORDER).toHaveLength(14)
     expect(WEAPONS['timed-grenade'].projectileSpeed).toBeGreaterThan(0)
     expect(WEAPONS['scatter-shot'].blastRadius).toBe(0)
     expect(WEAPONS['cluster-charge'].terrainRadius).toBeGreaterThan(0)

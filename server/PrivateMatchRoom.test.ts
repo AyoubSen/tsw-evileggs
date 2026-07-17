@@ -352,7 +352,6 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
     expect(playersBySeat(room).map((player) => player.playerId)).toEqual(playerIds)
     expect(room.state).toMatchObject({ simulationTick: 0, terrainSequence: 0, eventSequence: 0 })
     expect(room.state.projectiles.size).toBe(0)
-    expect(room.state.mines.size).toBe(0)
     expect(room.state.beacons.size).toBe(0)
     const rematch = internals(room).simulation!
     expect(rematch.state.wind).toBe(windForTurn(rematch.state.seed, 1))

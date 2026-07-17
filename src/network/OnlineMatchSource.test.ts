@@ -38,7 +38,6 @@ class FakeRoom {
     },
     players: new Map(),
     projectiles: new Map(),
-    mines: new Map(),
     beacons: new Map(),
   }
   sent: Array<{ type: string | number; payload: unknown }> = []

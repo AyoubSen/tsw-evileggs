@@ -22,7 +22,6 @@ export const ARSENAL_PRESETS: Record<Exclude<ArsenalPresetId, 'custom'>, Arsenal
       'basic-rocket',
       'high-arc-mortar',
       'timed-grenade',
-      'deployable-mine',
       'pocket-knife',
       'old-shoe',
     ]),

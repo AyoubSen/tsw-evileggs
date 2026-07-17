@@ -14,7 +14,6 @@ describe('arsenal rules', () => {
       'basic-rocket',
       'high-arc-mortar',
       'timed-grenade',
-      'deployable-mine',
       'pocket-knife',
       'old-shoe',
     ])

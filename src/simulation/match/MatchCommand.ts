@@ -10,7 +10,6 @@ type CommandEnvelope = {
 export type WeaponActivation =
   | { kind: 'directional'; aimDirection: Vector; power: number }
   | { kind: 'target-position'; target: Vector }
-  | { kind: 'self' }
 
 export type MatchCommand =
   | (CommandEnvelope & { type: 'move'; direction: -1 | 0 | 1; pressed: boolean })
@@ -39,7 +38,6 @@ export type CommandRejection =
   | 'no-ammunition'
   | 'cannot-jump'
   | 'invalid-target'
-  | 'invalid-placement'
   | 'cannot-trigger'
   | 'movement-locked'
 

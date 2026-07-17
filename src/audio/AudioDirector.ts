@@ -15,8 +15,6 @@ export type SoundCue =
   | 'cluster-fire'
   | 'cluster-split'
   | 'drill-fire'
-  | 'mine-deploy'
-  | 'mine-trigger'
   | 'knife-swing'
   | 'knife-hit'
   | 'knife-block'
@@ -35,7 +33,6 @@ export type SoundCue =
   | 'grenade-impact'
   | 'cluster-impact'
   | 'drill-impact'
-  | 'mine-impact'
   | 'beacon-impact'
   | 'fork-impact'
   | 'shoe-impact'
@@ -97,8 +94,6 @@ const frequencies: Record<SoundCue, readonly [number, number, number]> = {
   'cluster-fire': [145, 75, 0.17],
   'cluster-split': [620, 230, 0.13],
   'drill-fire': [240, 70, 0.2],
-  'mine-deploy': [310, 180, 0.1],
-  'mine-trigger': [880, 260, 0.12],
   'knife-swing': [720, 260, 0.08],
   'knife-hit': [230, 120, 0.09],
   'knife-block': [1400, 310, 0.075],
@@ -117,7 +112,6 @@ const frequencies: Record<SoundCue, readonly [number, number, number]> = {
   'grenade-impact': [150, 48, 0.2],
   'cluster-impact': [210, 58, 0.14],
   'drill-impact': [340, 64, 0.22],
-  'mine-impact': [112, 36, 0.22],
   'beacon-impact': [180, 52, 0.18],
   'fork-impact': [250, 72, 0.16],
   'shoe-impact': [165, 82, 0.12],

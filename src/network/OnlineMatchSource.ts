@@ -5,7 +5,6 @@ import type { MatchEvent, SimulationMatchResult } from '../simulation/match/Matc
 import type {
   MatchState,
   SimBeacon,
-  SimMine,
   SimProjectile,
 } from '../simulation/match/MatchState'
 import { reconstructTerrain } from '../simulation/match/MatchSimulation'
@@ -77,19 +76,6 @@ type SchemaProjectile = {
   fuseTicks: number
 }
 
-type SchemaMine = {
-  id: string
-  actionId: string
-  ownerId: string
-  teamId: 0 | 1
-  weaponId: SimMine['weaponId']
-  x: number
-  y: number
-  radius: number
-  triggerRadius: number
-  armedTurn: number
-}
-
 type SchemaBeacon = {
   id: string
   actionId: string
@@ -121,7 +107,6 @@ type OnlineSchemaState = {
   }
   players: { values(): IterableIterator<SchemaPlayer> }
   projectiles: { values(): IterableIterator<SchemaProjectile> }
-  mines: { values(): IterableIterator<SchemaMine> }
   beacons: { values(): IterableIterator<SchemaBeacon> }
 }
 
@@ -515,17 +500,6 @@ export class OnlineMatchSource implements MatchSource {
     }
     for (const id of this.projectileSamples.keys())
       if (!ids.has(id)) this.projectileSamples.delete(id)
-    state.mines = [...schema.mines.values()].map((mine) => ({
-      id: mine.id,
-      actionId: mine.actionId,
-      ownerId: mine.ownerId,
-      teamId: mine.teamId,
-      weaponId: mine.weaponId,
-      position: { x: mine.x, y: mine.y },
-      radius: mine.radius,
-      triggerRadius: mine.triggerRadius,
-      armedTurn: mine.armedTurn,
-    }))
     state.beacons = [...schema.beacons.values()].map((beacon) => ({
       id: beacon.id,
       actionId: beacon.actionId,
@@ -636,12 +610,6 @@ export class OnlineMatchSource implements MatchSource {
           this.projectileSamples.set(projectile.id, [])
         }
       }
-      if (event.type === 'mine-deployed' && this.snapshotState)
-        this.snapshotState.mines.push(structuredClone(event.mine))
-      if (event.type === 'mine-triggered' && this.snapshotState)
-        this.snapshotState.mines = this.snapshotState.mines.filter(
-          (mine) => mine.id !== event.mineId,
-        )
       if (event.type === 'beacon-deployed' && this.snapshotState)
         this.snapshotState.beacons.push(structuredClone(event.beacon))
       if (event.type === 'barrage-released' && this.snapshotState)

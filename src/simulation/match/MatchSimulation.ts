@@ -43,7 +43,6 @@ import {
   type SerializedMatchState,
   type SimBeacon,
   type SimPlayer,
-  type SimMine,
   type SimProjectile,
   type TerrainOperation,
 } from './MatchState'
@@ -151,7 +150,6 @@ export class MatchSimulation {
       durationTicks: 0,
       wind: windForTurn(seed, 1),
       projectiles: [],
-      mines: [],
       beacons: [],
       activeAction: null,
       pendingExplosions: [],
@@ -160,7 +158,6 @@ export class MatchSimulation {
       winnerTeamId: null,
       isDraw: false,
       nextProjectileId: 1,
-      nextMineId: 1,
       nextBeaconId: 1,
       nextActionId: 1,
       nextTerrainSequence: 1,
@@ -248,7 +245,6 @@ export class MatchSimulation {
         this.advanceBeacons()
       }
       this.advancePlayers()
-      this.advanceMines()
       this.checkVictory()
       if (this.state.phase === 'settling') this.advanceSettling()
       if (this.state.phase === 'expired') this.advanceExpired()
@@ -343,8 +339,7 @@ export class MatchSimulation {
     } else if (activation.kind === 'target-position') {
       if (weapon.mechanic !== 'teleport' || !this.isValidTeleport(activation.target, player.id))
         return 'invalid-target'
-    } else if (weapon.mechanic !== 'mine' || !this.resolveMinePosition(player))
-      return 'invalid-placement'
+    }
     return null
   }
 
@@ -372,22 +367,6 @@ export class MatchSimulation {
         from,
         to: { ...player.position },
       })
-      this.beginSettling()
-    } else if (weapon.mechanic === 'mine' && activation.kind === 'self') {
-      const position = this.resolveMinePosition(player)!
-      const mine: SimMine = {
-        id: `mine-${this.state.nextMineId++}`,
-        actionId,
-        ownerId: player.id,
-        teamId: player.teamId,
-        weaponId: 'deployable-mine',
-        position,
-        radius: weapon.mineRadius,
-        triggerRadius: weapon.mineTriggerRadius,
-        armedTurn: this.state.turnNumber + 1,
-      }
-      this.state.mines.push(mine)
-      this.emit({ type: 'mine-deployed', mine: structuredClone(mine) })
       this.beginSettling()
     } else if (activation.kind === 'directional') {
       const projectile = this.spawnProjectile(
@@ -1264,53 +1243,6 @@ export class MatchSimulation {
         this.emit({ type: 'player-died', playerId: player.id })
       }
     }
-  }
-
-  private resolveMinePosition(player: SimPlayer): Vector | null {
-    const weapon = WEAPONS['deployable-mine']
-    const x = player.position.x + player.facing * (player.radius + weapon.mineRadius + 6)
-    if (x < weapon.mineRadius || x > this.state.worldWidth - weapon.mineRadius) return null
-    const surface = this.terrain.surfaceY(x, Math.max(0, player.position.y - player.radius))
-    if (surface === null || Math.abs(surface - (player.position.y + player.radius)) > 28) return null
-    const position = { x, y: surface - weapon.mineRadius }
-    if (this.terrain.isSolid(position.x, position.y)) return null
-    if (
-      this.state.mines.some(
-        (mine) =>
-          Math.hypot(mine.position.x - position.x, mine.position.y - position.y) <
-          mine.radius + weapon.mineRadius + 8,
-      )
-    )
-      return null
-    return position
-  }
-
-  private advanceMines(): void {
-    const remaining: SimMine[] = []
-    for (const mine of this.state.mines) {
-      if (!this.terrain.isSolid(mine.position.x, mine.position.y + mine.radius + 1)) continue
-      const target = this.state.players.find(
-        (player) =>
-          player.alive &&
-          player.teamId !== mine.teamId &&
-          this.state.turnNumber >= mine.armedTurn &&
-          Math.hypot(player.position.x - mine.position.x, player.position.y - mine.position.y) <
-            mine.triggerRadius + player.radius,
-      )
-      if (!target) {
-        remaining.push(mine)
-        continue
-      }
-      this.emit({
-        type: 'mine-triggered',
-        mineId: mine.id,
-        actionId: mine.actionId,
-        position: { ...mine.position },
-      })
-      this.explode(mine.position, WEAPONS[mine.weaponId], mine.actionId, mine.ownerId)
-      if (this.state.phase === 'input') this.beginSettling()
-    }
-    this.state.mines = remaining
   }
 
   private playerHitsWall(player: SimPlayer, candidateX: number): boolean {

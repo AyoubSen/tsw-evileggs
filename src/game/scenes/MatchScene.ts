@@ -776,8 +776,7 @@ export class MatchScene extends Phaser.Scene {
         this.bannerOverride = 'Choose safe ground'
         this.turnBannerDuration = 0.65
       }
-    } else if (this.selectedWeapon().aimMode === 'self')
-      this.send({ type: 'activate-weapon', activation: { kind: 'self' } })
+    }
     else {
       const aim = this.dragPreview ?? this.shotAim
       if (this.dragPreview) {
@@ -1455,7 +1454,15 @@ export class MatchScene extends Phaser.Scene {
       reaction?.fireWeapon === weaponId && policy.recoilDurationMs > 0
         ? Phaser.Math.Clamp(firedAge / (policy.recoilDurationMs / 1000), 0, 1)
         : 1
-    const recoil = policy.recoilDistance * (1 - recoilProgress)
+    const recoilPhase = 1 - recoilProgress
+    const recoilCurve = visual.transitionStyle === 'snap'
+      ? recoilPhase * recoilPhase
+      : visual.transitionStyle === 'siege-kick'
+        ? Math.sin(recoilPhase * Math.PI * 0.5)
+        : visual.transitionStyle === 'lob'
+          ? Math.sin(recoilPhase * Math.PI)
+          : recoilPhase
+    const recoil = policy.recoilDistance * recoilCurve
     let forward = normalizeDirection(direction, { x: facing, y: 0 })
     const firing = reaction?.fireWeapon === weaponId && firedAge >= 0 && recoilProgress < 1
     const poseId = poseIdForWeapon(visual.pose, firing)
@@ -1467,7 +1474,12 @@ export class MatchScene extends Phaser.Scene {
     })
     if (firing && !this.preferences.reducedMotion) {
       const side = Math.sign(facing) || 1
-      const poseRotation = baseComposition.pose.weaponRotation * side
+      const kick = visual.transitionStyle === 'siege-kick' ? 0.1
+        : visual.transitionStyle === 'lob' ? 0.055
+          : visual.transitionStyle === 'snap' ? 0.025
+            : visual.transitionStyle === 'spin' ? 0.035
+              : 0
+      const poseRotation = baseComposition.pose.weaponRotation * side - kick * recoilPhase * side
       const cosine = Math.cos(poseRotation)
       const sine = Math.sin(poseRotation)
       forward = {
@@ -1568,7 +1580,6 @@ export class MatchScene extends Phaser.Scene {
     }
     this.renderProjectileTrails()
     for (const projectile of this.source.state.projectiles) this.renderProjectile(projectile)
-    this.renderMines()
     this.renderBeacons()
   }
 
@@ -1648,29 +1659,6 @@ export class MatchScene extends Phaser.Scene {
       scale: visual.scale,
       palette,
     })
-  }
-
-  private renderMines(): void {
-    const visual = getWeaponVisual('deployable-mine')
-    const palette = this.projectilePalette('deployable-mine')
-    for (const mine of this.source.state.mines) {
-      const armed = this.source.state.turnNumber >= mine.armedTurn
-      this.overlayGraphics
-        .fillStyle(INK_COLOR, 0.55)
-        .fillEllipse(mine.position.x, mine.position.y + mine.radius, mine.radius * 2.8, 5)
-      drawShapeRecipe(this.overlayGraphics, visual.icon, {
-        origin: { x: mine.position.x, y: mine.position.y - 1 },
-        scale: mine.radius / 15,
-        palette,
-      })
-      this.overlayGraphics
-        .fillStyle(armed ? palette.flash : palette.neutral)
-        .fillCircle(mine.position.x, mine.position.y - mine.radius * 0.55, 2.2)
-      if (armed && !this.preferences.reducedMotion)
-        this.overlayGraphics
-          .lineStyle(1.5, palette.accent, 0.25 + Math.sin(this.visualTime * 7) * 0.1)
-          .strokeCircle(mine.position.x, mine.position.y, mine.radius + 3)
-    }
   }
 
   private renderBeacons(): void {
@@ -2427,13 +2415,6 @@ export class MatchScene extends Phaser.Scene {
         this.addBurst('teleport', event.from, 28, event.sequence, 'teleporter')
         this.addBurst('teleport', event.to, 34, event.sequence + 1, 'teleporter')
         return
-      case 'mine-deployed':
-        return
-      case 'mine-triggered':
-        this.actionFocus = { ...event.position }
-        this.actionFocusUntil = this.visualTime + (this.preferences.reducedMotion ? 0 : 0.55)
-        this.audio.play('mine-trigger')
-        return
       case 'beacon-deployed':
         this.audio.play('beacon-armed')
         return
@@ -2605,7 +2586,6 @@ export class MatchScene extends Phaser.Scene {
     const style = getWeaponVisual(weaponId).impactStyle
     const shakeIntensity: Partial<Record<ImpactStyle, number>> = {
       'heavy-blast': 0.007,
-      'mine-blast': 0.007,
       'siege-blast': 0.011,
       'bounce-blast': 0.006,
       'cluster-burst': 0.002,
@@ -2767,8 +2747,75 @@ export class MatchScene extends Phaser.Scene {
       }
 
       if (effect.kind === 'muzzle') {
-        const length = visual.transitionStyle === 'scatter' ? 18 : visual.transitionStyle === 'split' ? 14 : 12
-        const width = visual.transitionStyle === 'scatter' ? 12 : 7
+        if (visual.transitionStyle === 'snap') {
+          const tip = point(28 - progress * 9, 0)
+          this.overlayGraphics
+            .lineStyle(5, palette.accent, alpha * 0.65)
+            .lineBetween(effect.position.x, effect.position.y, tip.x, tip.y)
+            .lineStyle(2, palette.flash, alpha)
+            .lineBetween(effect.position.x, effect.position.y, tip.x, tip.y)
+          for (const offset of [-5, 5]) {
+            const start = point(3, offset)
+            const end = point(17 + progress * 5, offset * 0.25)
+            this.overlayGraphics.lineStyle(1.5, palette.highlight, alpha).lineBetween(start.x, start.y, end.x, end.y)
+          }
+          continue
+        }
+        if (visual.transitionStyle === 'spin') {
+          for (let ring = 0; ring < 3; ring += 1) {
+            const center = point(4 + ring * 5 + progress * 5, 0)
+            this.overlayGraphics
+              .lineStyle(2.5 - ring * 0.4, ring % 2 ? palette.flash : palette.accent, alpha)
+              .strokeCircle(center.x, center.y, 8 - ring * 1.5 + progress * 3)
+          }
+          for (const offset of [-1, 1]) {
+            const start = point(2, offset * 5)
+            const end = point(22 + progress * 8, offset * (10 - progress * 5))
+            this.overlayGraphics.lineStyle(2, palette.highlight, alpha).lineBetween(start.x, start.y, end.x, end.y)
+          }
+          continue
+        }
+        if (visual.transitionStyle === 'signal') {
+          for (let wave = 0; wave < 3; wave += 1) {
+            const center = point(5 + wave * 5 + progress * 9, 0)
+            this.overlayGraphics
+              .lineStyle(2.5, wave % 2 ? palette.flash : palette.accent, alpha)
+              .strokeCircle(center.x, center.y, 4 + wave * 3 + progress * 5)
+          }
+          const beam = point(24 + progress * 6, 0)
+          this.overlayGraphics.lineStyle(2, palette.flash, alpha).lineBetween(effect.position.x, effect.position.y, beam.x, beam.y)
+          continue
+        }
+        if (visual.transitionStyle === 'freeze') {
+          const center = point(7 + progress * 5, 0)
+          for (let spoke = 0; spoke < 8; spoke += 1) {
+            const angle = (spoke / 8) * Math.PI * 2
+            const radius = 7 + (spoke % 2) * 5 + progress * 5
+            this.overlayGraphics
+              .lineStyle(spoke % 2 ? 2 : 3, spoke % 2 ? palette.accent : palette.flash, alpha)
+              .lineBetween(center.x, center.y, center.x + Math.cos(angle) * radius, center.y + Math.sin(angle) * radius)
+          }
+          continue
+        }
+        if (visual.transitionStyle === 'siege-kick') {
+          const tip = point(30 - progress * 8, 0)
+          const upper = point(-2, -15 + progress * 5)
+          const lower = point(-2, 15 - progress * 5)
+          this.overlayGraphics
+            .fillStyle(palette.impact, alpha * 0.75)
+            .fillTriangle(upper.x, upper.y, lower.x, lower.y, tip.x, tip.y)
+            .lineStyle(4, palette.flash, alpha)
+            .lineBetween(point(0, -7).x, point(0, -7).y, tip.x, tip.y)
+            .lineBetween(point(0, 7).x, point(0, 7).y, tip.x, tip.y)
+          for (const offset of [-13, -7, 7, 13]) {
+            const smoke = point(-5 - progress * 12, offset)
+            this.overlayGraphics.fillStyle(palette.neutral, alpha * 0.45).fillCircle(smoke.x, smoke.y, 3 + progress * 4)
+          }
+          continue
+        }
+        const lob = visual.transitionStyle === 'lob'
+        const length = visual.transitionStyle === 'scatter' ? 18 : visual.transitionStyle === 'split' ? 14 : lob ? 15 : 12
+        const width = visual.transitionStyle === 'scatter' ? 12 : lob ? 10 : 7
         const tip = point(length * (1 - progress * 0.35), 0)
         const upper = point(1, -width * (1 - progress * 0.45))
         const lower = point(1, width * (1 - progress * 0.45))
@@ -2778,6 +2825,14 @@ export class MatchScene extends Phaser.Scene {
           .lineStyle(2, palette.accent, alpha)
           .lineBetween(upper.x, upper.y, tip.x, tip.y)
           .lineBetween(lower.x, lower.y, tip.x, tip.y)
+        if (lob) {
+          const pressure = point(2 - progress * 4, 0)
+          this.overlayGraphics
+            .lineStyle(2, palette.neutral, alpha * 0.65)
+            .strokeCircle(pressure.x, pressure.y, 7 + progress * 8)
+            .lineStyle(2, palette.flash, alpha)
+            .strokeCircle(pressure.x, pressure.y, 3 + progress * 5)
+        }
         if (visual.transitionStyle === 'split') {
           for (const offset of [-7, 0, 7]) {
             const spark = point(7 + progress * 8, offset)
@@ -2912,20 +2967,6 @@ export class MatchScene extends Phaser.Scene {
               effect.position.y + Math.sin(angle) * effect.radius * (0.45 + progress * 0.5),
             )
         }
-      if (effect.style === 'mine-blast') {
-        const groundWidth = effect.radius * (0.35 + progress * 0.55)
-        this.overlayGraphics
-          .lineStyle(4, palette.impact, alpha)
-          .lineBetween(effect.position.x - groundWidth, effect.position.y + 4, effect.position.x + groundWidth, effect.position.y + 4)
-          .lineStyle(2.5, palette.flash, alpha)
-        for (const offset of [-0.7, -0.35, 0, 0.35, 0.7])
-          this.overlayGraphics.lineBetween(
-            effect.position.x + offset * groundWidth * 0.45,
-            effect.position.y + 3,
-            effect.position.x + offset * groundWidth,
-            effect.position.y - effect.radius * (0.3 + (1 - Math.abs(offset)) * 0.4),
-          )
-      }
       if (effect.style === 'beacon-strike')
         for (const offset of [-8, 0, 8])
           this.overlayGraphics

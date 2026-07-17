@@ -28,7 +28,7 @@ import { APP_VERSION } from '../version'
 import type { ArsenalRules } from '../match/arsenal'
 
 export const PRIVATE_MATCH_ROOM = 'private_match'
-export const PROTOCOL_VERSION = 'private-room-15'
+export const PROTOCOL_VERSION = 'private-room-16'
 export { SIMULATION_SNAPSHOT_VERSION }
 export const CLIENT_BUILD_VERSION = APP_VERSION
 export const ROOM_CODE_LENGTH = 6
@@ -270,7 +270,6 @@ const matchCommandSchema = z.discriminatedUnion('type', [
             ),
           })
           .strict(),
-        z.object({ kind: z.literal('self') }).strict(),
       ]),
     })
     .strict(),

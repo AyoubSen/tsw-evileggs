@@ -1,6 +1,6 @@
 import type { LocalMatchConfig } from '../../match/config'
 import type { WeaponId } from '../../weapons/registry'
-import type { SimBeacon, SimMine, SimProjectile, TerrainOperation } from './MatchState'
+import type { SimBeacon, SimProjectile, TerrainOperation } from './MatchState'
 import type { Vector } from '../../shared/types'
 import type { TeamId } from '../../maps/registry'
 import type { ProjectileBoundaryEdge } from '../projectile/contact'
@@ -113,13 +113,6 @@ export type MatchEvent =
       playerId: string
       from: Vector
       to: Vector
-    })
-  | (EventEnvelope & { type: 'mine-deployed'; mine: SimMine })
-  | (EventEnvelope & {
-      type: 'mine-triggered'
-      mineId: string
-      actionId: string
-      position: Vector
     })
   | (EventEnvelope & { type: 'beacon-deployed'; beacon: SimBeacon })
   | (EventEnvelope & {

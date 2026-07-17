@@ -6,7 +6,7 @@ import type { PlayerAppearance } from '../../players/appearanceRegistry'
 
 export const SIMULATION_HZ = 60
 export const FIXED_TICK_SECONDS = 1 / SIMULATION_HZ
-export const SIMULATION_SNAPSHOT_VERSION = 11
+export const SIMULATION_SNAPSHOT_VERSION = 12
 
 export type MatchPhase = 'input' | 'projectile' | 'settling' | 'expired' | 'victory'
 
@@ -40,18 +40,6 @@ export type SimProjectile = {
   velocity: Vector
   radius: number
   fuseTicks: number
-}
-
-export type SimMine = {
-  id: string
-  actionId: string
-  ownerId: string
-  teamId: TeamId
-  weaponId: 'deployable-mine'
-  position: Vector
-  radius: number
-  triggerRadius: number
-  armedTurn: number
 }
 
 export type SimBeacon = {
@@ -101,7 +89,6 @@ export type MatchState = {
   durationTicks: number
   wind: number
   projectiles: SimProjectile[]
-  mines: SimMine[]
   beacons: SimBeacon[]
   activeAction: ActiveAction
   pendingExplosions: []
@@ -110,7 +97,6 @@ export type MatchState = {
   winnerTeamId: TeamId | null
   isDraw: boolean
   nextProjectileId: number
-  nextMineId: number
   nextBeaconId: number
   nextActionId: number
   nextTerrainSequence: number
