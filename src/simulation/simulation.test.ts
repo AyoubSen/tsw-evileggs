@@ -304,12 +304,18 @@ describe('maps', () => {
     expect(getMap('crater-basin').id).toBe('rolling-hills')
     expect(MAPS['ruined-foundry']).toMatchObject({ revision: 2 })
     expect(MAPS['ruined-foundry'].objects).toHaveLength(2)
-    const [left, right] = MAPS['ruined-foundry'].objects
+    const reflectors = MAPS['ruined-foundry'].objects.filter(
+      (object) => object.type === 'reflector-wall',
+    )
+    const [left, right] = reflectors
     expect(left.id < right.id).toBe(true)
     expect(left.start.x + right.end.x).toBe(1440)
     expect(left.end.x + right.start.x).toBe(1440)
     expect(left.start.y).toBe(right.end.y)
     expect(left.end.y).toBe(right.start.y)
-    expect(MAP_ORDER.filter((id) => MAPS[id].objects.length > 0)).toEqual(['ruined-foundry'])
+    expect(MAP_ORDER.filter((id) => MAPS[id].objects.length > 0)).toEqual([
+      'twin-peaks',
+      'ruined-foundry',
+    ])
   })
 })

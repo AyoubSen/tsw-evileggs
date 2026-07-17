@@ -8,7 +8,10 @@ import {
   isRoomCode,
   normalizeRoomCode,
 } from './protocol'
-import { DEFAULT_PLAYER_APPEARANCES } from '../players/appearanceRegistry'
+import {
+  DEFAULT_PLAYER_APPEARANCES,
+  sanitizePlayerAppearance,
+} from '../players/appearanceRegistry'
 
 describe('online protocol validation', () => {
   it('normalizes human-entered room codes', () => {
@@ -91,12 +94,12 @@ describe('online protocol validation', () => {
 
   it('reports explicit compatibility failures', () => {
     expect(CURRENT_COMPATIBILITY).toMatchObject({
-      protocol: 'private-room-12',
-      snapshot: 9,
+      protocol: 'private-room-13',
+      snapshot: 10,
       maps: 'maps-9',
       weapons: 'weapons-4',
-      appearances: 'appearances-2',
-      build: '1.10.2',
+      appearances: 'appearances-3.0.0',
+      build: '1.11.0',
     })
     expect(compatibilityError(CURRENT_COMPATIBILITY)).toBeNull()
     expect(compatibilityError({ ...CURRENT_COMPATIBILITY, maps: 'maps-old' })).toMatch(
@@ -117,6 +120,12 @@ describe('online protocol validation', () => {
       playerAppearance: DEFAULT_PLAYER_APPEARANCES[0],
     }
     expect(joinRoomOptionsSchema.safeParse(join).success).toBe(true)
+    expect(
+      joinRoomOptionsSchema.safeParse({
+        ...join,
+        playerAppearance: { ...DEFAULT_PLAYER_APPEARANCES[0], version: 1 },
+      }).success,
+    ).toBe(false)
     expect(joinRoomOptionsSchema.safeParse({ ...join, playerAppearance: undefined }).success).toBe(
       false,
     )
@@ -132,6 +141,13 @@ describe('online protocol validation', () => {
         playerAppearance: { ...DEFAULT_PLAYER_APPEARANCES[0], extra: true },
       }).success,
     ).toBe(false)
+  })
+
+  it('migrates v1 appearances without changing their six existing selections', () => {
+    const current = DEFAULT_PLAYER_APPEARANCES[4]
+    const { victoryStyle: _victoryStyle, ...legacy } = current
+    const migrated = sanitizePlayerAppearance({ ...legacy, version: 1 })
+    expect(migrated).toEqual({ ...current, victoryStyle: 'proud' })
   })
 
   it('admits the new official maps only for their supported team modes', () => {

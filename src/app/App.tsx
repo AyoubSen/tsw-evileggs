@@ -35,9 +35,20 @@ import {
   PLAYER_FACES,
   PLAYER_PATTERNS,
   PLAYER_PRIMARY_COLORS,
+  PLAYER_PREVIEW_BACKGROUNDS,
+  PLAYER_VICTORY_STYLES,
+  analyzeAppearanceReadability,
   randomPlayerAppearance,
   type PlayerAppearance,
 } from '../players/appearanceRegistry'
+import type { PlayerPoseId } from '../players/playerVisualRecipes'
+import type { WeaponId } from '../weapons/registry'
+import {
+  MAX_OUTFIT_PRESETS,
+  makeOutfitPreset,
+  sanitizeOutfitPresetName,
+  type OutfitPreset,
+} from '../profile/outfitPresets'
 
 type Screen =
   | 'menu'
@@ -173,6 +184,19 @@ function colorHex(color: number): string {
 function MapPreview({ mapId }: { mapId: MapId }) {
   const map = MAPS[mapId]
   const preview = mapPreviewData(map)
+  const objectSegments: Array<{
+    objectId: string
+    aperture: { start: { x: number; y: number }; end: { x: number; y: number } }
+    label: 'A' | 'B' | null
+  }> = []
+  for (const object of map.objects) {
+    if (object.type === 'projectile-portal') {
+      objectSegments.push(
+        { objectId: object.id, aperture: object.entrance, label: 'A' },
+        { objectId: object.id, aperture: object.exit, label: 'B' },
+      )
+    } else objectSegments.push({ objectId: object.id, aperture: object, label: null })
+  }
   const materialColors = [
     'transparent',
     colorHex(map.theme.terrain),
@@ -211,9 +235,7 @@ function MapPreview({ mapId }: { mapId: MapId }) {
         ))}
       </g>
       <g className="map-preview-reflectors">
-        {map.objects.flatMap((object) => object.type === 'projectile-portal'
-          ? ([['A', object.entrance], ['B', object.exit]] as const).map(([label, aperture]) => ({ object, aperture, label }))
-          : [{ object, aperture: object, label: null }]).map(({ object, aperture, label }) => {
+        {objectSegments.map(({ objectId, aperture, label }) => {
           const startX = (aperture.start.x / map.width) * MAP_PREVIEW_WIDTH
           const startY = (aperture.start.y / map.height) * MAP_PREVIEW_HEIGHT
           const endX = (aperture.end.x / map.width) * MAP_PREVIEW_WIDTH
@@ -224,7 +246,7 @@ function MapPreview({ mapId }: { mapId: MapId }) {
           const normalX = -dy / length
           const normalY = dx / length
           return (
-            <g key={`${object.id}-${label ?? 'wall'}`} className={label ? `map-preview-portal portal-${label.toLowerCase()}` : undefined}>
+            <g key={`${objectId}-${label ?? 'wall'}`} className={label ? `map-preview-portal portal-${label.toLowerCase()}` : undefined}>
               <line className="map-preview-reflector-outer" x1={startX} y1={startY} x2={endX} y2={endY} />
               <line className="map-preview-reflector-inner" x1={startX} y1={startY} x2={endX} y2={endY} />
               {[0.25, 0.5, 0.75].map((position) => {
@@ -509,24 +531,71 @@ const APPEARANCE_GROUPS = [
   { field: 'accentColor', label: 'Accent', entries: PLAYER_ACCENT_COLORS },
   { field: 'pattern', label: 'Pattern', entries: PLAYER_PATTERNS },
   { field: 'face', label: 'Face', entries: PLAYER_FACES },
+  { field: 'victoryStyle', label: 'Victory style', entries: PLAYER_VICTORY_STYLES },
   { field: 'accessory', label: 'Accessory', entries: PLAYER_ACCESSORIES },
 ] as const
 
+function PresetNameEditor({ preset, onSave }: { preset: OutfitPreset; onSave: (name: string) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(preset.name)
+  const cancel = () => { setDraft(preset.name); setEditing(false) }
+  const save = () => { onSave(draft); setEditing(false) }
+  if (!editing) return <button type="button" className="preset-name" onClick={() => { setDraft(preset.name); setEditing(true) }}>{preset.name}</button>
+  return <span className="preset-name-editor"><input autoFocus aria-label={`Rename ${preset.name}`} value={draft} maxLength={24} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); save() } else if (event.key === 'Escape') { event.preventDefault(); cancel() } }} onBlur={(event) => { if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node)) cancel() }} /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={save}>Save</button><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={cancel}>Cancel</button></span>
+}
+
 function CustomizePlayer({
   appearances,
+  presets,
   selectedSlot,
   onSelectSlot,
   onChange,
+  onPresetsChange,
   onBack,
 }: {
   appearances: readonly PlayerAppearance[]
+  presets: readonly OutfitPreset[]
   selectedSlot: number
   onSelectSlot: (slot: number) => void
   onChange: (slot: number, appearance: PlayerAppearance) => void
+  onPresetsChange: (presets: OutfitPreset[]) => void
   onBack: () => void
 }) {
-  const [teamBackground, setTeamBackground] = useState(true)
+  const [previewContrast, setPreviewContrast] = useState<'normal' | 'high'>('normal')
+  const [previewState, setPreviewState] = useState<'idle' | 'aiming' | 'firing' | 'hurt' | 'frozen' | 'defeated' | 'victory'>('aiming')
+  const [previewFacing, setPreviewFacing] = useState<-1 | 1>(1)
+  const [previewWeapon, setPreviewWeapon] = useState<WeaponId>('basic-rocket')
+  const [presetName, setPresetName] = useState('')
   const appearance = appearances[selectedSlot] ?? DEFAULT_PLAYER_APPEARANCES[selectedSlot]
+  const readability = analyzeAppearanceReadability(appearance)
+  const previewPose: PlayerPoseId = previewState === 'aiming' || previewState === 'frozen' ? 'aim' : previewState === 'firing' ? 'fire' : previewState === 'hurt' ? 'idle' : previewState
+  const previewWeapons: readonly { id: WeaponId; label: string }[] = [
+    { id: 'basic-rocket', label: 'Two-hand launcher' },
+    { id: 'pocket-knife', label: 'One-hand melee' },
+    { id: 'old-shoe', label: 'Thrown weapon' },
+    { id: 'deployable-mine', label: 'Placement tool' },
+    { id: 'siege-bazooka', label: 'Heavy weapon' },
+    { id: 'teleporter', label: 'Device' },
+  ]
+  const uniquePresetId = () => {
+    let id: string
+    do id = globalThis.crypto?.randomUUID?.() ?? `outfit-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    while (presets.some((preset) => preset.id === id))
+    return id
+  }
+  const savePreset = () => {
+    if (presets.length >= MAX_OUTFIT_PRESETS) return
+    onPresetsChange([...presets, makeOutfitPreset(uniquePresetId(), presetName, appearance, Date.now())])
+    setPresetName('')
+  }
+  const updatePreset = (id: string, changes: Partial<Pick<OutfitPreset, 'name' | 'appearance'>>) =>
+    onPresetsChange(presets.map((preset) => preset.id === id ? {
+      ...preset,
+      ...changes,
+      name: sanitizeOutfitPresetName(changes.name ?? preset.name),
+      appearance: { ...(changes.appearance ?? preset.appearance) },
+      updatedAt: Date.now(),
+    } : preset))
   return (
     <section className="panel customize-panel">
       <header className="screen-heading">
@@ -551,22 +620,51 @@ function CustomizePlayer({
               </button>
             ))}
           </div>
-          <div className="large-avatar-preview">
-            <PlayerAvatar
-              appearance={appearance}
-              teamId={selectedSlot % 2}
-              teamBackground={teamBackground}
-              label={`Player ${selectedSlot + 1} appearance preview`}
-            />
+          <div className="team-preview-grid" aria-label="Appearance on both team backgrounds">
+            {PLAYER_PREVIEW_BACKGROUNDS.map((background) => <figure className="large-avatar-preview" key={background.teamId}>
+              <PlayerAvatar appearance={appearance} teamId={background.teamId} teamBackground highContrast={previewContrast === 'high'} label={`${background.label} preview`} pose={previewPose} facing={previewFacing} weaponId={previewState === 'idle' || previewState === 'defeated' || previewState === 'victory' ? undefined : previewWeapon} hurt={previewState === 'hurt'} frozen={previewState === 'frozen'} />
+              <figcaption>{background.label} · {readability.backgroundContrast.find((item) => item.teamId === background.teamId)!.ratio.toFixed(1)}:1</figcaption>
+            </figure>)}
           </div>
-          <label className="toggle customize-team-toggle">
-            <input type="checkbox" checked={teamBackground} onChange={(event) => setTeamBackground(event.target.checked)} />
-            Preview team background
-          </label>
+          <div className="combat-preview-controls">
+            <label>Combat state<select value={previewState} onChange={(event) => setPreviewState(event.target.value as typeof previewState)}>{['idle', 'aiming', 'firing', 'hurt', 'frozen', 'defeated', 'victory'].map((state) => <option key={state} value={state}>{state[0].toUpperCase() + state.slice(1)}</option>)}</select></label>
+            <label>Facing<select value={previewFacing} onChange={(event) => setPreviewFacing(Number(event.target.value) as -1 | 1)}><option value={1}>Right</option><option value={-1}>Left</option></select></label>
+            <label className="combat-weapon-control">Representative weapon<select value={previewWeapon} onChange={(event) => setPreviewWeapon(event.target.value as WeaponId)}>{previewWeapons.map((weapon) => <option key={weapon.id} value={weapon.id}>{weapon.label}</option>)}</select></label>
+          </div>
+          <div className="compact-hud-preview"><PlayerAvatar appearance={appearance} teamId={selectedSlot % 2} teamBackground highContrast={previewContrast === 'high'} compact label="Compact HUD and timeline portrait preview" /><span><strong>P{selectedSlot + 1} · HUD / timeline</strong><i><b /></i></span></div>
+          <fieldset className="preview-contrast-toggle"><legend>Preview contrast</legend><button type="button" aria-pressed={previewContrast === 'normal'} onClick={() => setPreviewContrast('normal')}>Normal</button><button type="button" aria-pressed={previewContrast === 'high'} onClick={() => setPreviewContrast('high')}>High contrast</button></fieldset>
+          <div className={`readability-report ${readability.warnings.length ? 'has-warnings' : ''}`} role="status" aria-live="polite">
+            <strong>Readability check</strong>
+            <span>Primary/accent {readability.primaryAccentContrast.toFixed(1)}:1 · ink {readability.inkContrast.toFixed(1)}:1 · face {readability.faceContrast.toFixed(1)}:1 · {readability.compactSafe ? 'compact safe' : 'compact warning'} · {readability.highContrastSafe ? 'high contrast safe' : 'high contrast warning'}</span>
+            {readability.warnings.length ? <ul>{readability.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : <p>No readability warnings.</p>}
+          </div>
           <div className="actions customize-random-actions">
             <button type="button" onClick={() => onChange(selectedSlot, randomPlayerAppearance())}>Randomize</button>
             <button type="button" className="secondary" onClick={() => onChange(selectedSlot, { ...DEFAULT_PLAYER_APPEARANCES[selectedSlot] })}>Reset</button>
           </div>
+          <section className="preset-library" aria-labelledby="preset-library-title">
+            <div className="preset-heading">
+              <h3 id="preset-library-title">Outfit presets</h3>
+              <span>{presets.length}/{MAX_OUTFIT_PRESETS}</span>
+            </div>
+            <div className="preset-save-row">
+              <label htmlFor="preset-name">Preset name</label>
+              <input id="preset-name" value={presetName} maxLength={24} placeholder="Outfit" onChange={(event) => setPresetName(event.target.value)} />
+              <button type="button" onClick={savePreset} disabled={presets.length >= MAX_OUTFIT_PRESETS}>Save current</button>
+            </div>
+            {presets.length === 0 ? <p className="preset-empty">No saved outfits yet.</p> : <ul className="preset-list">
+              {presets.slice(0, MAX_OUTFIT_PRESETS).map((preset) => <li key={preset.id}>
+                <PlayerAvatar appearance={preset.appearance} label={`${preset.name} outfit`} compact />
+                <PresetNameEditor preset={preset} onSave={(name) => updatePreset(preset.id, { name })} />
+                <div className="preset-actions">
+                  <button type="button" onClick={() => onChange(selectedSlot, { ...preset.appearance })}>Apply to P{selectedSlot + 1}</button>
+                  <button type="button" onClick={() => updatePreset(preset.id, { appearance })}>Replace</button>
+                  <button type="button" disabled={presets.length >= MAX_OUTFIT_PRESETS} onClick={() => onPresetsChange([...presets, makeOutfitPreset(uniquePresetId(), `${preset.name} copy`, preset.appearance, Date.now())])}>Duplicate</button>
+                  <button type="button" className="preset-delete" onClick={() => onPresetsChange(presets.filter((item) => item.id !== preset.id))}>Delete</button>
+                </div>
+              </li>)}
+            </ul>}
+          </section>
         </aside>
         <div className="appearance-galleries">
           {APPEARANCE_GROUPS.map((group) => (
@@ -766,7 +864,8 @@ export function App() {
         current.playerNames.every((name, index) => name === authoritativeConfig.playerNames[index]) &&
         current.playerAppearances.length === authoritativeConfig.playerAppearances.length &&
         current.playerAppearances.every((appearance, index) =>
-          JSON.stringify(appearance) === JSON.stringify(authoritativeConfig.playerAppearances[index]))
+          JSON.stringify(appearance) === JSON.stringify(authoritativeConfig.playerAppearances[index]),
+        )
           ? current
           : authoritativeConfig,
       )
@@ -1202,9 +1301,11 @@ export function App() {
       return (
         <CustomizePlayer
           appearances={preferences.playerAppearances}
+          presets={preferences.outfitPresets}
           selectedSlot={customizeSlot}
           onSelectSlot={setCustomizeSlot}
           onChange={updatePlayerAppearance}
+          onPresetsChange={(outfitPresets) => setPreferences((current) => ({ ...current, outfitPresets }))}
           onBack={() => setScreen(customizeReturnScreen)}
         />
       )
@@ -1898,6 +1999,7 @@ export function App() {
                   <PlayerAvatar
                     key={index}
                     appearance={result.config.playerAppearances[index]}
+                    pose="victory"
                     teamId={index % 2}
                     label={result.config.playerNames[index]}
                   />

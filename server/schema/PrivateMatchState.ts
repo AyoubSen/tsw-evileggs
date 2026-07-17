@@ -32,12 +32,13 @@ export const RoomPlayerState = schema({
   facing: { type: 'int8', default: 1 },
   selectedWeapon: { type: 'string', default: 'basic-rocket' },
   ammunition: { map: 'int16', default: new MapSchema<number>() },
-  version: { type: 'uint8', default: 1 },
+  version: { type: 'uint8', default: 2 },
   body: { type: 'string', default: 'classic' },
   primaryColor: { type: 'string', default: 'shell' },
   accentColor: { type: 'string', default: 'gold' },
   pattern: { type: 'string', default: 'solid' },
   face: { type: 'string', default: 'smile' },
+  victoryStyle: { type: 'string', default: 'proud' },
   accessory: { type: 'string', default: 'none' },
 })
 export type RoomPlayerState = SchemaType<typeof RoomPlayerState>
@@ -149,6 +150,7 @@ function projectPlayer(target: RoomPlayerState, source: SimPlayer): void {
   target.accentColor = source.appearance.accentColor
   target.pattern = source.appearance.pattern
   target.face = source.appearance.face
+  target.victoryStyle = source.appearance.victoryStyle
   target.accessory = source.appearance.accessory
   for (const weaponId of WEAPON_ORDER)
     target.ammunition.set(weaponId, ammo(source.inventory[weaponId]))

@@ -565,14 +565,20 @@ export class MatchSimulation {
             y: (movementEnd.y - movementStart.y) * (1 - impact.toi),
           }
           if (mode === 'wrap') {
+            const edge = impact.edge === 'left' || impact.edge === 'right' ? impact.edge : null
+            if (!edge) {
+              removedAtBoundary = true
+              impact = null
+              break
+            }
             const to = {
-              x: impact.edge === 'left' ? this.state.worldWidth - projectile.radius : projectile.radius,
+              x: edge === 'left' ? this.state.worldWidth - projectile.radius : projectile.radius,
               y: impact.position.y,
             }
             this.emit({
               type: 'projectile-wrapped',
               projectileId: projectile.id,
-              edge: impact.edge,
+              edge,
               from: { ...impact.position },
               to: { ...to },
               velocity: { ...velocity },

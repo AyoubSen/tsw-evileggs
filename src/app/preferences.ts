@@ -8,14 +8,20 @@ import {
 import { getMap, type MapId, type MatchMode } from '../maps/registry'
 import {
   DEFAULT_PLAYER_APPEARANCES,
-  sanitizePlayerAppearance,
+  migratePlayerAppearance,
   type PlayerAppearance,
 } from '../players/appearanceRegistry'
+import {
+  LocalOutfitPresetRepository,
+  migrateOutfitPresets,
+  type OutfitPreset,
+} from '../profile/outfitPresets'
 
 export type Preferences = {
-  version: 2
+  version: 4
   playerNames: string[]
   playerAppearances: PlayerAppearance[]
+  outfitPresets: OutfitPreset[]
   lastMode: MatchMode
   lastMapId: MapId
   turnDurationSeconds: TurnDuration
@@ -32,9 +38,10 @@ export type Preferences = {
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
-  version: 2,
+  version: 4,
   playerNames: [...DEFAULT_PLAYER_NAMES],
   playerAppearances: DEFAULT_PLAYER_APPEARANCES.map((appearance) => ({ ...appearance })),
+  outfitPresets: [],
   lastMode: '1v1',
   lastMapId: 'rolling-hills',
   turnDurationSeconds: 30,
@@ -51,6 +58,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
 }
 
 const storageKey = `${BRAND.storageNamespace}:preferences`
+const outfitPresetStorageKey = `${BRAND.storageNamespace}:outfit-presets`
 
 export function loadPreferences(
   storage: Storage | undefined = globalThis.localStorage,
@@ -62,10 +70,10 @@ export function loadPreferences(
     if (
       !parsed ||
       typeof parsed !== 'object' ||
-      ![1, 2].includes((parsed as { version?: number }).version ?? 0)
+      ![1, 2, 3, 4].includes((parsed as { version?: number }).version ?? 0)
     )
       return DEFAULT_PREFERENCES
-    const value = parsed as Partial<Preferences> & { version: 1 | 2 }
+    const value = parsed as Partial<Preferences> & { version: 1 | 2 | 3 | 4 }
     const playerNames = DEFAULT_PLAYER_NAMES.map((fallback, index) => {
       const name = value.playerNames?.[index]
       return typeof name === 'string' && name.trim() ? name.trim().slice(0, 18) : fallback
@@ -78,14 +86,31 @@ export function loadPreferences(
       projectileBoundaryMode: value.projectileBoundaryMode,
       playerAppearances: value.playerAppearances,
     })
+    const quarantinedAppearances: unknown[] = []
+    const playerAppearances = DEFAULT_PLAYER_APPEARANCES.map((fallback, index) => {
+      const source = value.playerAppearances?.[index]
+      const migrated = migratePlayerAppearance(source)
+      if (source !== undefined && !migrated) quarantinedAppearances.push(source)
+      return migrated ?? { ...fallback }
+    })
+    if (quarantinedAppearances.length)
+      storage?.setItem(`${BRAND.storageNamespace}:quarantine:appearances`, JSON.stringify(quarantinedAppearances))
+    const repositoryRecords = new LocalOutfitPresetRepository(
+      storage,
+      outfitPresetStorageKey,
+    )
+      .load()
+      .records.filter((record): record is OutfitPreset => record.deleted !== true)
     return {
       ...DEFAULT_PREFERENCES,
       ...config,
       playerNames,
-      playerAppearances: DEFAULT_PLAYER_APPEARANCES.map((fallback, index) =>
-        sanitizePlayerAppearance(value.playerAppearances?.[index], fallback),
-      ),
-      version: 2,
+      playerAppearances,
+      outfitPresets:
+        repositoryRecords.length > 0
+          ? repositoryRecords
+          : migrateOutfitPresets(value.outfitPresets),
+      version: 4,
       lastMode: config.mode,
       lastMapId: getMap(config.mapId).id,
       projectileBoundaryMode: config.projectileBoundaryMode,
@@ -118,7 +143,13 @@ export function savePreferences(
   storage: Storage | undefined = globalThis.localStorage,
 ): void {
   try {
-    storage?.setItem(storageKey, JSON.stringify(preferences))
+    const { outfitPresets, ...storedPreferences } = preferences
+    storage?.setItem(storageKey, JSON.stringify(storedPreferences))
+    new LocalOutfitPresetRepository(storage, outfitPresetStorageKey).save({
+      version: 1,
+      records: outfitPresets,
+      quarantined: [],
+    })
   } catch {
     // Storage can be blocked by privacy settings; the game remains usable without it.
   }

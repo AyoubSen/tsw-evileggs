@@ -3,7 +3,7 @@ import type { LocalMatchConfig } from '../match/config'
 import type { RoomPhase } from './protocol'
 import {
   DEFAULT_PLAYER_APPEARANCES,
-  sanitizePlayerAppearance,
+  validatePlayerAppearance,
   type PlayerAppearance,
 } from '../players/appearanceRegistry'
 
@@ -99,7 +99,18 @@ export function roomViewFromSchema(state: RawRoomState): OnlineRoomView {
     weaponRegistryVersion: state.weaponRegistryVersion,
     appearanceRegistryVersion: state.appearanceRegistryVersion,
     players: [...state.players.values()]
-      .map((player) => ({
+      .map((player) => {
+        const appearance = {
+          version: player.version,
+          body: player.body,
+          primaryColor: player.primaryColor,
+          accentColor: player.accentColor,
+          pattern: player.pattern,
+          face: player.face,
+          victoryStyle: player.victoryStyle,
+          accessory: player.accessory,
+        }
+        return ({
         playerId: player.playerId,
         sessionId: player.sessionId,
         seat: player.seat,
@@ -117,8 +128,11 @@ export function roomViewFromSchema(state: RawRoomState): OnlineRoomView {
         x: 'x' in player ? Number(player.x) : 0,
         y: 'y' in player ? Number(player.y) : 0,
         health: 'health' in player ? Number(player.health) : 100,
-        appearance: sanitizePlayerAppearance(player, DEFAULT_PLAYER_APPEARANCES[player.seat]),
-      }))
+        appearance: validatePlayerAppearance(appearance)
+          ? appearance
+          : { ...DEFAULT_PLAYER_APPEARANCES[player.seat] },
+        })
+      })
       .sort((left, right) => left.seat - right.seat),
     result: {
       available: state.result.available,

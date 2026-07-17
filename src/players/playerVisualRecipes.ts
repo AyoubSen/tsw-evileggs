@@ -4,10 +4,37 @@ import type {
   PlayerBodyId,
   PlayerFaceId,
   PlayerPatternId,
+  PlayerVictoryStyleId,
 } from './appearanceRegistry'
+import { PLAYER_ACCESSORIES, PLAYER_BODIES } from './appearanceRegistry'
+import type { PoseKind } from '../game/weaponVisualRecipes'
+import type { WeaponId } from '../weapons/registry'
+import { getWeaponVisual } from '../game/weaponVisualRecipes'
 
 export type PlayerVisualRole = 'primary' | 'accent' | 'ink' | 'face' | 'shine'
 export type PlayerVisualPoint = Readonly<{ x: number; y: number }>
+export type PlayerPoseId = 'idle' | 'aim' | 'fire' | 'throw' | 'place' | 'melee' | 'defeated' | 'victory'
+export type PlayerExpressionState = 'normal' | 'hurt' | 'frozen' | 'defeated' | 'victory'
+export const PLAYER_RENDER_LAYERS = ['rear-accessories', 'rear-arm-hands', 'body-pattern-face', 'front-accessories', 'front-arm-hands', 'weapon', 'team-overlay', 'status-overlay'] as const
+export type PlayerRenderLayer = (typeof PLAYER_RENDER_LAYERS)[number]
+export type PlayerRig = Readonly<{
+  shoulder: PlayerVisualPoint
+  rearHand: PlayerVisualPoint
+  frontHand: PlayerVisualPoint
+  weaponGrip: PlayerVisualPoint
+  faceSafe: PlayerVisualPoint
+  accessory: PlayerVisualPoint
+  accessoryFit: Readonly<{ x: number; y: number; scale: number }>
+}>
+export type ResolvedPlayerPose = Readonly<{
+  id: PlayerPoseId
+  rig: PlayerRig
+  rearArm: Readonly<{ shoulder: PlayerVisualPoint; hand: PlayerVisualPoint }>
+  frontArm: Readonly<{ shoulder: PlayerVisualPoint; hand: PlayerVisualPoint }> | null
+  weaponOrigin: PlayerVisualPoint
+  bodyOffset: PlayerVisualPoint
+  weaponRotation: number
+}>
 export type PlayerPathCommand =
   | Readonly<{ kind: 'move' | 'line'; x: number; y: number }>
   | Readonly<{ kind: 'curve'; x1: number; y1: number; x2: number; y2: number; x: number; y: number }>
@@ -23,7 +50,27 @@ export type PlayerVisualRecipe = Readonly<{
   viewBox: Readonly<{ width: 128; height: 120 }>
   body: PlayerVisualPrimitive
   pattern: readonly PlayerVisualPrimitive[]
-  details: readonly PlayerVisualPrimitive[]
+  face: readonly PlayerVisualPrimitive[]
+  rearAccessories: readonly PlayerVisualPrimitive[]
+  frontAccessories: readonly PlayerVisualPrimitive[]
+}>
+export type ResolvedPlayerComposition = Readonly<{
+  origin: PlayerVisualPoint
+  direction: PlayerVisualPoint
+  scale: number
+  mirror: boolean
+  pose: ResolvedPlayerPose
+  progress: number
+  recipe: PlayerVisualRecipe
+  weaponId?: WeaponId
+  weaponScale: number
+  layers: typeof PLAYER_RENDER_LAYERS
+}>
+
+export type CompactPlayerRecipe = Readonly<{
+  body: PlayerVisualPrimitive
+  patternMarks: readonly PlayerVisualPrimitive[]
+  accessoryMarks: readonly PlayerVisualPrimitive[]
 }>
 
 const M = (x: number, y: number): PlayerPathCommand => ({ kind: 'move', x, y })
@@ -47,11 +94,11 @@ const BODIES: Record<PlayerBodyId, PlayerVisualPrimitive> = {
 
 const PATTERNS: Record<PlayerPatternId, readonly PlayerVisualPrimitive[]> = {
   solid: [],
-  spots: [circle(45, 43, 5, 'accent'), circle(79, 38, 4, 'accent'), circle(39, 75, 4, 'accent'), circle(83, 78, 6, 'accent')],
-  stripes: [0, 18, 36].map((offset) => path([M(39 + offset, 31), C(47 + offset, 48, 49 + offset, 71, 43 + offset, 89)], undefined, 'accent', 7)),
-  split: [path([M(64, 16), L(95, 30), L(99, 83), L(83, 99), L(64, 102), Z], 'accent')],
-  zigzag: [path([M(34, 43), L(45, 53), L(56, 43), L(67, 53), L(78, 43), L(93, 54)], undefined, 'accent', 5), path([M(31, 72), L(43, 82), L(55, 72), L(67, 82), L(79, 72), L(96, 82)], undefined, 'accent', 5)],
-  speckled: [circle(42, 38, 2.2, 'accent'), circle(75, 31, 1.6, 'accent'), circle(88, 54, 2, 'accent'), circle(37, 68, 1.5, 'accent'), circle(59, 84, 2.2, 'accent'), circle(83, 80, 1.5, 'accent')],
+  spots: [circle(48, 45, 4, 'accent'), circle(77, 42, 3, 'accent'), circle(47, 74, 3, 'accent'), circle(78, 76, 4, 'accent')],
+  stripes: [0, 14, 28].map((offset) => path([M(43 + offset, 38), C(47 + offset, 50, 47 + offset, 67, 43 + offset, 82)], undefined, 'accent', 5)),
+  split: [path([M(64, 29), L(82, 36), L(84, 78), L(76, 87), L(64, 90), Z], 'accent')],
+  zigzag: [path([M(43, 45), L(51, 52), L(59, 45), L(67, 52), L(75, 45), L(84, 52)], undefined, 'accent', 4), path([M(43, 71), L(51, 78), L(59, 71), L(67, 78), L(75, 71), L(84, 78)], undefined, 'accent', 4)],
+  speckled: [circle(47, 42, 2, 'accent'), circle(73, 38, 1.5, 'accent'), circle(82, 54, 2, 'accent'), circle(45, 67, 1.5, 'accent'), circle(59, 82, 2, 'accent'), circle(79, 78, 1.5, 'accent')],
 }
 
 const EYES = (kind: PlayerFaceId): readonly PlayerVisualPrimitive[] => {
@@ -70,6 +117,19 @@ const MOUTHS: Record<PlayerFaceId, PlayerVisualPrimitive> = {
   cheery: path([M(51, 69), C(58, 84, 71, 84, 77, 69)], 'accent', 'ink', 2),
 }
 
+const STATE_FACES: Record<Exclude<PlayerExpressionState, 'normal' | 'victory'>, readonly PlayerVisualPrimitive[]> = {
+  hurt: [path([M(43, 53), L(55, 60), M(55, 53), L(43, 60)], undefined, 'ink', 2.5), path([M(73, 60), L(85, 53), M(73, 53), L(85, 60)], undefined, 'ink', 2.5), path([M(54, 78), C(60, 69, 69, 69, 75, 78)], undefined, 'ink', 2.5)],
+  frozen: [path([M(44, 57), L(55, 57)], undefined, 'ink', 3), path([M(73, 57), L(84, 57)], undefined, 'ink', 3), path([M(54, 75), L(74, 75)], undefined, 'ink', 2.5)],
+  defeated: [path([M(44, 53), L(55, 62), M(55, 53), L(44, 62)], undefined, 'ink', 2.5), path([M(73, 53), L(84, 62), M(84, 53), L(73, 62)], undefined, 'ink', 2.5), path([M(54, 77), C(60, 70, 68, 70, 75, 77)], undefined, 'ink', 2.5)],
+}
+
+const VICTORY_FACES: Record<PlayerVictoryStyleId, readonly PlayerVisualPrimitive[]> = {
+  proud: [circle(50, 57, 3, 'ink'), circle(78, 57, 3, 'ink'), path([M(51, 69), C(58, 82, 71, 82, 77, 69)], 'face', 'ink', 2)],
+  excited: [path([M(43, 58), C(48, 50, 53, 50, 57, 58)], undefined, 'ink', 2.5), path([M(71, 58), C(76, 50, 81, 50, 85, 58)], undefined, 'ink', 2.5), ellipse(64, 75, 8, 10, 'face', 'ink', 2.5)],
+  smug: [path([M(44, 57), L(55, 55)], undefined, 'ink', 2.5), path([M(73, 55), L(84, 57)], undefined, 'ink', 2.5), path([M(53, 73), C(62, 79, 70, 75, 76, 69)], undefined, 'ink', 2.5)],
+  calm: [path([M(44, 57), C(48, 60, 52, 60, 56, 57)], undefined, 'ink', 2.5), path([M(72, 57), C(76, 60, 80, 60, 84, 57)], undefined, 'ink', 2.5), path([M(55, 72), C(61, 77, 68, 77, 74, 72)], undefined, 'ink', 2.5)],
+}
+
 const ACCESSORIES: Record<PlayerAccessoryId, readonly PlayerVisualPrimitive[]> = {
   none: [],
   cap: [path([M(37, 31), C(50, 10, 75, 12, 88, 31), L(88, 39), L(38, 39), Z], 'accent', 'ink', 3), path([M(77, 37), C(88, 36, 97, 38, 102, 40), C(95, 45, 85, 45, 77, 43), Z], 'accent', 'ink', 2.5)],
@@ -81,17 +141,143 @@ const ACCESSORIES: Record<PlayerAccessoryId, readonly PlayerVisualPrimitive[]> =
   mohawk: [path([M(44, 25), L(52, 6), L(61, 21), L(69, 2), L(76, 22), L(86, 9), L(88, 33), Z], 'accent', 'ink', 3)],
 }
 
-export function getPlayerVisualRecipe(appearance: Readonly<PlayerAppearance>): PlayerVisualRecipe {
+function transformPrimitive(item: PlayerVisualPrimitive, x: number, y: number, scale: number): PlayerVisualPrimitive {
+  const point = (px: number, py: number) => ({ x: 64 + (px - 64) * scale + x, y: 29 + (py - 29) * scale + y })
+  if (item.kind === 'circle') {
+    const center = point(item.cx, item.cy)
+    return { ...item, cx: center.x, cy: center.y, radius: item.radius * scale }
+  }
+  if (item.kind === 'ellipse') {
+    const center = point(item.cx, item.cy)
+    return { ...item, cx: center.x, cy: center.y, radiusX: item.radiusX * scale, radiusY: item.radiusY * scale }
+  }
+  return { ...item, commands: item.commands.map((command) => {
+    if (command.kind === 'close') return command
+    const end = point(command.x, command.y)
+    if (command.kind !== 'curve') return { ...command, ...end }
+    const first = point(command.x1, command.y1)
+    const second = point(command.x2, command.y2)
+    return { ...command, x1: first.x, y1: first.y, x2: second.x, y2: second.y, ...end }
+  }) }
+}
+
+export type AccessoryFitResult = Readonly<{ safe: boolean; bounds: Readonly<{ left: number; top: number; right: number; bottom: number }>; primitives: readonly PlayerVisualPrimitive[]; reason?: string }>
+
+function primitiveBounds(items: readonly PlayerVisualPrimitive[]) {
+  const points: { x: number; y: number }[] = []
+  for (const item of items) {
+    if (item.kind === 'circle') points.push({ x: item.cx - item.radius, y: item.cy - item.radius }, { x: item.cx + item.radius, y: item.cy + item.radius })
+    else if (item.kind === 'ellipse') points.push({ x: item.cx - item.radiusX, y: item.cy - item.radiusY }, { x: item.cx + item.radiusX, y: item.cy + item.radiusY })
+    else for (const command of item.commands) {
+      if (command.kind === 'close') continue
+      points.push({ x: command.x, y: command.y })
+      if (command.kind === 'curve') points.push({ x: command.x1, y: command.y1 }, { x: command.x2, y: command.y2 })
+    }
+  }
+  return { left: Math.min(...points.map((p) => p.x), 64), top: Math.min(...points.map((p) => p.y), 60), right: Math.max(...points.map((p) => p.x), 64), bottom: Math.max(...points.map((p) => p.y), 60) }
+}
+
+export function resolveAccessoryFit(body: PlayerBodyId, accessory: PlayerAccessoryId): AccessoryFitResult {
+  const metadata = PLAYER_ACCESSORIES.find((entry) => entry.id === accessory)!.recipe
+  const rig = getPlayerRig(body)
+  const fitY = metadata.category === 'face' ? rig.faceSafe.y - 64 : rig.accessoryFit.y
+  const fitScale = metadata.category === 'face' ? 1 : rig.accessoryFit.scale
+  const primitives = ACCESSORIES[accessory].map((item) => transformPrimitive(item, rig.accessoryFit.x, fitY, fitScale))
+  const bounds = primitiveBounds(primitives)
+  const safe = metadata.occludesEyes < 2 && !metadata.occludesMouth && bounds.left >= 0 && bounds.right <= 128 && bounds.top >= 0 && bounds.bottom <= 110
+  return Object.freeze({ safe, bounds: Object.freeze(bounds), primitives: Object.freeze(primitives), reason: safe ? undefined : 'Accessory metadata or fitted geometry exceeds the character safe area.' })
+}
+
+export function getPlayerVisualRecipe(appearance: Readonly<PlayerAppearance>, expressionState: PlayerExpressionState = 'normal'): PlayerVisualRecipe {
+  const metadata = PLAYER_ACCESSORIES.find((entry) => entry.id === appearance.accessory)!.recipe
+  const fit = resolveAccessoryFit(appearance.body, appearance.accessory)
+  if (!fit.safe) throw new Error(`Unsafe accessory ${appearance.accessory} for body ${appearance.body}: ${fit.reason}`)
+  const accessories = fit.primitives
+  const rearAccessory = metadata.category === 'rear'
   return {
     viewBox: { width: 128, height: 120 },
     body: BODIES[appearance.body],
     pattern: PATTERNS[appearance.pattern],
-    details: [
+    face: [
       path([M(43, 33), C(49, 26, 58, 23, 65, 24)], undefined, 'shine', 4),
-      ...EYES(appearance.face),
-      MOUTHS[appearance.face],
-      ...ACCESSORIES[appearance.accessory],
+      ...(expressionState === 'normal' ? [...EYES(appearance.face), MOUTHS[appearance.face]] : expressionState === 'victory' ? VICTORY_FACES[appearance.victoryStyle] : STATE_FACES[expressionState]),
     ],
+    rearAccessories: rearAccessory ? accessories : [],
+    frontAccessories: rearAccessory ? [] : accessories,
+  }
+}
+
+const COMPACT_ACCESSORY_MARKS: Record<PlayerAccessoryId, readonly PlayerVisualPrimitive[]> = {
+  none: [], cap: [path([M(43, 42), L(83, 42), L(91, 46)], undefined, 'accent', 4)],
+  crown: [path([M(45, 42), L(50, 32), L(59, 40), L(66, 29), L(75, 40), L(84, 32), L(87, 43)], undefined, 'accent', 3)],
+  headband: [path([M(42, 44), L(86, 44)], undefined, 'accent', 5)],
+  glasses: [circle(53, 58, 6, undefined, 'accent', 3), circle(75, 58, 6, undefined, 'accent', 3)],
+  eyepatch: [circle(75, 58, 6, 'accent', 'ink', 2)],
+  bow: [path([M(43, 43), L(31, 36), L(32, 49), Z], 'accent'), path([M(43, 43), L(54, 36), L(53, 49), Z], 'accent')],
+  mohawk: [path([M(48, 40), L(54, 29), L(61, 39), L(68, 27), L(76, 40)], undefined, 'accent', 4)],
+}
+
+export function getCompactPlayerRecipe(appearance: Readonly<PlayerAppearance>): CompactPlayerRecipe {
+  return Object.freeze({ body: BODIES[appearance.body], patternMarks: PATTERNS[appearance.pattern], accessoryMarks: COMPACT_ACCESSORY_MARKS[appearance.accessory] })
+}
+
+export function resolvePlayerComposition(options: Readonly<{ appearance: Readonly<PlayerAppearance>; origin?: PlayerVisualPoint; direction?: PlayerVisualPoint; scale?: number; mirror?: boolean; pose?: PlayerPoseId; progress?: number; weaponId?: WeaponId; expressionState?: PlayerExpressionState }>): ResolvedPlayerComposition {
+  const progress = Math.max(0, Math.min(1, options.progress ?? 1))
+  const weapon = options.weaponId ? getWeaponVisual(options.weaponId) : undefined
+  return Object.freeze({
+    origin: options.origin ?? { x: 64, y: 60 }, direction: options.direction ?? { x: options.mirror ? -1 : 1, y: 0 },
+    scale: options.scale ?? 1, mirror: options.mirror ?? false, progress,
+    pose: resolvePlayerPose(options.appearance.body, options.pose ?? 'idle', weapon?.pose, progress),
+    recipe: getPlayerVisualRecipe(options.appearance, options.expressionState), weaponId: options.weaponId,
+    weaponScale: weapon?.heldScale ?? 1, layers: PLAYER_RENDER_LAYERS,
+  })
+}
+
+export function getPlayerRig(body: PlayerBodyId): PlayerRig {
+  return PLAYER_BODIES.find((entry) => entry.id === body)!.recipe.rig
+}
+
+export function poseIdForWeapon(pose: PoseKind, firing = false): PlayerPoseId {
+  if (pose === 'throw') return 'throw'
+  if (pose === 'place') return 'place'
+  if (pose === 'one-hand') return 'melee'
+  return firing ? 'fire' : 'aim'
+}
+
+export function resolvePlayerPose(
+  body: PlayerBodyId,
+  id: PlayerPoseId,
+  weaponPose: PoseKind = 'two-hand',
+  fireProgress = 1,
+): ResolvedPlayerPose {
+  const rig = getPlayerRig(body)
+  const oneHanded = weaponPose === 'one-hand' || weaponPose === 'throw' || weaponPose === 'place'
+  const poseRotation = id === 'melee' ? -0.72 + fireProgress * 1.18 : id === 'throw' ? -0.9 * (1 - fireProgress) : id === 'place' ? 0.35 * (1 - fireProgress) : 0
+  const bodyOffset = id === 'defeated' ? { x: 0, y: 5 } : id === 'victory' ? { x: 0, y: -3 } : { x: 0, y: 0 }
+  return {
+    id,
+    rig,
+    rearArm: { shoulder: rig.shoulder, hand: rig.rearHand },
+    frontArm: oneHanded ? null : { shoulder: { x: rig.shoulder.x + 6, y: rig.shoulder.y - 7 }, hand: rig.frontHand },
+    weaponOrigin: rig.weaponGrip,
+    bodyOffset,
+    weaponRotation: poseRotation,
+  }
+}
+
+export function resolveWeaponHandAnchors(
+  pose: ResolvedPlayerPose,
+  grip: PlayerVisualPoint,
+  bodyLength: number,
+  muzzleX: number,
+  modelScale: number,
+): Readonly<{ grip: PlayerVisualPoint; support: PlayerVisualPoint | null }> {
+  return {
+    grip: { x: grip.x * modelScale, y: grip.y * modelScale },
+    support: pose.frontArm ? {
+      x: Math.min(bodyLength * 0.62, muzzleX - 5) * modelScale,
+      y: grip.y * 0.35 * modelScale,
+    } : null,
   }
 }
 

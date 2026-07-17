@@ -21,13 +21,15 @@ import {
   PLAYER_FACES,
   PLAYER_PATTERNS,
   PLAYER_PRIMARY_COLORS,
+  PLAYER_VICTORY_STYLES,
   type PlayerAppearance,
 } from '../players/appearanceRegistry'
+import { APP_VERSION } from '../version'
 
 export const PRIVATE_MATCH_ROOM = 'private_match'
-export const PROTOCOL_VERSION = 'private-room-12'
+export const PROTOCOL_VERSION = 'private-room-13'
 export { SIMULATION_SNAPSHOT_VERSION }
-export const CLIENT_BUILD_VERSION = '1.10.2'
+export const CLIENT_BUILD_VERSION = APP_VERSION
 export const ROOM_CODE_LENGTH = 6
 export const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/
 export const NETWORK_MESSAGE_TYPE = 'room'
@@ -154,12 +156,13 @@ const compatibilitySchema = z
 
 const playerAppearanceSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
     body: z.enum(PLAYER_BODIES.map(({ id }) => id)),
     primaryColor: z.enum(PLAYER_PRIMARY_COLORS.map(({ id }) => id)),
     accentColor: z.enum(PLAYER_ACCENT_COLORS.map(({ id }) => id)),
     pattern: z.enum(PLAYER_PATTERNS.map(({ id }) => id)),
     face: z.enum(PLAYER_FACES.map(({ id }) => id)),
+    victoryStyle: z.enum(PLAYER_VICTORY_STYLES.map(({ id }) => id)),
     accessory: z.enum(PLAYER_ACCESSORIES.map(({ id }) => id)),
   })
   .strict()

@@ -26,11 +26,14 @@ import { NetworkConfigurationError, joinHttpUrl, runtimeNetworkConfig } from './
 import { waitForGameServer } from './serverWarmup'
 import {
   DEFAULT_PLAYER_APPEARANCES,
-  sanitizePlayerAppearance,
+  validatePlayerAppearance,
   type PlayerAppearance,
 } from '../players/appearanceRegistry'
+import { BRAND } from '../app/branding'
+import { resolveAccessoryFit } from '../players/playerVisualRecipes'
 
-export const ONLINE_RECONNECT_STORAGE_KEY = 'toybox-artillery:online-reconnection'
+export const ONLINE_RECONNECT_STORAGE_KEY = `${BRAND.storageNamespace}:online-reconnection`
+const LEGACY_ONLINE_RECONNECT_STORAGE_KEY = 'toybox-artillery:online-reconnection'
 
 type ConnectionStatus = 'connected' | 'reconnecting' | 'failed' | 'left'
 export type ConnectionQuality = 'unknown' | 'good' | 'fair' | 'poor'
@@ -204,6 +207,7 @@ export class OnlineRoomSession {
       throwIfOnlineStartupAborted(signal)
       await waitForGameServer(signal)
       const client = new Client(runtimeNetworkConfig().colyseusUrl)
+      if (!validatePlayerAppearance(config.playerAppearances[0]) || !resolveAccessoryFit(config.playerAppearances[0].body, config.playerAppearances[0].accessory).safe) throw new Error('Invalid or unsafe player appearance.')
       const options: CreateRoomOptions = {
         playerName,
         mode: config.mode,
@@ -211,7 +215,7 @@ export class OnlineRoomSession {
         projectileBoundaryMode: config.projectileBoundaryMode,
         turnDurationSeconds: config.turnDurationSeconds,
         compatibility: CURRENT_COMPATIBILITY,
-        playerAppearance: sanitizePlayerAppearance(config.playerAppearances[0]),
+        playerAppearance: { ...config.playerAppearances[0] },
       }
       const room = await client.create(PRIVATE_MATCH_ROOM, options)
       if (signal?.aborted) {
@@ -240,9 +244,10 @@ export class OnlineRoomSession {
       const roomId = await resolvePrivateRoom(code, signal)
       throwIfOnlineStartupAborted(signal)
       const client = new Client(runtimeNetworkConfig().colyseusUrl)
+      if (!validatePlayerAppearance(playerAppearance) || !resolveAccessoryFit(playerAppearance.body, playerAppearance.accessory).safe) throw new Error('Invalid or unsafe player appearance.')
       const options: JoinRoomOptions = {
         playerName,
-        playerAppearance: sanitizePlayerAppearance(playerAppearance),
+        playerAppearance: { ...playerAppearance },
         compatibility: CURRENT_COMPATIBILITY,
       }
       const room = await client.joinById(roomId, options)
@@ -262,6 +267,11 @@ export class OnlineRoomSession {
     let token: string | null
     try {
       token = sessionStorage.getItem(ONLINE_RECONNECT_STORAGE_KEY)
+      if (!token) {
+        token = sessionStorage.getItem(LEGACY_ONLINE_RECONNECT_STORAGE_KEY)
+        if (token) sessionStorage.setItem(ONLINE_RECONNECT_STORAGE_KEY, token)
+      }
+      sessionStorage.removeItem(LEGACY_ONLINE_RECONNECT_STORAGE_KEY)
     } catch {
       return null
     }

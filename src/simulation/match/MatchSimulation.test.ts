@@ -202,7 +202,9 @@ describe('framework-independent weapons', () => {
       ['cryo-shot', 'primary'],
     ]
     const map = getMap('ruined-foundry')
-    const object = map.objects[0]
+    const object = map.objects.find((candidate) => candidate.type === 'reflector-wall')
+    expect(object?.type).toBe('reflector-wall')
+    if (!object || object.type !== 'reflector-wall') throw new Error('Reflector fixture missing.')
     const dx = object.end.x - object.start.x
     const dy = object.end.y - object.start.y
     const length = Math.hypot(dx, dy)

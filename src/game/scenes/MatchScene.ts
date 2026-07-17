@@ -62,7 +62,12 @@ import {
   PLAYER_PRIMARY_COLORS,
 } from '../../players/appearanceRegistry'
 import {
-  getPlayerVisualRecipe,
+  getCompactPlayerRecipe,
+  poseIdForWeapon,
+  resolvePlayerComposition,
+  resolveWeaponHandAnchors,
+  type PlayerRenderLayer,
+  type PlayerExpressionState,
   type PlayerVisualPrimitive,
   type PlayerVisualRole,
 } from '../../players/playerVisualRecipes'
@@ -1227,31 +1232,35 @@ export class MatchScene extends Phaser.Scene {
     defeated = false,
     alpha = 1,
     teamOutline?: number,
+    layer?: PlayerRenderLayer,
+    expressionState: PlayerExpressionState = 'normal',
+    compact = false,
   ): void {
     const look = this.playerAppearance(player)
-    const recipe = getPlayerVisualRecipe(player.appearance)
+    const composition = resolvePlayerComposition({ appearance: player.appearance, origin: { x, y }, scale: size / 80, mirror: facing < 0, expressionState })
+    const recipe = composition.recipe
+    const compactRecipe = compact ? getCompactPlayerRecipe(player.appearance) : null
     const s = size / 80
     const bodyY = y + (defeated ? 5 * s : 0)
     const primary = hurt ? 0xffffff : this.preferences.highContrastHud ? 0xb8b8b8 : look.primary
     const accent = this.preferences.highContrastHud ? 0xffffff : look.accent
     const ink = this.preferences.highContrastHud ? 0x080808 : INK_COLOR
     const palette = { primary, accent, ink, face: 0xfff1c9, shine: 0xfff8df }
-    this.drawPlayerPrimitive(graphics, recipe.body, x, bodyY, s, facing, palette, alpha)
-    for (const primitive of recipe.pattern)
-      this.drawPlayerPrimitive(graphics, primitive, x, bodyY, s, facing, palette, alpha)
-    this.drawPlayerPrimitive(
-      graphics,
-      { ...recipe.body, fill: undefined },
-      x,
-      bodyY,
-      s,
-      facing,
-      palette,
-      alpha,
-    )
-    for (const primitive of recipe.details)
-      this.drawPlayerPrimitive(graphics, primitive, x, bodyY, s, facing, palette, alpha)
-    if (teamOutline !== undefined)
+    if (!layer || layer === 'rear-accessories')
+      for (const primitive of recipe.rearAccessories)
+        this.drawPlayerPrimitive(graphics, primitive, x, bodyY, s, facing, palette, alpha)
+    if (!layer || layer === 'body-pattern-face') {
+      this.drawPlayerPrimitive(graphics, compactRecipe?.body ?? recipe.body, x, bodyY, s, facing, palette, alpha)
+      for (const primitive of compactRecipe?.patternMarks ?? recipe.pattern)
+        this.drawPlayerPrimitive(graphics, primitive, x, bodyY, s, facing, palette, alpha)
+      this.drawPlayerPrimitive(graphics, { ...recipe.body, fill: undefined }, x, bodyY, s, facing, palette, alpha)
+      if (!compact) for (const primitive of recipe.face)
+          this.drawPlayerPrimitive(graphics, primitive, x, bodyY, s, facing, palette, alpha)
+    }
+    if (!layer || layer === 'front-accessories')
+      for (const primitive of compactRecipe?.accessoryMarks ?? recipe.frontAccessories)
+        this.drawPlayerPrimitive(graphics, primitive, x, bodyY, s, facing, palette, alpha)
+    if ((!layer || layer === 'body-pattern-face') && teamOutline !== undefined)
       this.drawPlayerPrimitive(
         graphics,
         { ...recipe.body, fill: undefined, stroke: 'accent', strokeWidth: 5 },
@@ -1288,6 +1297,15 @@ export class MatchScene extends Phaser.Scene {
           ? -Math.abs(Math.sin(this.visualTime * 7)) * 7
           : 0
       const y = player.position.y + bob + victoryBob
+      const expressionState: PlayerExpressionState = defeated
+        ? 'defeated'
+        : player.frozenTurnsRemaining > 0
+          ? 'frozen'
+          : hurt
+            ? 'hurt'
+            : victory
+              ? 'victory'
+              : 'normal'
       const scale = ACTOR_VISUAL_SCALE
       const shadowY =
         this.source
@@ -1296,6 +1314,12 @@ export class MatchScene extends Phaser.Scene {
       this.actorGraphics
         .fillStyle(0x473b31, 0.7)
         .fillEllipse(x + 3 * scale, shadowY + 7 * scale, 32 * scale, 9 * scale)
+      this.drawAppearance(this.actorGraphics, player, x, y, 34 * scale, facing, hurt, defeated, 1, undefined, 'rear-accessories')
+      if (!defeated)
+        this.renderHeldWeapon(
+          { x, y }, weaponPose.direction, weaponPose.weaponId, reaction, facing,
+          player.appearance.body, 'rear',
+        )
       this.drawAppearance(
         this.actorGraphics,
         player,
@@ -1307,7 +1331,10 @@ export class MatchScene extends Phaser.Scene {
         defeated,
         1,
         TEAM_COLORS[player.teamId],
+        'body-pattern-face',
+        expressionState,
       )
+      this.drawAppearance(this.actorGraphics, player, x, y, 34 * scale, facing, hurt, defeated, 1, undefined, 'front-accessories')
       if (victory)
         this.actorGraphics
           .fillStyle(0xf7bd3f)
@@ -1336,6 +1363,8 @@ export class MatchScene extends Phaser.Scene {
           weaponPose.weaponId,
           reaction,
           facing,
+          player.appearance.body,
+          'front',
         )
     })
   }
@@ -1391,6 +1420,8 @@ export class MatchScene extends Phaser.Scene {
     weaponId: WeaponId,
     reaction: Reaction | undefined,
     facing: number,
+    body: SimPlayer['appearance']['body'],
+    layer: 'rear' | 'front',
   ): void {
     const presentation = getWeaponPresentation(weaponId)
     const visual = getWeaponVisual(weaponId)
@@ -1406,14 +1437,7 @@ export class MatchScene extends Phaser.Scene {
     const firing = reaction?.fireWeapon === weaponId && firedAge >= 0 && recoilProgress < 1
     if (firing && !this.preferences.reducedMotion) {
       const side = Math.sign(facing) || 1
-      const poseRotation =
-        visual.pose === 'one-hand'
-          ? (-0.72 + recoilProgress * 1.18) * side
-          : visual.pose === 'throw'
-            ? -0.9 * (1 - recoilProgress) * side
-            : visual.pose === 'place'
-              ? 0.35 * (1 - recoilProgress) * side
-              : 0
+      const poseRotation = resolvePlayerComposition({ appearance: { ...this.source.activePlayer.appearance, body }, weaponId, pose: poseIdForWeapon(visual.pose, true), progress: recoilProgress }).pose.weaponRotation * side
       const cosine = Math.cos(poseRotation)
       const sine = Math.sin(poseRotation)
       forward = {
@@ -1439,22 +1463,26 @@ export class MatchScene extends Phaser.Scene {
     const handedness = heldWeaponHandedness(forward, facing)
     const posePoint = (x: number, y: number) =>
       transformLocalPoint(origin, forward, { x, y: y * handedness })
-    const local = (x: number, y: number) =>
-      posePoint(x * modelScale, y * modelScale)
-    const grip = local(presentation.grip.x, presentation.grip.y)
-    const support = local(
-      Math.min(presentation.body.length * 0.62, presentation.muzzle.x - 5),
-      presentation.grip.y * 0.35,
-    )
-    const shoulderBack = posePoint(-5, 4.5)
-    const shoulderFront = posePoint(1, -2.5)
+    const poseId = poseIdForWeapon(visual.pose, firing)
+    const characterPose = resolvePlayerComposition({ appearance: { ...this.source.activePlayer.appearance, body }, origin, direction: forward, scale: modelScale, mirror: handedness < 0, weaponId, pose: poseId, progress: recoilProgress }).pose
+    const hands = resolveWeaponHandAnchors(characterPose, presentation.grip, presentation.body.length, presentation.muzzle.x, modelScale)
+    const grip = posePoint(hands.grip.x, hands.grip.y * handedness)
+    const support = hands.support ? posePoint(hands.support.x, hands.support.y * handedness) : null
+    const bodyScale = (34 * ACTOR_VISUAL_SCALE) / 80
+    const bodyPoint = (point: Readonly<{ x: number; y: number }>) => ({
+      x: actorCenter.x + (point.x - 64) * bodyScale * Math.sign(facing || 1),
+      y: actorCenter.y + (point.y - 60) * bodyScale,
+    })
+    const shoulderBack = bodyPoint(characterPose.rearArm.shoulder)
+    const shoulderFront = characterPose.frontArm ? bodyPoint(characterPose.frontArm.shoulder) : null
 
-    this.actorGraphics
+    if (layer === 'rear') this.actorGraphics
       .lineStyle(7, INK_COLOR)
       .lineBetween(shoulderBack.x, shoulderBack.y, grip.x, grip.y)
       .lineStyle(4, 0xffdca8)
       .lineBetween(shoulderBack.x, shoulderBack.y, grip.x, grip.y)
-    if (visual.pose !== 'one-hand' && visual.pose !== 'throw' && visual.pose !== 'place')
+    if (layer === 'rear') return
+    if (shoulderFront && support)
       this.actorGraphics
         .lineStyle(7, INK_COLOR)
         .lineBetween(shoulderFront.x, shoulderFront.y, support.x, support.y)
@@ -1473,7 +1501,7 @@ export class MatchScene extends Phaser.Scene {
       .fillCircle(grip.x, grip.y, 4.2)
       .fillStyle(0xffe2b2)
       .fillCircle(grip.x, grip.y, 2.5)
-    if (visual.pose !== 'one-hand' && visual.pose !== 'throw' && visual.pose !== 'place')
+    if (support)
       this.actorGraphics
         .fillStyle(INK_COLOR)
         .fillCircle(support.x, support.y, 4.2)
@@ -1910,7 +1938,7 @@ export class MatchScene extends Phaser.Scene {
     }
 
     this.hudGraphics.fillStyle(HUD_SHADOW, alpha).fillCircle(portraitX + (left ? 1 : -1), y + 21, 15)
-    this.drawAppearance(this.hudGraphics, player, portraitX, y + 19, 24, left ? 1 : -1, false, !player.alive, alpha)
+    this.drawAppearance(this.hudGraphics, player, portraitX, y + 19, 24, left ? 1 : -1, false, !player.alive, alpha, undefined, undefined, 'normal', true)
     this.hudGraphics.lineStyle(2, HUD_PAPER, alpha).strokeCircle(portraitX, y + 19, 14)
 
     if (!player.alive)
@@ -2024,7 +2052,7 @@ export class MatchScene extends Phaser.Scene {
         .lineStyle(current ? 4 : 3, teamColor)
         .strokeCircle(x, tokenY, radius)
 
-      this.drawAppearance(this.hudGraphics, player, x, tokenY, current ? 25 : 20, 1, false, !player.alive)
+      this.drawAppearance(this.hudGraphics, player, x, tokenY, current ? 25 : 20, 1, false, !player.alive, 1, undefined, undefined, 'normal', true)
       if (current) {
         if (ratio > 0)
           this.hudGraphics

@@ -26,7 +26,7 @@ import {
   resolveTeleportDestination,
 } from '../simulation/weapons/teleport'
 import { WEAPON_ORDER, WEAPONS, type WeaponInventory } from '../weapons/registry'
-import { sanitizePlayerAppearance } from '../players/appearanceRegistry'
+import { validatePlayerAppearance } from '../players/appearanceRegistry'
 
 type StateListener = (state: MatchState) => void
 type PendingCommand = {
@@ -60,6 +60,7 @@ type SchemaPlayer = {
   pattern: string
   face: string
   accessory: string
+  victoryStyle: string
 }
 
 type SchemaProjectile = {
@@ -459,7 +460,19 @@ export class OnlineMatchSource implements MatchSource {
       if (projected.teamId === 0 || projected.teamId === 1) player.teamId = projected.teamId
       if (Number.isSafeInteger(projected.teamSlot)) player.teamSlot = projected.teamSlot
       player.selectedWeapon = projected.selectedWeapon
-      player.appearance = sanitizePlayerAppearance(projected, player.appearance)
+      const projectedAppearance = {
+        version: projected.version,
+        body: projected.body,
+        primaryColor: projected.primaryColor,
+        accentColor: projected.accentColor,
+        pattern: projected.pattern,
+        face: projected.face,
+        victoryStyle: projected.victoryStyle,
+        accessory: projected.accessory,
+      }
+      player.appearance = validatePlayerAppearance(projectedAppearance)
+        ? projectedAppearance
+        : player.appearance
       player.inventory = Object.fromEntries(
         WEAPON_ORDER.map((weaponId) => [weaponId, ammo(projected.ammunition.get(weaponId) ?? 0)]),
       ) as WeaponInventory

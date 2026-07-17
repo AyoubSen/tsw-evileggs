@@ -184,6 +184,7 @@ export class PrivateMatchRoom extends Room<{
     player.accentColor = appearance.accentColor
     player.pattern = appearance.pattern
     player.face = appearance.face
+    player.victoryStyle = appearance.victoryStyle
     player.accessory = appearance.accessory
     this.state.players.set(playerId, player)
     client.userData = {
@@ -345,6 +346,7 @@ export class PrivateMatchRoom extends Room<{
           accentColor: player!.accentColor,
           pattern: player!.pattern,
           face: player!.face,
+          victoryStyle: player!.victoryStyle,
           accessory: player!.accessory,
         }),
       ),

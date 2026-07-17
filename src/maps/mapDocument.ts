@@ -272,11 +272,12 @@ function cloneProjectileBoundary(value: unknown): ProjectileBoundary {
   exactKeys(source, PROJECTILE_BOUNDARY_KEYS, 'Projectile boundary')
   if (!Array.isArray(source.supportedModes) || source.supportedModes.length === 0)
     throw new Error('Projectile boundary supported modes must be a non-empty array.')
-  if (source.supportedModes.some((mode) => !PROJECTILE_BOUNDARY_MODES.includes(mode as ProjectileBoundaryMode)))
+  const supportedModes = source.supportedModes as unknown[]
+  if (supportedModes.some((mode) => !PROJECTILE_BOUNDARY_MODES.includes(mode as ProjectileBoundaryMode)))
     throw new Error('Projectile boundary contains an unknown supported mode.')
-  if (new Set(source.supportedModes).size !== source.supportedModes.length)
+  if (new Set(supportedModes).size !== supportedModes.length)
     throw new Error('Projectile boundary supported modes must not contain duplicates.')
-  if (!source.supportedModes.includes(source.defaultMode))
+  if (!supportedModes.includes(source.defaultMode))
     throw new Error('Projectile boundary default mode must be supported.')
   if (
     !Number.isFinite(source.reflectionVelocityRetention) ||
@@ -286,7 +287,7 @@ function cloneProjectileBoundary(value: unknown): ProjectileBoundary {
     throw new Error('Projectile boundary reflection velocity retention must be between 0.1 and 1.')
   return {
     defaultMode: source.defaultMode as ProjectileBoundaryMode,
-    supportedModes: PROJECTILE_BOUNDARY_MODES.filter((mode) => source.supportedModes.includes(mode)),
+    supportedModes: PROJECTILE_BOUNDARY_MODES.filter((mode) => supportedModes.includes(mode)),
     reflectionVelocityRetention: source.reflectionVelocityRetention as number,
   }
 }
@@ -638,7 +639,7 @@ export function createHeightFieldDocument(source: HeightFieldSource): MapDocumen
     height: source.height,
     theme: source.theme,
     spawns,
-    objects: source.objects ? source.objects.map(cloneObject).sort(compareObjectIds) : [],
+    objects: source.objects ? source.objects.map((object) => cloneObject(object)).sort(compareObjectIds) : [],
     projectileBoundary: cloneProjectileBoundary(source.projectileBoundary ?? DEFAULT_PROJECTILE_BOUNDARY),
     terrain: {
       encoding: 'row-rle-v1',
@@ -679,7 +680,7 @@ export function createShapeMapDocument(source: ShapeMapSource): MapDocument {
     height: source.height,
     theme: source.theme,
     spawns: source.spawns,
-    objects: source.objects ? source.objects.map(cloneObject).sort(compareObjectIds) : [],
+    objects: source.objects ? source.objects.map((object) => cloneObject(object)).sort(compareObjectIds) : [],
     projectileBoundary: cloneProjectileBoundary(source.projectileBoundary ?? DEFAULT_PROJECTILE_BOUNDARY),
     terrain: {
       encoding: 'row-rle-v1',
