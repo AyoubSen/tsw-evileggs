@@ -208,6 +208,39 @@ function MapPreview({ mapId }: { mapId: MapId }) {
           />
         ))}
       </g>
+      <g className="map-preview-reflectors">
+        {map.objects.map((object) => {
+          const startX = (object.start.x / map.width) * MAP_PREVIEW_WIDTH
+          const startY = (object.start.y / map.height) * MAP_PREVIEW_HEIGHT
+          const endX = (object.end.x / map.width) * MAP_PREVIEW_WIDTH
+          const endY = (object.end.y / map.height) * MAP_PREVIEW_HEIGHT
+          const dx = endX - startX
+          const dy = endY - startY
+          const length = Math.hypot(dx, dy) || 1
+          const normalX = -dy / length
+          const normalY = dx / length
+          return (
+            <g key={object.id}>
+              <line className="map-preview-reflector-outer" x1={startX} y1={startY} x2={endX} y2={endY} />
+              <line className="map-preview-reflector-inner" x1={startX} y1={startY} x2={endX} y2={endY} />
+              {[0.25, 0.5, 0.75].map((position) => {
+                const x = startX + dx * position
+                const y = startY + dy * position
+                return (
+                  <line
+                    className="map-preview-reflector-hatch"
+                    key={position}
+                    x1={x - normalX * 2 - (dx / length)}
+                    y1={y - normalY * 2 - (dy / length)}
+                    x2={x + normalX * 2 + (dx / length)}
+                    y2={y + normalY * 2 + (dy / length)}
+                  />
+                )
+              })}
+            </g>
+          )
+        })}
+      </g>
       {map.spawnPoints.map((spawn) => {
         const x = (spawn.x / map.width) * MAP_PREVIEW_WIDTH
         const y = Math.max(4, (spawn.y / map.height) * MAP_PREVIEW_HEIGHT - 4)
@@ -229,6 +262,15 @@ function MapPreview({ mapId }: { mapId: MapId }) {
         )
       })}
     </svg>
+  )
+}
+
+function MapMechanicLegend({ mapId }: { mapId: MapId }) {
+  if (!MAPS[mapId].objects.some((object) => object.type === 'reflector-wall')) return null
+  return (
+    <span className="map-mechanic-legend">
+      <i aria-hidden="true" /> Reflects projectiles
+    </span>
   )
 }
 
@@ -425,6 +467,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null)
   const [matchMode, setMatchMode] = useState<SessionMode>('local')
   const [editorTestActive, setEditorTestActive] = useState(false)
+  const [editorTestDocument, setEditorTestDocument] = useState<MapDocument | null>(null)
   const [onlineSession, setOnlineSession] = useState<OnlineRoomSession | null>(null)
   const [roomView, setRoomView] = useState<OnlineRoomView | null>(null)
   const [roomCodeInput, setRoomCodeInput] = useState('')
@@ -722,6 +765,7 @@ export function App() {
     setScreen('match')
   }
   const testEditorMap = (document: MapDocument) => {
+    setEditorTestDocument(structuredClone(document))
     setCustomDraftMap(document)
     setConfig(
       validateMatchConfig({
@@ -927,6 +971,7 @@ export function App() {
                 className="button-quiet button-play button-editor"
                 onClick={() => {
                   setEditorTestActive(false)
+                  setEditorTestDocument(null)
                   setScreen('editor')
                 }}
               >
@@ -951,8 +996,10 @@ export function App() {
     if (screen === 'editor')
       return (
         <MapEditor
+          initialDocument={editorTestDocument}
           onBack={() => {
             setEditorTestActive(false)
+            setEditorTestDocument(null)
             setScreen('menu')
           }}
           onTestPlay={testEditorMap}
@@ -1076,6 +1123,7 @@ export function App() {
                 <strong>{MAPS[id].displayName}</strong>
                 <em>{MAPS[id].label}</em>
                 <span>{MAPS[id].description}</span>
+                <MapMechanicLegend mapId={id} />
               </button>
             ))}
           </div>
@@ -1359,6 +1407,7 @@ export function App() {
                     <strong>{MAPS[id].displayName}</strong>
                     <em>{MAPS[id].label}</em>
                     <span>{MAPS[id].description}</span>
+                    <MapMechanicLegend mapId={id} />
                   </button>
                 ))}
               </div>

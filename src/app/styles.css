@@ -673,6 +673,42 @@ select {
 .map-preview-spawn-ember {
   fill: var(--clay);
 }
+.map-preview-reflector-outer {
+  stroke: #17252b;
+  stroke-width: 5;
+  stroke-linecap: square;
+}
+.map-preview-reflector-inner {
+  stroke: #91a6aa;
+  stroke-width: 2.5;
+  stroke-linecap: square;
+}
+.map-preview-reflector-hatch {
+  stroke: #fff9e9;
+  stroke-width: 1;
+}
+.map-card .map-mechanic-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 10px 10px;
+  padding: 6px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 7px;
+  background: #dce6e4;
+  color: var(--ink);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.map-mechanic-legend i {
+  width: 23px;
+  height: 8px;
+  flex: 0 0 auto;
+  border: 2px solid #17252b;
+  background: repeating-linear-gradient(125deg, #91a6aa 0 3px, #fff9e9 3px 5px);
+  transform: skewX(-18deg);
+}
 .setup-actions {
   display: flex;
   align-items: center;
@@ -1376,6 +1412,44 @@ select {
   transform: translateY(2px);
   box-shadow: 0 1px 0 var(--line);
 }
+.editor-object-palette button {
+  position: relative;
+  overflow: hidden;
+  background: #dce6e4;
+}
+.editor-object-palette button::before {
+  content: '';
+  width: 34px;
+  height: 8px;
+  margin-right: 7px;
+  border: 2px solid #17252b;
+  background: repeating-linear-gradient(125deg, #91a6aa 0 4px, #fff9e9 4px 6px);
+  display: inline-block;
+  vertical-align: middle;
+  transform: skewX(-18deg);
+}
+.editor-object-inspector {
+  padding: 13px;
+  border: 2px solid #71878a;
+  border-radius: 12px;
+  background: #edf1ea;
+}
+.editor-object-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.editor-object-fields label:first-child {
+  grid-column: 1 / -1;
+}
+.editor-object-validation {
+  flex-direction: column;
+  margin-bottom: 10px;
+}
+.editor-sidebar .editor-object-delete {
+  width: 100%;
+  border-color: #8b271f;
+  background: #ffd9d2;
+  color: #8b271f;
+}
 .material-palette {
   display: grid;
   gap: 6px;
@@ -1552,6 +1626,9 @@ footer {
     grid-column: 1 / -1;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .editor-object-inspector {
+    grid-column: 1 / -1;
+  }
 }
 @media (max-width: 620px) {
   .brand p:last-child {
@@ -1649,6 +1726,12 @@ footer {
   .editor-sidebar,
   .editor-field-grid {
     grid-template-columns: 1fr;
+  }
+  .editor-object-fields {
+    grid-template-columns: 1fr;
+  }
+  .editor-object-fields label:first-child {
+    grid-column: auto;
   }
   .editor-description-field {
     grid-column: auto;

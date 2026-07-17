@@ -42,6 +42,14 @@ export type MatchEvent =
       weaponId: WeaponId
       position: Vector
     })
+  | (EventEnvelope & {
+      type: 'projectile-reflected'
+      objectId: string
+      projectileId: string
+      position: Vector
+      incomingVelocity: Vector
+      outgoingVelocity: Vector
+    })
   | (EventEnvelope & { type: 'cluster-split'; actionId: string; position: Vector })
   | (EventEnvelope & {
       type: 'remote-split'

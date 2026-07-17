@@ -7,6 +7,7 @@ export type SoundCue =
   | 'mortar-fire'
   | 'grenade-fire'
   | 'grenade-bounce'
+  | 'reflector-hit'
   | 'grenade-fuse'
   | 'scatter-fire'
   | 'cluster-fire'
@@ -52,6 +53,7 @@ const frequencies: Record<SoundCue, readonly [number, number, number]> = {
   'mortar-fire': [92, 38, 0.24],
   'grenade-fire': [180, 105, 0.14],
   'grenade-bounce': [310, 220, 0.07],
+  'reflector-hit': [1800, 420, 0.1],
   'grenade-fuse': [780, 680, 0.045],
   'scatter-fire': [190, 85, 0.11],
   'cluster-fire': [145, 75, 0.17],
@@ -125,7 +127,9 @@ export class AudioDirector {
       const gain = context.createGain()
       const start = context.currentTime
       oscillator.type =
-        cue === 'explosion' || cue === 'scatter-fire' || cue === 'siege-fire'
+        cue === 'reflector-hit'
+          ? 'square'
+          : cue === 'explosion' || cue === 'scatter-fire' || cue === 'siege-fire'
           ? 'sawtooth'
           : 'sine'
       oscillator.frequency.setValueAtTime(startFrequency, start)

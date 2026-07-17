@@ -97,12 +97,20 @@ type WeaponEffect = {
   lifetime: number
   seed: number
 }
+type ReflectionEffect = {
+  position: Vector
+  direction: Vector
+  age: number
+  lifetime: number
+  seed: number
+}
 const ACTOR_VISUAL_SCALE = 0.9
 const ACTOR_COLORS = [0x2863b7, 0xed7090, 0x57b89e, 0xf39a55, 0x8267c7, 0xe2ad2f]
 const TEAM_COLORS = [0x17447f, 0xaa392b]
 const INK_COLOR = 0x24313a
 const MAX_PROJECTILE_TRAILS = 32
 const MAX_WEAPON_EFFECTS = 40
+const MAX_REFLECTION_EFFECTS = 24
 
 export class MatchScene extends Phaser.Scene {
   private source!: MatchSource
@@ -119,6 +127,7 @@ export class MatchScene extends Phaser.Scene {
   private audio!: AudioDirector
   private backgroundGraphics!: Phaser.GameObjects.Graphics
   private terrainGraphics!: Phaser.GameObjects.Graphics
+  private mapObjectGraphics!: Phaser.GameObjects.Graphics
   private actorGraphics!: Phaser.GameObjects.Graphics
   private overlayGraphics!: Phaser.GameObjects.Graphics
   private hudGraphics!: Phaser.GameObjects.Graphics
@@ -149,6 +158,7 @@ export class MatchScene extends Phaser.Scene {
   private traceEffects: TraceEffect[] = []
   private projectileTrails = new Map<string, ProjectileTrail>()
   private weaponEffects: WeaponEffect[] = []
+  private reflectionEffects: ReflectionEffect[] = []
   private reactions = new Map<string, Reaction>()
   private displayedHealth: number[] = []
   private pendingResult: SimulationMatchResult | null = null
@@ -161,10 +171,12 @@ export class MatchScene extends Phaser.Scene {
   private lastTimerSecond = -1
   private warnedGrenades = new Set<string>()
   private lastExplosionAudioAt = -1
+  private lastReflectionAudioAt = -1
   private lastShakeAt = -1
   private renderedTerrainMatchId = ''
   private renderedTerrainOperationCount = -1
   private renderedTerrain: TerrainMask | null = null
+  private renderedMapObjectsKey = ''
   private actionFocus: Vector | null = null
   private actionFocusUntil = 0
 
@@ -189,6 +201,7 @@ export class MatchScene extends Phaser.Scene {
   create(): void {
     this.backgroundGraphics = this.add.graphics()
     this.terrainGraphics = this.add.graphics()
+    this.mapObjectGraphics = this.add.graphics()
     this.actorGraphics = this.add.graphics()
     this.overlayGraphics = this.add.graphics()
     this.hudGraphics = this.add.graphics()
@@ -250,6 +263,7 @@ export class MatchScene extends Phaser.Scene {
     const worldObjects = [
       this.backgroundGraphics,
       this.terrainGraphics,
+      this.mapObjectGraphics,
       this.actorGraphics,
       this.overlayGraphics,
     ]
@@ -307,6 +321,7 @@ export class MatchScene extends Phaser.Scene {
     })
     this.traceEffects.forEach((effect) => (effect.age += presentationDelta))
     this.weaponEffects.forEach((effect) => (effect.age += presentationDelta))
+    this.reflectionEffects.forEach((effect) => (effect.age += presentationDelta))
     this.burstEffects = this.burstEffects.filter((effect) => effect.age < effect.lifetime)
     this.damageEffects = this.damageEffects.filter((effect) => {
       if (effect.age < 1) return true
@@ -315,6 +330,9 @@ export class MatchScene extends Phaser.Scene {
     })
     this.traceEffects = this.traceEffects.filter((effect) => effect.age < effect.lifetime)
     this.weaponEffects = this.weaponEffects.filter((effect) => effect.age < effect.lifetime)
+    this.reflectionEffects = this.reflectionEffects.filter(
+      (effect) => effect.age < effect.lifetime,
+    )
     for (const event of this.source.drainEvents()) this.consumeMatchEvent(event)
     this.updateHealthPresentation(presentationDelta)
     this.updateTimerAudio()
@@ -419,6 +437,7 @@ export class MatchScene extends Phaser.Scene {
     this.traceEffects = []
     this.projectileTrails.clear()
     this.weaponEffects = []
+    this.reflectionEffects = []
     this.reactions.clear()
     this.pendingResult = null
     this.resultDelay = 0
@@ -433,6 +452,7 @@ export class MatchScene extends Phaser.Scene {
     this.renderedTerrainMatchId = ''
     this.renderedTerrainOperationCount = -1
     this.renderedTerrain = null
+    this.renderedMapObjectsKey = ''
     this.actionFocus = null
     this.actionFocusUntil = 0
     this.configureWorldCamera()
@@ -450,6 +470,7 @@ export class MatchScene extends Phaser.Scene {
     }
     this.projectileTrails.clear()
     this.weaponEffects = []
+    this.reflectionEffects = []
     this.burstEffects = []
     this.traceEffects = []
     for (const effect of this.damageEffects) effect.label.destroy()
@@ -885,6 +906,7 @@ export class MatchScene extends Phaser.Scene {
     if (!this.source) return
     this.renderBackdrop()
     this.renderTerrain()
+    this.renderMapObjects()
     this.renderActors()
     this.renderOverlay()
     this.renderEffects()
@@ -965,6 +987,74 @@ export class MatchScene extends Phaser.Scene {
     if (material === TERRAIN_MATERIAL.stone) return theme.stone
     if (material === TERRAIN_MATERIAL.steel) return theme.steel
     return theme.terrain
+  }
+
+  private renderMapObjects(): void {
+    const state = this.source.state
+    const cacheKey = `${state.matchId}:${state.mapId}:${state.mapRevision}:${state.mapContentHash}`
+    if (cacheKey === this.renderedMapObjectsKey) return
+    this.renderedMapObjectsKey = cacheKey
+    this.mapObjectGraphics.clear()
+
+    const map = getMap(state.mapId)
+    for (const object of map.objects) {
+      if (object.type !== 'reflector-wall') continue
+      const dx = object.end.x - object.start.x
+      const dy = object.end.y - object.start.y
+      const length = Math.hypot(dx, dy)
+      if (length === 0) continue
+      const along = { x: dx / length, y: dy / length }
+      const across = { x: -along.y, y: along.x }
+      const outerWidth = object.thickness + 7
+      this.mapObjectGraphics
+        .lineStyle(outerWidth, INK_COLOR)
+        .lineBetween(object.start.x, object.start.y, object.end.x, object.end.y)
+        .lineStyle(object.thickness, map.theme.steel)
+        .lineBetween(object.start.x, object.start.y, object.end.x, object.end.y)
+        .lineStyle(2, 0xd8e2df, 0.72)
+        .lineBetween(
+          object.start.x + across.x * object.thickness * 0.24,
+          object.start.y + across.y * object.thickness * 0.24,
+          object.end.x + across.x * object.thickness * 0.24,
+          object.end.y + across.y * object.thickness * 0.24,
+        )
+
+      const hatchHalfLength = Math.max(3, object.thickness * 0.38)
+      for (let distance = 14; distance < length - 10; distance += 20) {
+        const center = {
+          x: object.start.x + along.x * distance,
+          y: object.start.y + along.y * distance,
+        }
+        this.mapObjectGraphics
+          .lineStyle(2.5, 0x17252b, 0.9)
+          .lineBetween(
+            center.x - across.x * hatchHalfLength - along.x * 3,
+            center.y - across.y * hatchHalfLength - along.y * 3,
+            center.x + across.x * hatchHalfLength + along.x * 3,
+            center.y + across.y * hatchHalfLength + along.y * 3,
+          )
+      }
+
+      for (const end of [object.start, object.end]) {
+        this.mapObjectGraphics
+          .lineStyle(6, INK_COLOR)
+          .lineBetween(
+            end.x - across.x * outerWidth * 0.58,
+            end.y - across.y * outerWidth * 0.58,
+            end.x + across.x * outerWidth * 0.58,
+            end.y + across.y * outerWidth * 0.58,
+          )
+          .lineStyle(2.5, 0xb6c3c2)
+          .lineBetween(
+            end.x - across.x * object.thickness * 0.48,
+            end.y - across.y * object.thickness * 0.48,
+            end.x + across.x * object.thickness * 0.48,
+            end.y + across.y * object.thickness * 0.48,
+          )
+          .fillStyle(0x17252b)
+          .fillCircle(end.x, end.y, 2.5)
+      }
+    }
   }
 
   private renderActors(): void {
@@ -2023,7 +2113,8 @@ export class MatchScene extends Phaser.Scene {
         this.burstEffects.length +
           this.damageEffects.length +
           this.traceEffects.length +
-          this.weaponEffects.length,
+          this.weaponEffects.length +
+          this.reflectionEffects.length,
       ),
     )
     const hint =
@@ -2161,6 +2252,39 @@ export class MatchScene extends Phaser.Scene {
         )
         this.audio.play('grenade-bounce')
         return
+      case 'projectile-reflected': {
+        this.reflectionEffects.push({
+          position: { ...event.position },
+          direction: normalizeDirection(
+            {
+              x: event.outgoingVelocity.x - event.incomingVelocity.x,
+              y: event.outgoingVelocity.y - event.incomingVelocity.y,
+            },
+            normalizeDirection(event.outgoingVelocity),
+          ),
+          age: 0,
+          lifetime: this.preferences.reducedMotion ? 0.18 : 0.32,
+          seed: event.sequence,
+        })
+        if (this.reflectionEffects.length > MAX_REFLECTION_EFFECTS)
+          this.reflectionEffects.splice(
+            0,
+            this.reflectionEffects.length - MAX_REFLECTION_EFFECTS,
+          )
+        if (this.visualTime - this.lastReflectionAudioAt > 0.04) {
+          this.audio.play('reflector-hit')
+          this.lastReflectionAudioAt = this.visualTime
+        }
+        if (
+          this.preferences.cameraShake &&
+          !this.preferences.reducedMotion &&
+          this.visualTime - this.lastShakeAt > 0.08
+        ) {
+          this.cameras.main.shake(70, 0.0025)
+          this.lastShakeAt = this.visualTime
+        }
+        return
+      }
       case 'cluster-split':
         this.addBurst('explosion', event.position, 25, event.sequence, 'cluster-charge')
         this.addWeaponEffect(
@@ -2416,6 +2540,43 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private renderEffects(): void {
+    for (const effect of this.reflectionEffects) {
+      const progress = Phaser.Math.Clamp(effect.age / effect.lifetime, 0, 1)
+      const alpha = 1 - progress
+      const forward = effect.direction
+      const across = perpendicular(forward)
+      const flashRadius = this.preferences.reducedMotion ? 8 : 6 + progress * 3
+      this.overlayGraphics
+        .fillStyle(0xfff4bc, alpha * 0.9)
+        .fillCircle(effect.position.x, effect.position.y, flashRadius)
+        .lineStyle(2.5, 0x26373d, alpha)
+        .strokeCircle(effect.position.x, effect.position.y, flashRadius)
+        .lineStyle(2, 0xffffff, alpha)
+        .lineBetween(
+          effect.position.x - across.x * 10,
+          effect.position.y - across.y * 10,
+          effect.position.x + across.x * 10,
+          effect.position.y + across.y * 10,
+        )
+      if (this.preferences.reducedMotion) continue
+      for (let spark = 0; spark < 6; spark += 1) {
+        const spread = (spark - 2.5) * 0.28
+        const direction = normalizeDirection({
+          x: forward.x + across.x * spread,
+          y: forward.y + across.y * spread,
+        })
+        const startDistance = 4 + ((effect.seed + spark) % 4)
+        const endDistance = startDistance + 5 + progress * (12 + (spark % 3) * 3)
+        this.overlayGraphics
+          .lineStyle(spark % 2 ? 2 : 3, spark % 2 ? 0xffb43f : 0xfff2ad, alpha)
+          .lineBetween(
+            effect.position.x + direction.x * startDistance,
+            effect.position.y + direction.y * startDistance,
+            effect.position.x + direction.x * endDistance,
+            effect.position.y + direction.y * endDistance,
+          )
+      }
+    }
     for (const effect of this.weaponEffects) {
       const progress = Phaser.Math.Clamp(effect.age / effect.lifetime, 0, 1)
       const alpha = 1 - progress

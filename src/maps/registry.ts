@@ -10,6 +10,7 @@ import {
   resolveMapDocument,
   spawnSeatForIndex,
   type MapDocument,
+  type MapObjectDefinition,
   type MapTheme,
   type MatchMode,
   type ResolvedMap,
@@ -31,7 +32,7 @@ export type MapId =
   | 'fossil-wake'
   | 'custom-draft'
 
-export const MAP_REGISTRY_VERSION = 'maps-6'
+export const MAP_REGISTRY_VERSION = 'maps-7'
 export type MapDefinition = Omit<ResolvedMap, 'id'> & { id: MapId }
 export type { MapDocument, MapTheme, MatchMode, SpawnDefinition, TeamId } from './mapDocument'
 
@@ -75,8 +76,9 @@ type RasterPainter = {
   carveEllipse: (centerX: number, centerY: number, radiusX: number, radiusY: number) => void
 }
 
-type RasterMapSource = Omit<MapDocument, 'format' | 'formatVersion' | 'terrain'> & {
+type RasterMapSource = Omit<MapDocument, 'format' | 'formatVersion' | 'terrain' | 'objects'> & {
   paint: (painter: RasterPainter) => void
+  objects?: readonly MapObjectDefinition[]
 }
 
 const registeredMap = (map: ResolvedMap): MapDefinition => map as MapDefinition
@@ -176,6 +178,7 @@ function createRasterMap(source: RasterMapSource): MapDefinition {
     height: source.height,
     theme: source.theme,
     spawns: source.spawns,
+    objects: source.objects ? [...source.objects] : [],
     terrain: {
       encoding: 'row-rle-v1',
       cellSize: TERRAIN_SCALE,
@@ -358,7 +361,7 @@ const maps: Record<MapId, MapDefinition> = {
   'ruined-foundry': registeredMap(resolveMapDocument(
     createShapeMapDocument({
       id: 'ruined-foundry',
-      revision: 1,
+      revision: 2,
       mode: '2v2',
       displayName: 'Ruined Foundry',
       description: 'Brick workshops, steel frames, interior floors, and a shattered central span.',
@@ -382,6 +385,24 @@ const maps: Record<MapId, MapDefinition> = {
         { x: 1220, y: 320, teamId: 1, teamSlot: 0, facing: -1 },
         { x: 390, y: 456, teamId: 0, teamSlot: 1, facing: 1 },
         { x: 1050, y: 456, teamId: 1, teamSlot: 1, facing: -1 },
+      ],
+      objects: [
+        {
+          id: 'central-left-plate',
+          type: 'reflector-wall',
+          start: { x: 630, y: 472 },
+          end: { x: 690, y: 400 },
+          thickness: 14,
+          velocityRetention: 0.82,
+        },
+        {
+          id: 'central-right-plate',
+          type: 'reflector-wall',
+          start: { x: 750, y: 400 },
+          end: { x: 810, y: 472 },
+          thickness: 14,
+          velocityRetention: 0.82,
+        },
       ],
       rectangles: [
         { x: 0, y: 650, width: 1440, height: 160, material: TERRAIN_MATERIAL.soil },

@@ -4,25 +4,38 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import {
   MAP_FORMAT_VERSION,
+  MAX_MAP_OBJECTS,
+  MAX_REFLECTOR_LENGTH,
+  MAX_REFLECTOR_THICKNESS,
+  MAX_REFLECTOR_TOTAL_LENGTH,
+  MAX_REFLECTOR_VELOCITY_RETENTION,
+  MIN_REFLECTOR_LENGTH,
+  MIN_REFLECTOR_THICKNESS,
+  MIN_REFLECTOR_VELOCITY_RETENTION,
+  SPAWN_OBJECT_CLEARANCE,
   encodeMaterialRows,
+  migrateMapDocument,
   resolveMapDocument,
   spawnSeatForIndex,
   type MapDocument,
+  type MapObjectDefinition,
   type MapTheme,
   type MatchMode,
+  type ReflectorWallDefinition,
   type SpawnDefinition,
 } from '../maps/mapDocument'
 import { TERRAIN_MATERIAL, type TerrainMaterialId } from '../terrain/materials'
 import { loadEditorDraft, saveEditorDraft } from './editorStorage'
 
 type SupportedMode = MatchMode
-type EditorTool = 'brush' | 'line' | 'rectangle' | 'fill' | 'spawn'
+type EditorTool = 'brush' | 'line' | 'rectangle' | 'fill' | 'spawn' | 'reflector-wall'
 type EditorDraft = {
-  version: 1
+  version: 2
   id: string
   revision: number
   mode: SupportedMode
@@ -35,11 +48,25 @@ type EditorDraft = {
   theme: MapTheme
   cells: Uint8Array
   spawns: SpawnDefinition[]
+  objects: MapObjectDefinition[]
 }
 
 type MapEditorProps = {
   onBack: () => void
   onTestPlay: (document: MapDocument) => void
+  initialDocument?: MapDocument | null
+}
+
+type EditorGesture = {
+  pointerId: number
+  startX: number
+  startY: number
+  lastX: number
+  lastY: number
+  kind: 'terrain' | 'place-object' | 'move-object' | 'start-handle' | 'end-handle'
+  objectIndex?: number
+  originalObject?: ReflectorWallDefinition
+  changed: boolean
 }
 
 const EDITOR_THEME: MapTheme = {
@@ -92,7 +119,24 @@ const cloneDraft = (draft: EditorDraft): EditorDraft => ({
   theme: { ...draft.theme },
   cells: new Uint8Array(draft.cells),
   spawns: draft.spawns.map((spawn) => ({ ...spawn })),
+  objects: draft.objects.map((object) => ({
+    ...object,
+    start: { ...object.start },
+    end: { ...object.end },
+  })),
 })
+
+const compareObjectIds = (left: MapObjectDefinition, right: MapObjectDefinition) =>
+  left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+
+const cloneObjectsCanonical = (objects: readonly MapObjectDefinition[]): MapObjectDefinition[] =>
+  objects
+    .map((object) => ({
+      ...object,
+      start: { ...object.start },
+      end: { ...object.end },
+    }))
+    .sort(compareObjectIds)
 
 const colorToCss = (color: number) => `#${color.toString(16).padStart(6, '0')}`
 
@@ -130,7 +174,7 @@ function createDraft(width = 960, height = 540, mode: SupportedMode = '1v1'): Ed
   cells.fill(TERRAIN_MATERIAL.soil, groundCell * cellWidth)
   const groundY = groundCell * cellSize
   return {
-    version: 1,
+    version: 2,
     id: 'untitled-map',
     revision: 1,
     mode,
@@ -143,6 +187,7 @@ function createDraft(width = 960, height = 540, mode: SupportedMode = '1v1'): Ed
     theme: { ...EDITOR_THEME },
     cells,
     spawns: defaultSpawns(width, mode, () => groundY),
+    objects: [],
   }
 }
 
@@ -160,6 +205,7 @@ function buildDocument(draft: EditorDraft): MapDocument {
     height: draft.height,
     theme: { ...draft.theme },
     spawns: draft.spawns.map((spawn) => ({ ...spawn })),
+    objects: cloneObjectsCanonical(draft.objects),
     terrain: {
       encoding: 'row-rle-v1',
       cellSize: draft.cellSize,
@@ -172,12 +218,13 @@ function buildDocument(draft: EditorDraft): MapDocument {
   }
 }
 
-function draftFromDocument(document: MapDocument): EditorDraft {
+function draftFromDocument(value: unknown): EditorDraft {
+  const document = migrateMapDocument(value)
   const resolved = resolveMapDocument(document)
   if (resolved.mode !== '1v1' && resolved.mode !== '2v2' && resolved.mode !== '3v3')
     throw new Error('The editor supports only 1v1, 2v2, and 3v3 maps.')
   return {
-    version: 1,
+    version: 2,
     id: document.id,
     revision: document.revision,
     mode: resolved.mode,
@@ -190,20 +237,100 @@ function draftFromDocument(document: MapDocument): EditorDraft {
     theme: { ...resolved.theme },
     cells: new Uint8Array(resolved.terrainCells),
     spawns: resolved.spawnPoints.map((spawn) => ({ ...spawn })),
+    objects: cloneObjectsCanonical(resolved.objects),
   }
 }
 
-function isStoredDraft(value: unknown): value is EditorDraft {
-  if (!value || typeof value !== 'object') return false
-  const draft = value as Partial<EditorDraft>
-  return (
-    draft.version === 1 &&
+export function migrateStoredDraft(value: unknown): EditorDraft {
+  if (!value || typeof value !== 'object')
+    throw new Error('No compatible editor draft was found.')
+  const draft = value as Omit<Partial<EditorDraft>, 'version' | 'objects'> & {
+    version?: unknown
+    objects?: unknown
+  }
+  const hasBaseFields =
+    (draft.version === 1 || draft.version === 2) &&
     (draft.mode === '1v1' || draft.mode === '2v2' || draft.mode === '3v3') &&
     Number.isSafeInteger(draft.width) &&
     Number.isSafeInteger(draft.height) &&
     draft.cells instanceof Uint8Array &&
     Array.isArray(draft.spawns)
+  if (!hasBaseFields) throw new Error('No compatible editor draft was found.')
+  if (draft.version === 2 && !Array.isArray(draft.objects))
+    throw new Error('The editor draft has an invalid object list.')
+  return cloneDraft({
+    ...draft,
+    version: 2,
+    objects: draft.version === 1 ? [] : draft.objects as MapObjectDefinition[],
+  } as EditorDraft)
+}
+
+function pointSegmentDistance(
+  point: { x: number; y: number },
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): number {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const lengthSquared = dx * dx + dy * dy
+  if (lengthSquared === 0) return Math.hypot(point.x - start.x, point.y - start.y)
+  const t = Math.max(
+    0,
+    Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared),
   )
+  return Math.hypot(point.x - (start.x + dx * t), point.y - (start.y + dy * t))
+}
+
+function objectValidationError(draft: EditorDraft, index: number): string | null {
+  const object = draft.objects[index]
+  if (!object) return null
+  if (draft.objects.length > MAX_MAP_OBJECTS && index >= MAX_MAP_OBJECTS)
+    return `Maps support at most ${MAX_MAP_OBJECTS} objects.`
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(object.id) || object.id.length > 64)
+    return 'Object ID must be a bounded lowercase slug.'
+  if (draft.objects.some((candidate, candidateIndex) => candidateIndex !== index && candidate.id === object.id))
+    return `Duplicate object ID: ${object.id}.`
+  const length = Math.hypot(object.end.x - object.start.x, object.end.y - object.start.y)
+  if (!Number.isFinite(length) || length < MIN_REFLECTOR_LENGTH || length > MAX_REFLECTOR_LENGTH)
+    return `Length must be between ${MIN_REFLECTOR_LENGTH} and ${MAX_REFLECTOR_LENGTH}.`
+  if (
+    !Number.isFinite(object.thickness) ||
+    object.thickness < MIN_REFLECTOR_THICKNESS ||
+    object.thickness > MAX_REFLECTOR_THICKNESS
+  )
+    return `Thickness must be between ${MIN_REFLECTOR_THICKNESS} and ${MAX_REFLECTOR_THICKNESS}.`
+  if (
+    !Number.isFinite(object.velocityRetention) ||
+    object.velocityRetention < MIN_REFLECTOR_VELOCITY_RETENTION ||
+    object.velocityRetention > MAX_REFLECTOR_VELOCITY_RETENTION
+  )
+    return `Velocity retention must be between ${MIN_REFLECTOR_VELOCITY_RETENTION} and ${MAX_REFLECTOR_VELOCITY_RETENTION}.`
+  const margin = object.thickness / 2
+  if (
+    [object.start, object.end].some(
+      (point) =>
+        point.x < margin ||
+        point.x > draft.width - margin ||
+        point.y < margin ||
+        point.y > draft.height - margin,
+    )
+  )
+    return 'Reflector is outside the map bounds.'
+  if (
+    draft.spawns.some(
+      (spawn) =>
+        pointSegmentDistance({ x: spawn.x, y: spawn.y - 15 }, object.start, object.end) <=
+        SPAWN_OBJECT_CLEARANCE + margin,
+    )
+  )
+    return 'Reflector overlaps a spawn safety volume.'
+  const totalLength = draft.objects.reduce(
+    (total, candidate) => total + Math.hypot(candidate.end.x - candidate.start.x, candidate.end.y - candidate.start.y),
+    0,
+  )
+  if (totalLength > MAX_REFLECTOR_TOTAL_LENGTH)
+    return `Map reflectors exceed ${MAX_REFLECTOR_TOTAL_LENGTH} total world units.`
+  return null
 }
 
 function floodFill(
@@ -235,8 +362,10 @@ function floodFill(
   }
 }
 
-export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
-  const [draft, setDraft] = useState<EditorDraft>(() => createDraft())
+export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProps) {
+  const [draft, setDraft] = useState<EditorDraft>(() =>
+    initialDocument ? draftFromDocument(initialDocument) : createDraft(),
+  )
   const [tool, setTool] = useState<EditorTool>('brush')
   const [material, setMaterial] = useState<TerrainMaterialId>(TERRAIN_MATERIAL.soil)
   const [brushRadius, setBrushRadius] = useState(6)
@@ -244,17 +373,16 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
   const [zoom, setZoom] = useState(0.75)
   const [notice, setNotice] = useState('Drafts stay on this device until exported.')
   const [historyRevision, setHistoryRevision] = useState(0)
+  const [selectedObjectIndex, setSelectedObjectIndex] = useState<number | null>(null)
+  const [objectPreview, setObjectPreview] = useState<{
+    start: { x: number; y: number }
+    end: { x: number; y: number }
+  } | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const draftRef = useRef(draft)
   const undoRef = useRef<EditorDraft[]>([])
   const redoRef = useRef<EditorDraft[]>([])
-  const gestureRef = useRef<{
-    pointerId: number
-    startX: number
-    startY: number
-    lastX: number
-    lastY: number
-  } | null>(null)
+  const gestureRef = useRef<EditorGesture | null>(null)
   const deferredDraft = useDeferredValue(draft)
 
   draftRef.current = draft
@@ -293,6 +421,31 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
       image.data[index * 4 + 3] = 255
     }
     context.putImageData(image, 0, 0)
+    const drawReflector = (
+      object: Pick<ReflectorWallDefinition, 'start' | 'end' | 'thickness'>,
+      color: string,
+    ) => {
+      context.strokeStyle = color
+      context.lineWidth = Math.max(2, object.thickness / draft.cellSize)
+      context.lineCap = 'round'
+      context.beginPath()
+      context.moveTo(object.start.x / draft.cellSize, object.start.y / draft.cellSize)
+      context.lineTo(object.end.x / draft.cellSize, object.end.y / draft.cellSize)
+      context.stroke()
+      context.strokeStyle = '#fff4d8'
+      context.lineWidth = Math.max(1, 1 / draft.cellSize)
+      context.setLineDash([4 / draft.cellSize, 4 / draft.cellSize])
+      context.stroke()
+      context.setLineDash([])
+    }
+    draft.objects.forEach((object, index) => {
+      drawReflector(object, objectValidationError(draft, index) ? '#d63f35' : '#18282d')
+    })
+    if (objectPreview)
+      drawReflector(
+        { ...objectPreview, thickness: 12 },
+        '#f7bd3f',
+      )
     draft.spawns.forEach((spawn, index) => {
       const x = spawn.x / draft.cellSize
       const y = spawn.y / draft.cellSize
@@ -308,7 +461,20 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
       context.textAlign = 'center'
       context.fillText(String(spawn.teamSlot + 1), x, y - 4)
     })
-  }, [draft, selectedSpawn])
+    const selectedObject = selectedObjectIndex === null ? null : draft.objects[selectedObjectIndex]
+    if (selectedObject) {
+      const handleRadius = Math.max(3, 6 / (draft.cellSize * zoom))
+      context.fillStyle = objectValidationError(draft, selectedObjectIndex!) ? '#d63f35' : '#f7bd3f'
+      context.strokeStyle = '#fff4d8'
+      context.lineWidth = Math.max(1, 2 / (draft.cellSize * zoom))
+      for (const point of [selectedObject.start, selectedObject.end]) {
+        context.beginPath()
+        context.arc(point.x / draft.cellSize, point.y / draft.cellSize, handleRadius, 0, Math.PI * 2)
+        context.fill()
+        context.stroke()
+      }
+    }
+  }, [draft, objectPreview, selectedObjectIndex, selectedSpawn, zoom])
 
   const setCurrentDraft = (next: EditorDraft) => {
     draftRef.current = next
@@ -335,6 +501,32 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
       x: Math.max(0, Math.min(canvas.width - 1, Math.floor(((event.clientX - bounds.left) / bounds.width) * canvas.width))),
       y: Math.max(0, Math.min(canvas.height - 1, Math.floor(((event.clientY - bounds.top) / bounds.height) * canvas.height))),
     }
+  }
+
+  const worldPoint = (cellX: number, cellY: number) => ({
+    x: cellX * draftRef.current.cellSize,
+    y: cellY * draftRef.current.cellSize,
+  })
+
+  const hitObject = (point: { x: number; y: number }): number | null => {
+    let hit: number | null = null
+    let distance = Number.POSITIVE_INFINITY
+    draftRef.current.objects.forEach((object, index) => {
+      const candidateDistance = pointSegmentDistance(point, object.start, object.end)
+      const threshold = object.thickness / 2 + 7 / zoom
+      if (candidateDistance <= threshold && candidateDistance < distance) {
+        hit = index
+        distance = candidateDistance
+      }
+    })
+    return hit
+  }
+
+  const nextReflectorId = () => {
+    const ids = new Set(draftRef.current.objects.map((object) => object.id))
+    let suffix = 1
+    while (ids.has(`reflector-wall-${suffix}`)) suffix += 1
+    return `reflector-wall-${suffix}`
   }
 
   const paintCircle = (next: EditorDraft, x: number, y: number) => {
@@ -379,9 +571,112 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
     })
   }
 
+  const updateObjectGesture = (gesture: EditorGesture, cellX: number, cellY: number) => {
+    if (gesture.kind === 'place-object') {
+      setObjectPreview({
+        start: worldPoint(gesture.startX, gesture.startY),
+        end: worldPoint(cellX, cellY),
+      })
+      return
+    }
+    if (
+      gesture.kind === 'terrain' ||
+      gesture.objectIndex === undefined ||
+      !gesture.originalObject
+    )
+      return
+    const original = gesture.originalObject
+    const point = worldPoint(cellX, cellY)
+    const delta = {
+      x: (cellX - gesture.startX) * draftRef.current.cellSize,
+      y: (cellY - gesture.startY) * draftRef.current.cellSize,
+    }
+    const start =
+      gesture.kind === 'start-handle'
+        ? point
+        : gesture.kind === 'move-object'
+          ? { x: original.start.x + delta.x, y: original.start.y + delta.y }
+          : original.start
+    const end =
+      gesture.kind === 'end-handle'
+        ? point
+        : gesture.kind === 'move-object'
+          ? { x: original.end.x + delta.x, y: original.end.y + delta.y }
+          : original.end
+    if (
+      start.x === original.start.x &&
+      start.y === original.start.y &&
+      end.x === original.end.x &&
+      end.y === original.end.y
+    )
+      return
+    if (!gesture.changed) {
+      pushHistory()
+      gesture.changed = true
+    }
+    mutateDraft((next) => {
+      const object = next.objects[gesture.objectIndex!]
+      if (!object) return
+      object.start = start
+      object.end = end
+    })
+  }
+
   const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const point = pointFromEvent(event)
+    event.currentTarget.focus()
     event.currentTarget.setPointerCapture(event.pointerId)
+    if (tool === 'reflector-wall') {
+      const world = worldPoint(point.x, point.y)
+      const selected = selectedObjectIndex === null ? null : draftRef.current.objects[selectedObjectIndex]
+      const handleThreshold = 10 / zoom
+      let kind: EditorGesture['kind'] | null = null
+      let objectIndex = selectedObjectIndex ?? undefined
+      if (selected && Math.hypot(world.x - selected.start.x, world.y - selected.start.y) <= handleThreshold)
+        kind = 'start-handle'
+      else if (selected && Math.hypot(world.x - selected.end.x, world.y - selected.end.y) <= handleThreshold)
+        kind = 'end-handle'
+      else {
+        const hit = hitObject(world)
+        if (hit !== null) {
+          objectIndex = hit
+          kind = 'move-object'
+          setSelectedObjectIndex(hit)
+        }
+      }
+      if (kind && objectIndex !== undefined) {
+        const object = draftRef.current.objects[objectIndex]
+        if (!object) return
+        gestureRef.current = {
+          pointerId: event.pointerId,
+          startX: point.x,
+          startY: point.y,
+          lastX: point.x,
+          lastY: point.y,
+          kind,
+          objectIndex,
+          originalObject: {
+            ...object,
+            start: { ...object.start },
+            end: { ...object.end },
+          },
+          changed: false,
+        }
+        return
+      }
+      setSelectedObjectIndex(null)
+      setObjectPreview({ start: world, end: world })
+      gestureRef.current = {
+        pointerId: event.pointerId,
+        startX: point.x,
+        startY: point.y,
+        lastX: point.x,
+        lastY: point.y,
+        kind: 'place-object',
+        changed: false,
+      }
+      return
+    }
     pushHistory()
     gestureRef.current = {
       pointerId: event.pointerId,
@@ -389,6 +684,8 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
       startY: point.y,
       lastX: point.x,
       lastY: point.y,
+      kind: 'terrain',
+      changed: true,
     }
     if (tool === 'spawn') placeSpawn(point.x, point.y)
     else if (tool === 'fill')
@@ -407,8 +704,15 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
 
   const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const gesture = gestureRef.current
-    if (!gesture || gesture.pointerId !== event.pointerId || tool !== 'brush') return
+    if (!gesture || gesture.pointerId !== event.pointerId) return
     const point = pointFromEvent(event)
+    if (gesture.kind !== 'terrain') {
+      updateObjectGesture(gesture, point.x, point.y)
+      gesture.lastX = point.x
+      gesture.lastY = point.y
+      return
+    }
+    if (tool !== 'brush') return
     mutateDraft((next) => paintLine(next, gesture.lastX, gesture.lastY, point.x, point.y))
     gesture.lastX = point.x
     gesture.lastY = point.y
@@ -418,7 +722,32 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
     const gesture = gestureRef.current
     if (!gesture || gesture.pointerId !== event.pointerId) return
     const point = pointFromEvent(event)
-    if (tool === 'rectangle')
+    if (gesture.kind === 'place-object') {
+      const start = worldPoint(gesture.startX, gesture.startY)
+      const end = worldPoint(point.x, point.y)
+      setObjectPreview(null)
+      if (start.x !== end.x || start.y !== end.y) {
+        if (draftRef.current.objects.length >= MAX_MAP_OBJECTS)
+          setNotice(`Maps support at most ${MAX_MAP_OBJECTS} objects.`)
+        else {
+          const objectIndex = draftRef.current.objects.length
+          pushHistory()
+          mutateDraft((next) => {
+            next.objects.push({
+              id: nextReflectorId(),
+              type: 'reflector-wall',
+              start,
+              end,
+              thickness: 12,
+              velocityRetention: 0.85,
+            })
+          })
+          setSelectedObjectIndex(objectIndex)
+        }
+      }
+    } else if (gesture.kind !== 'terrain')
+      updateObjectGesture(gesture, point.x, point.y)
+    else if (tool === 'rectangle')
       mutateDraft((next) => {
         const width = next.width / next.cellSize
         const left = Math.min(gesture.startX, point.x)
@@ -433,6 +762,14 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
         paintLine(next, gesture.startX, gesture.startY, point.x, point.y),
       )
     gestureRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+
+  const onPointerCancel = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (gestureRef.current?.pointerId !== event.pointerId) return
+    gestureRef.current = null
+    setObjectPreview(null)
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId)
   }
@@ -453,11 +790,49 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
     setHistoryRevision((value) => value + 1)
   }
 
+  const deleteSelectedObject = () => {
+    if (selectedObjectIndex === null || !draftRef.current.objects[selectedObjectIndex]) return
+    pushHistory()
+    mutateDraft((next) => {
+      next.objects.splice(selectedObjectIndex, 1)
+    })
+    setSelectedObjectIndex(null)
+    setNotice('Reflector Wall deleted.')
+  }
+
+  const commitObjectProperty = (
+    property: 'id' | 'thickness' | 'velocityRetention',
+    input: string,
+  ) => {
+    if (selectedObjectIndex === null) return
+    const object = draftRef.current.objects[selectedObjectIndex]
+    if (!object) return
+    const value = property === 'id' ? input : Number(input)
+    if (Object.is(object[property], value)) return
+    pushHistory()
+    mutateDraft((next) => {
+      const selected = next.objects[selectedObjectIndex]
+      if (!selected) return
+      if (property === 'id') selected.id = input
+      else if (property === 'thickness') selected.thickness = Number(input)
+      else selected.velocityRetention = Number(input)
+    })
+  }
+
+  const onCanvasKeyDown = (event: ReactKeyboardEvent<HTMLCanvasElement>) => {
+    if (event.key !== 'Delete' && event.key !== 'Backspace') return
+    if (selectedObjectIndex === null) return
+    event.preventDefault()
+    deleteSelectedObject()
+  }
+
   const replaceDraft = (next: EditorDraft, message: string) => {
     undoRef.current = []
     redoRef.current = []
     setHistoryRevision((value) => value + 1)
     setSelectedSpawn(0)
+    setSelectedObjectIndex(null)
+    setObjectPreview(null)
     setCurrentDraft(next)
     setNotice(message)
   }
@@ -536,8 +911,7 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
   const loadDraft = async () => {
     try {
       const stored = await loadEditorDraft<unknown>()
-      if (!isStoredDraft(stored)) throw new Error('No compatible editor draft was found.')
-      replaceDraft(cloneDraft(stored), 'Draft restored from this browser.')
+      replaceDraft(migrateStoredDraft(stored), 'Draft restored from this browser.')
     } catch (caught) {
       setNotice(caught instanceof Error ? caught.message : 'Unable to load draft.')
     }
@@ -547,6 +921,16 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
     (total, value) => total + Number(value !== TERRAIN_MATERIAL.empty),
     0,
   )
+  const selectedObject =
+    selectedObjectIndex === null ? null : draft.objects[selectedObjectIndex] ?? null
+  const selectedObjectError =
+    selectedObjectIndex === null ? null : objectValidationError(draft, selectedObjectIndex)
+  const selectedObjectLength = selectedObject
+    ? Math.hypot(
+        selectedObject.end.x - selectedObject.start.x,
+        selectedObject.end.y - selectedObject.start.y,
+      )
+    : 0
 
   return (
     <section className="map-editor-shell">
@@ -663,7 +1047,20 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
             </div>
           </div>
 
-          {tool !== 'spawn' ? (
+          <div className="editor-section editor-object-palette">
+            <span className="editor-label">Objects</span>
+            <div className="editor-tool-grid">
+              <button
+                className={tool === 'reflector-wall' ? 'selected' : ''}
+                onClick={() => setTool('reflector-wall')}
+                title="Drag between two terrain-grid endpoints"
+              >
+                Reflector Wall
+              </button>
+            </div>
+          </div>
+
+          {tool !== 'spawn' && tool !== 'reflector-wall' && (
             <div className="editor-section">
               <span className="editor-label">Material</span>
               <div className="material-palette">
@@ -687,7 +1084,8 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
                 </label>
               )}
             </div>
-          ) : (
+          )}
+          {tool === 'spawn' && (
             <label className="editor-section">
               <span className="editor-label">Spawn to place</span>
               <select value={selectedSpawn} onChange={(event) => setSelectedSpawn(Number(event.target.value))}>
@@ -696,6 +1094,60 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
                 ))}
               </select>
             </label>
+          )}
+
+          {selectedObject && selectedObjectIndex !== null && (
+            <section
+              className="editor-section editor-object-inspector"
+              data-selected-object-id={selectedObject.id}
+              key={`${selectedObjectIndex}-${selectedObject.id}-${selectedObject.thickness}-${selectedObject.velocityRetention}`}
+            >
+              <span className="editor-label">Reflector Wall inspector</span>
+              <div className="editor-field-grid editor-object-fields">
+                <label>
+                  Stable ID
+                  <input
+                    defaultValue={selectedObject.id}
+                    maxLength={64}
+                    onBlur={(event) => commitObjectProperty('id', event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+                  />
+                </label>
+                <label>
+                  Length
+                  <input value={selectedObjectLength.toFixed(1)} readOnly />
+                </label>
+                <label>
+                  Thickness
+                  <input
+                    type="number"
+                    min={MIN_REFLECTOR_THICKNESS}
+                    max={MAX_REFLECTOR_THICKNESS}
+                    step={1}
+                    defaultValue={selectedObject.thickness}
+                    onBlur={(event) => commitObjectProperty('thickness', event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+                  />
+                </label>
+                <label>
+                  Velocity retention
+                  <input
+                    type="number"
+                    min={MIN_REFLECTOR_VELOCITY_RETENTION}
+                    max={MAX_REFLECTOR_VELOCITY_RETENTION}
+                    step={0.05}
+                    defaultValue={selectedObject.velocityRetention}
+                    onBlur={(event) => commitObjectProperty('velocityRetention', event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+                  />
+                </label>
+              </div>
+              <div className={`editor-validation editor-object-validation ${selectedObjectError ? 'invalid' : 'valid'}`}>
+                <strong>{selectedObjectError ? 'Object invalid' : 'Object valid'}</strong>
+                <span>{selectedObjectError ?? 'This reflector passes all object checks.'}</span>
+              </div>
+              <button className="editor-object-delete" onClick={deleteSelectedObject}>Delete Reflector Wall</button>
+            </section>
           )}
 
           <div className="editor-section editor-history">
@@ -720,6 +1172,7 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
             <span>{draft.width} × {draft.height}</span>
             <span>{filledCells.toLocaleString()} solid cells</span>
             <span>{draft.spawns.length} spawns</span>
+            <span>{draft.objects.length} objects</span>
             <strong className={validationError ? 'invalid' : 'valid'}>{validationError ? 'Needs attention' : 'Ready to test'}</strong>
           </div>
           <div className="editor-canvas-scroll">
@@ -730,13 +1183,16 @@ export function MapEditor({ onBack, onTestPlay }: MapEditorProps) {
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
-              onPointerCancel={onPointerUp}
+              onPointerCancel={onPointerCancel}
+              onKeyDown={onCanvasKeyDown}
+              tabIndex={0}
+              data-editor-canvas
               aria-label="Map material canvas"
             />
           </div>
           <div className={`editor-validation ${validationError ? 'invalid' : 'valid'}`}>
             <strong>{validationError ? 'Validation' : 'Map ready'}</strong>
-            <span>{validationError ?? 'All spawn, dimension, material, and format checks passed.'}</span>
+            <span>{validationError ?? 'All spawn, object, dimension, material, and format checks passed.'}</span>
           </div>
           <div className="editor-file-actions">
             <button onClick={() => replaceDraft(createDraft(draft.width, draft.height, draft.mode), 'New blank map created.')}>New</button>

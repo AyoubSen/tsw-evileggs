@@ -39,7 +39,8 @@ describe('synthesized audio director', () => {
     expect(audio.play('explosion')).toBe(false)
     audio.setPreferences({ mute: false, masterVolume: 0.8, soundEffectsVolume: 0.5 })
     expect(audio.play('explosion')).toBe(true)
-    expect(fake.start).toHaveBeenCalledOnce()
+    expect(audio.play('reflector-hit')).toBe(true)
+    expect(fake.start).toHaveBeenCalledTimes(2)
   })
 
   it('fails silently when AudioContext is unavailable', async () => {

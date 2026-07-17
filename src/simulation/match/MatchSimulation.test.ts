@@ -10,6 +10,8 @@ import {
 } from '../serialization/matchSerialization'
 import { replayChecksum, replayMatch, type MatchReplay } from '../replay/replay'
 import { TERRAIN_MATERIAL } from '../../terrain/materials'
+import { getMap } from '../../maps/registry'
+import type { SimProjectile } from './MatchState'
 
 const config = {
   mode: '1v1' as const,
@@ -179,6 +181,68 @@ describe('fixed-step timing', () => {
 })
 
 describe('framework-independent weapons', () => {
+  it('reflects every physical projectile kind before weapon-specific impact handling', () => {
+    const cases: Array<[SimProjectile['weaponId'], SimProjectile['kind']]> = [
+      ['basic-rocket', 'primary'],
+      ['precision-cannon', 'primary'],
+      ['high-arc-mortar', 'primary'],
+      ['timed-grenade', 'primary'],
+      ['cluster-charge', 'primary'],
+      ['cluster-charge', 'cluster-child'],
+      ['terrain-boring-drill', 'primary'],
+      ['bomb-beacon', 'primary'],
+      ['bomb-beacon', 'beacon-bomb'],
+      ['fork-rocket', 'primary'],
+      ['fork-rocket', 'fork-child'],
+      ['old-shoe', 'primary'],
+      ['siege-bazooka', 'primary'],
+      ['cryo-shot', 'primary'],
+    ]
+    const map = getMap('ruined-foundry')
+    const object = map.objects[0]
+    const dx = object.end.x - object.start.x
+    const dy = object.end.y - object.start.y
+    const length = Math.hypot(dx, dy)
+    const normal = { x: -dy / length, y: dx / length }
+    const midpoint = {
+      x: (object.start.x + object.end.x) / 2,
+      y: (object.start.y + object.end.y) / 2,
+    }
+
+    for (const [weaponId, kind] of cases) {
+      const simulation = new MatchSimulation({
+        mode: '2v2',
+        playerNames: ['A', 'B', 'C', 'D'],
+        mapId: 'ruined-foundry',
+        turnDurationSeconds: 30,
+      })
+      simulation.state.phase = 'projectile'
+      simulation.state.wind = 0
+      simulation.state.projectiles = [{
+        id: 'projectile-test',
+        actionId: 'action-test',
+        ownerId: 'player-1',
+        weaponId,
+        kind,
+        position: { x: midpoint.x + normal.x * 30, y: midpoint.y + normal.y * 30 },
+        velocity: { x: -normal.x * 2400, y: -normal.y * 2400 },
+        radius: weaponId === 'terrain-boring-drill' || kind === 'beacon-bomb' ? 6 : kind === 'primary' ? 5 : 4,
+        fuseTicks: weaponId === 'timed-grenade' ? 120 : 0,
+      }]
+      simulation.step()
+      expect(simulation.state.projectiles, `${weaponId}:${kind}`).toHaveLength(1)
+      expect(simulation.state.projectiles[0].id).toBe('projectile-test')
+      expect(simulation.state.beacons).toHaveLength(0)
+      expect(simulation.state.terrainOperations).toHaveLength(0)
+      const event = simulation.drainEvents().find((candidate) => candidate.type === 'projectile-reflected')
+      expect(event).toMatchObject({ objectId: object.id, projectileId: 'projectile-test' })
+      expect(
+        simulation.state.projectiles[0].velocity.x * normal.x +
+          simulation.state.projectiles[0].velocity.y * normal.y,
+      ).toBeGreaterThan(0)
+    }
+  })
+
   it('resolves rocket and grenade terrain destruction inside simulation', () => {
     for (const weaponId of ['basic-rocket', 'timed-grenade'] as const) {
       const simulation = new MatchSimulation(config)
@@ -473,7 +537,7 @@ describe('terrain, snapshots, and replay', () => {
     fireDown(simulation)
     simulation.step(20)
     const payload = serializeMatchState(simulation.state)
-    expect(deserializeMatchState(payload).version).toBe(6)
+    expect(deserializeMatchState(payload).version).toBe(7)
     const restored = restoreMatchSimulation(payload)
     expect(matchStateChecksum(restored.state)).toBe(matchStateChecksum(simulation.state))
     expect([...restored.getTerrain().cells]).toEqual([...simulation.getTerrain().cells])
@@ -489,10 +553,33 @@ describe('terrain, snapshots, and replay', () => {
     expect(matchStateChecksum(restored.state)).toBe(matchStateChecksum(simulation.state))
   })
 
+  it('rejects snapshot and replay restoration when installed map content differs', () => {
+    const simulation = new MatchSimulation(config)
+    const snapshot = simulation.snapshot()
+    snapshot.state.mapContentHash = '0000000000000000'
+    expect(() => new MatchSimulation(undefined, { snapshot })).toThrow(/installed map revision/)
+
+    const map = getMap(config.mapId)
+    expect(() =>
+      replayMatch({
+        version: 1,
+        seed: 42,
+        config,
+        mapRevision: map.revision,
+        mapContentHash: '0000000000000000',
+        commands: [],
+        endTick: 1,
+      }),
+    ).toThrow(/installed map content/)
+  })
+
   it('replays deterministically without Phaser and changes checksum when a command changes', () => {
     const base: MatchReplay = {
+      version: 1,
       seed: 42,
       config,
+      mapRevision: getMap(config.mapId).revision,
+      mapContentHash: getMap(config.mapId).contentHash,
       endTick: 120,
       commands: [
         {

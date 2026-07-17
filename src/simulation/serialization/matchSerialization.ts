@@ -1,13 +1,25 @@
 import { MatchSimulation } from '../match/MatchSimulation'
-import type { MatchState, SerializedMatchState } from '../match/MatchState'
+import {
+  SIMULATION_SNAPSHOT_VERSION,
+  type MatchState,
+  type SerializedMatchState,
+} from '../match/MatchState'
 
 export function serializeMatchState(state: MatchState): string {
-  return JSON.stringify({ version: 6, state, accumulatorSeconds: 0 } satisfies SerializedMatchState)
+  return JSON.stringify({
+    version: SIMULATION_SNAPSHOT_VERSION,
+    state,
+    accumulatorSeconds: 0,
+  } satisfies SerializedMatchState)
 }
 
 export function deserializeMatchState(payload: string): SerializedMatchState {
   const parsed: unknown = JSON.parse(payload)
-  if (!parsed || typeof parsed !== 'object' || (parsed as { version?: unknown }).version !== 6)
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    (parsed as { version?: unknown }).version !== SIMULATION_SNAPSHOT_VERSION
+  )
     throw new Error('Unsupported match snapshot')
   const snapshot = parsed as SerializedMatchState
   if (
@@ -19,6 +31,8 @@ export function deserializeMatchState(payload: string): SerializedMatchState {
     !Array.isArray(snapshot.state.terrainOperations) ||
     !Number.isSafeInteger(snapshot.state.mapRevision) ||
     snapshot.state.mapRevision < 1 ||
+    typeof snapshot.state.mapContentHash !== 'string' ||
+    !/^[0-9a-f]{16}$/.test(snapshot.state.mapContentHash) ||
     !Number.isFinite(snapshot.state.worldWidth) ||
     !Number.isFinite(snapshot.state.worldHeight) ||
     snapshot.state.worldWidth <= 0 ||
@@ -39,7 +53,7 @@ function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
   return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
     .join(',')}}`
 }

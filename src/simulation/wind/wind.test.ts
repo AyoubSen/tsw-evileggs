@@ -134,8 +134,11 @@ describe('authoritative wind', () => {
     simulation.state.wind += WIND_STEP
     expect(matchStateChecksum(simulation.state)).not.toBe(checksum)
     const replayed = replayMatch({
+      version: 1,
       seed: 77,
       config: simulation.state.config,
+      mapRevision: simulation.state.mapRevision,
+      mapContentHash: simulation.state.mapContentHash,
       commands: [],
       endTick: 1,
     })

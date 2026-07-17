@@ -19,6 +19,17 @@ const explosion = (sequence: number): MatchEvent => ({
   blastRadius: 72,
 })
 
+const reflection = (sequence: number): MatchEvent => ({
+  type: 'projectile-reflected',
+  sequence,
+  tick: sequence,
+  objectId: 'wall-1',
+  projectileId: 'projectile-1',
+  position: { x: 100, y: 200 },
+  incomingVelocity: { x: 100, y: 0 },
+  outgoingVelocity: { x: -80, y: 0 },
+})
+
 describe('presentation event sequencing', () => {
   it('consumes an authoritative effect once and ignores duplicate or recovered old events', () => {
     const guard = new EventSequenceGuard()
@@ -40,5 +51,11 @@ describe('presentation event sequencing', () => {
     guard.consume(event(4))
     guard.reset()
     expect(guard.consume(event(1))).toBe(true)
+  })
+
+  it('deduplicates authoritative reflector presentation events', () => {
+    const guard = new EventSequenceGuard()
+    expect(guard.consume(reflection(1))).toBe(true)
+    expect(guard.consume(reflection(1))).toBe(false)
   })
 })

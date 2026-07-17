@@ -14,6 +14,7 @@
     { "x": 700, "y": 680, "teamId": 0, "teamSlot": 2, "facing": 1 },
     { "x": 1028, "y": 680, "teamId": 1, "teamSlot": 2, "facing": -1 }
   ],
+  "objects": [],
   "theme": {
     "sky": "#9EDCE5",
     "sun": "#FFEDB1",

@@ -162,6 +162,58 @@ describe('OnlineMatchSource synchronization', () => {
     })
   })
 
+  it('deduplicates reflection events and applies their authoritative projectile correction', () => {
+    const room = new FakeRoom()
+    const source = new OnlineMatchSource(room as unknown as Room)
+    const simulation = new MatchSimulation()
+    simulation.state.projectiles.push({
+      id: 'projectile-1',
+      actionId: 'action-1',
+      ownerId: 'player-1',
+      weaponId: 'basic-rocket',
+      kind: 'primary',
+      position: { x: 100, y: 100 },
+      velocity: { x: 100, y: 0 },
+      radius: 5,
+      fuseTicks: 0,
+    })
+    room.message(snapshotMessage(simulation))
+    const event = {
+      type: 'projectile-reflected' as const,
+      sequence: 1,
+      tick: 1,
+      objectId: 'wall-1',
+      projectileId: 'projectile-1',
+      position: { x: 140, y: 120 },
+      incomingVelocity: { x: 100, y: 0 },
+      outgoingVelocity: { x: -80, y: 0 },
+    }
+    const message = {
+      type: 'simulation-events' as const,
+      matchGeneration: 1,
+      fromSequence: 1,
+      events: [event],
+    }
+    room.message(message)
+    room.message(message)
+    expect(source.state.projectiles[0]).toMatchObject({
+      position: event.position,
+      velocity: event.outgoingVelocity,
+    })
+    expect(source.drainEvents()).toEqual([event])
+  })
+
+  it('rejects a checksummed snapshot with mismatched installed map content', () => {
+    const room = new FakeRoom()
+    const source = new OnlineMatchSource(room as unknown as Room)
+    const message = snapshotMessage(new MatchSimulation())
+    message.snapshot.state.mapContentHash = '0000000000000000'
+    message.checksum = matchStateChecksum(message.snapshot.state)
+    room.message(message)
+    expect(source.ready).toBe(false)
+    expect(room.sent.at(-1)).toMatchObject({ payload: { type: 'request-snapshot' } })
+  })
+
   it('projects discrete state immediately and interpolates only positions', () => {
     const room = new FakeRoom()
     const source = new OnlineMatchSource(room as unknown as Room)

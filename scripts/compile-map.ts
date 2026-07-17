@@ -14,6 +14,37 @@ type CompilerMetadata = Omit<MapDocument, 'format' | 'formatVersion' | 'width' |
   theme: { [Key in keyof MapTheme]: number | string }
 }
 
+const METADATA_KEYS = [
+  'id',
+  'revision',
+  'mode',
+  'displayName',
+  'description',
+  'label',
+  'cellSize',
+  'spawns',
+  'objects',
+  'theme',
+] as const
+const THEME_KEYS: Array<keyof MapTheme> = [
+  'sky',
+  'sun',
+  'backHill',
+  'terrain',
+  'surface',
+  'dust',
+  'brick',
+  'stone',
+  'steel',
+]
+
+function requireExactKeys(value: object, keys: readonly string[], label: string): void {
+  const record = value as Record<string, unknown>
+  const allowed = new Set(keys)
+  if (Object.keys(record).some((key) => !allowed.has(key)) || keys.some((key) => !(key in record)))
+    throw new Error(`${label} contains unsupported or missing fields.`)
+}
+
 const SOURCE_PALETTE = new Map<string, TerrainMaterialId>([
   ['000000', TERRAIN_MATERIAL.empty],
   ['8a5a3b', TERRAIN_MATERIAL.soil],
@@ -112,6 +143,10 @@ async function main(): Promise<void> {
     readFile(metadataPath, 'utf8'),
   ])
   const metadata = JSON.parse(metadataText) as CompilerMetadata
+  if (!metadata || typeof metadata !== 'object' || !metadata.theme || typeof metadata.theme !== 'object')
+    throw new Error('Map metadata is invalid.')
+  requireExactKeys(metadata, METADATA_KEYS, 'Map metadata')
+  requireExactKeys(metadata.theme, THEME_KEYS, 'Map metadata theme')
   if (!Number.isSafeInteger(metadata.cellSize) || metadata.cellSize < 1)
     throw new Error('Map metadata cellSize must be a positive integer.')
   const decoded = decodePng(image)
@@ -146,6 +181,7 @@ async function main(): Promise<void> {
     height: decoded.height * metadata.cellSize,
     theme,
     spawns: metadata.spawns,
+    objects: metadata.objects,
     terrain: {
       encoding: 'row-rle-v1',
       cellSize: metadata.cellSize,

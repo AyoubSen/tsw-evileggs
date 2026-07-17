@@ -14,6 +14,11 @@ import { explosionFalloff, knockbackVelocity } from '../damage/explosion'
 import { launchVelocity } from '../aim/aim'
 import { integrateProjectile } from '../projectile/integrate'
 import {
+  firstProjectileContact,
+  sweepCircleAgainstMapObject,
+  type ProjectileContact,
+} from '../projectile/contact'
+import {
   WEAPON_ORDER,
   WEAPONS,
   canUseWeapon,
@@ -32,6 +37,7 @@ import {
 import {
   FIXED_TICK_SECONDS,
   SIMULATION_HZ,
+  SIMULATION_SNAPSHOT_VERSION,
   type MatchState,
   type SerializedMatchState,
   type SimBeacon,
@@ -61,7 +67,6 @@ const finiteVector = (value: unknown): value is Vector =>
   value !== null &&
   Number.isFinite((value as Vector).x) &&
   Number.isFinite((value as Vector).y)
-type ProjectileImpact = { position: Vector; normal: Vector }
 
 export class MatchSimulation {
   private terrain: TerrainMask
@@ -81,6 +86,7 @@ export class MatchSimulation {
       if (
         this.map.id !== this.state.mapId ||
         this.map.revision !== this.state.mapRevision ||
+        this.map.contentHash !== this.state.mapContentHash ||
         this.map.width !== this.state.worldWidth ||
         this.map.height !== this.state.worldHeight ||
         this.map.mode !== this.state.config.mode ||
@@ -109,6 +115,7 @@ export class MatchSimulation {
       config: validated,
       mapId: validated.mapId,
       mapRevision: map.revision,
+      mapContentHash: map.contentHash,
       worldWidth: map.width,
       worldHeight: map.height,
       phase: 'input',
@@ -500,7 +507,35 @@ export class MatchSimulation {
         if (!this.outOfBounds(next.position)) nextProjectiles.push({ ...projectile, ...next })
         continue
       }
-      if (weapon.mechanic === 'timed-bounce') {
+      if (impact.kind === 'reflector') {
+        const incomingVelocity = { ...next.velocity }
+        const normalVelocity =
+          incomingVelocity.x * impact.normal.x + incomingVelocity.y * impact.normal.y
+        const outgoingVelocity = {
+          x:
+            (incomingVelocity.x - 2 * normalVelocity * impact.normal.x) *
+            impact.object.velocityRetention,
+          y:
+            (incomingVelocity.y - 2 * normalVelocity * impact.normal.y) *
+            impact.object.velocityRetention,
+        }
+        nextProjectiles.push({
+          ...projectile,
+          position: {
+            x: impact.position.x + impact.normal.x * 0.05,
+            y: impact.position.y + impact.normal.y * 0.05,
+          },
+          velocity: outgoingVelocity,
+        })
+        this.emit({
+          type: 'projectile-reflected',
+          objectId: impact.object.id,
+          projectileId: projectile.id,
+          position: { ...impact.position },
+          incomingVelocity,
+          outgoingVelocity: { ...outgoingVelocity },
+        })
+      } else if (weapon.mechanic === 'timed-bounce') {
         const normalVelocity =
           next.velocity.x * impact.normal.x + next.velocity.y * impact.normal.y
         const tangentVelocity = {
@@ -629,7 +664,7 @@ export class MatchSimulation {
   private projectileCollision(
     previous: Pick<SimProjectile, 'position' | 'radius'>,
     next: Pick<SimProjectile, 'position' | 'radius'>,
-  ): ProjectileImpact | null {
+  ): ProjectileContact | null {
     const distance = Math.hypot(
       next.position.x - previous.position.x,
       next.position.y - previous.position.y,
@@ -640,37 +675,60 @@ export class MatchSimulation {
       x: next.position.x - previous.position.x,
       y: next.position.y - previous.position.y,
     }
+    let terminalContact: ProjectileContact | null = null
     for (let sample = 1; sample <= samples; sample += 1) {
       const t = sample / samples
       const point = {
         x: previous.position.x + (next.position.x - previous.position.x) * t,
         y: previous.position.y + (next.position.y - previous.position.y) * t,
       }
-      const hitPlayer = this.state.players.find(
+      const hitPlayers = this.state.players.filter(
         (player) =>
           player.alive &&
           Math.hypot(player.position.x - point.x, player.position.y - point.y) <
             player.radius + next.radius,
       )
+      const contacts: Array<ProjectileContact | null> = []
       if (this.outOfBounds(point))
-        return { position: point, normal: this.boundaryNormal(point, movement) }
-      if (hitPlayer) {
+        contacts.push({
+          kind: 'boundary',
+          toi: t,
+          position: point,
+          normal: this.boundaryNormal(point, movement),
+          stableId: 'boundary',
+        })
+      for (const hitPlayer of hitPlayers) {
         const dx = point.x - hitPlayer.position.x
         const dy = point.y - hitPlayer.position.y
         const length = Math.hypot(dx, dy)
-        return {
+        contacts.push({
+          kind: 'player',
+          toi: t,
           position: point,
           normal:
             length > Number.EPSILON
               ? { x: dx / length, y: dy / length }
               : this.oppositeDirection(movement),
-        }
+          playerId: hitPlayer.id,
+          stableId: hitPlayer.id,
+        })
       }
       if (this.terrain.isSolid(point.x, point.y))
-        return { position: point, normal: this.terrainImpactNormal(lastPoint, point, movement) }
+        contacts.push({
+          kind: 'terrain',
+          toi: t,
+          position: point,
+          normal: this.terrainImpactNormal(lastPoint, point, movement),
+          stableId: `${Math.floor(point.y / this.terrain.scale)}:${Math.floor(point.x / this.terrain.scale)}`,
+        })
+      terminalContact = firstProjectileContact(contacts)
+      if (terminalContact) break
       lastPoint = point
     }
-    return null
+    const reflectorContacts = this.map.objects.map((object) =>
+      sweepCircleAgainstMapObject(previous.position, next.position, next.radius, object),
+    )
+    return firstProjectileContact([terminalContact, ...reflectorContacts])
   }
 
   private boundaryNormal(point: Vector, movement: Vector): Vector {
@@ -1179,7 +1237,7 @@ export class MatchSimulation {
 
   snapshot(): SerializedMatchState {
     return {
-      version: 6,
+      version: SIMULATION_SNAPSHOT_VERSION,
       state: structuredClone(this.state),
       accumulatorSeconds: this.accumulator,
     }

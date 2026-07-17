@@ -5,6 +5,7 @@ import type { WeaponId, WeaponInventory } from '../../weapons/registry'
 
 export const SIMULATION_HZ = 60
 export const FIXED_TICK_SECONDS = 1 / SIMULATION_HZ
+export const SIMULATION_SNAPSHOT_VERSION = 7
 
 export type MatchPhase = 'input' | 'projectile' | 'settling' | 'expired' | 'victory'
 
@@ -83,6 +84,7 @@ export type MatchState = {
   config: LocalMatchConfig
   mapId: MapId
   mapRevision: number
+  mapContentHash: string
   worldWidth: number
   worldHeight: number
   phase: MatchPhase
@@ -115,7 +117,7 @@ export type MatchState = {
 }
 
 export type SerializedMatchState = {
-  version: 6
+  version: typeof SIMULATION_SNAPSHOT_VERSION
   state: MatchState
   accumulatorSeconds: number
 }

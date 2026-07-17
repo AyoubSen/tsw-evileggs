@@ -9,6 +9,7 @@ import type {
   SimProjectile,
 } from '../simulation/match/MatchState'
 import { reconstructTerrain } from '../simulation/match/MatchSimulation'
+import { getMap } from '../maps/registry'
 import { SIMULATION_HZ } from '../simulation/match/MatchState'
 import { matchStateChecksum } from '../simulation/serialization/matchSerialization'
 import type { TerrainMask } from '../terrain/TerrainMask'
@@ -372,6 +373,15 @@ export class OnlineMatchSource implements MatchSource {
       this.requestSnapshot()
       return
     }
+    const installedMap = getMap(message.snapshot.state.mapId)
+    if (
+      installedMap.id !== message.snapshot.state.mapId ||
+      installedMap.revision !== message.snapshot.state.mapRevision ||
+      installedMap.contentHash !== message.snapshot.state.mapContentHash
+    ) {
+      this.requestSnapshot()
+      return
+    }
     const generationChanged = message.matchGeneration !== this.matchGeneration
     if (generationChanged) this.cancelPendingCommands()
     this.snapshotState = structuredClone(message.snapshot.state)
@@ -549,6 +559,16 @@ export class OnlineMatchSource implements MatchSource {
         if (seat >= 0) {
           this.snapshotState.players[seat].position = { ...event.to }
           this.playerSamples.set(seat, [])
+        }
+      }
+      if (event.type === 'projectile-reflected' && this.snapshotState) {
+        const projectile = this.snapshotState.projectiles.find(
+          (candidate) => candidate.id === event.projectileId,
+        )
+        if (projectile) {
+          projectile.position = { ...event.position }
+          projectile.velocity = { ...event.outgoingVelocity }
+          this.projectileSamples.set(projectile.id, [])
         }
       }
       if (event.type === 'mine-deployed' && this.snapshotState)
