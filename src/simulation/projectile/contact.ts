@@ -11,8 +11,10 @@ type ContactBase = {
   normal: Vector
 }
 
+export type ProjectileBoundaryEdge = 'left' | 'right' | 'top' | 'bottom'
+
 export type ProjectileContact =
-  | (ContactBase & { kind: 'boundary'; stableId: string })
+  | (ContactBase & { kind: 'boundary'; edge: ProjectileBoundaryEdge; stableId: string })
   | (ContactBase & { kind: 'player'; playerId: string; stableId: string })
   | (ContactBase & { kind: 'terrain'; stableId: string })
   | (ContactBase & {
@@ -50,6 +52,47 @@ export function firstProjectileContact(
   for (const contact of contacts)
     if (contact && (!first || compareProjectileContacts(contact, first) < 0)) first = contact
   return first
+}
+
+export function sweepCircleAgainstBounds(
+  start: Vector,
+  end: Vector,
+  radius: number,
+  width: number,
+  height: number,
+): ProjectileContact | null {
+  const movement = { x: end.x - start.x, y: end.y - start.y }
+  const candidates: ProjectileContact[] = []
+  const add = (
+    edge: ProjectileBoundaryEdge,
+    coordinate: number,
+    startCoordinate: number,
+    movementCoordinate: number,
+    normal: Vector,
+  ) => {
+    if (movementCoordinate * (normal.x || normal.y) >= -CONTACT_EPSILON) return
+    const toi = (coordinate - startCoordinate) / movementCoordinate
+    if (toi < -CONTACT_EPSILON || toi > 1 + CONTACT_EPSILON) return
+    const clampedToi = Math.max(0, Math.min(1, toi))
+    candidates.push({
+      kind: 'boundary',
+      edge,
+      stableId: `boundary:${edge}`,
+      toi: clampedToi,
+      position: {
+        x: start.x + movement.x * clampedToi,
+        y: start.y + movement.y * clampedToi,
+      },
+      normal,
+    })
+  }
+  if (movement.x < -CONTACT_EPSILON) add('left', radius, start.x, movement.x, { x: 1, y: 0 })
+  if (movement.x > CONTACT_EPSILON)
+    add('right', width - radius, start.x, movement.x, { x: -1, y: 0 })
+  if (movement.y < -CONTACT_EPSILON) add('top', radius, start.y, movement.y, { x: 0, y: 1 })
+  if (movement.y > CONTACT_EPSILON)
+    add('bottom', height - radius, start.y, movement.y, { x: 0, y: -1 })
+  return firstProjectileContact(candidates)
 }
 
 type CapsuleContact = ContactBase

@@ -16,6 +16,8 @@ Transparent pixels are also empty. Disable antialiasing, color correction, index
 
 Create a metadata JSON file using `map.metadata.example.json`, then compile the source:
 
+`projectileBoundary` declares the modes a map supports. `supportedModes` accepts `open`, `reflect`, and `wrap`; the compiler canonicalizes that list in this order. It must be non-empty and duplicate-free, `defaultMode` must be included, and `reflectionVelocityRetention` must be from `0.1` through `1`.
+
 ```sh
 pnpm map:compile maps-src/my-map.png maps-src/my-map.json maps-src/my-map.map.json
 ```

@@ -227,6 +227,11 @@ textarea:focus-visible {
   background: #fff0b8;
   color: var(--clay-dark);
 }
+.button-customize {
+  margin-top: 12px;
+  background: #eee3fa;
+  color: #594495;
+}
 .menu-links {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -295,6 +300,9 @@ textarea:focus-visible {
   position: absolute;
   bottom: 76px;
   filter: drop-shadow(0 10px 0 #254d45);
+}
+.hero-toy .player-avatar {
+  width: 112px;
 }
 .hero-toy-left {
   left: 21%;
@@ -435,6 +443,209 @@ textarea:focus-visible {
   border: 3px solid var(--line);
   border-radius: 50%;
   background: #fff9df;
+}
+.player-avatar {
+  display: block;
+  width: 82px;
+  height: auto;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+.player-avatar .avatar-body {
+  stroke: var(--line);
+  stroke-width: 4;
+  stroke-linejoin: round;
+  filter: drop-shadow(4px 5px 0 #473b3155);
+}
+.player-avatar .avatar-shine {
+  fill: none;
+  stroke: #fff9e9aa;
+  stroke-linecap: round;
+  stroke-width: 5;
+}
+.player-avatar .avatar-shadow {
+  fill: #473b3145;
+}
+.player-avatar .avatar-face {
+  fill: var(--line);
+  stroke: var(--line);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+.player-avatar .avatar-accessory {
+  stroke: var(--line);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 4;
+}
+.player-avatar.team-background .avatar-team-field {
+  fill: #cce8ee;
+  stroke: var(--line);
+  stroke-width: 3;
+}
+.player-avatar.team-background.team-1 .avatar-team-field {
+  fill: #f8d4d9;
+}
+.contender-avatar-button {
+  flex: 0 0 auto;
+  padding: 2px;
+  border: 2px dashed transparent;
+  border-radius: 18px;
+  background: transparent;
+}
+.contender-avatar-button:hover {
+  border-color: var(--clay-dark);
+}
+.setup-customize-all {
+  display: block;
+  margin: -8px auto 18px;
+  padding: 9px 14px;
+}
+.identity-editor {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 170px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: #fff3cf;
+  color: var(--ink);
+  font-weight: 900;
+}
+.identity-editor .player-avatar {
+  width: 52px;
+  height: 52px;
+}
+.empty-avatar {
+  display: grid;
+  width: 70px;
+  aspect-ratio: 1;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 3px dashed #8aaebd;
+  border-radius: 50%;
+  color: #66818b;
+  font: 900 1.5rem Impact, sans-serif;
+}
+.team-1 .empty-avatar {
+  border-color: #d598a2;
+  color: #a86f79;
+}
+.customize-panel {
+  max-width: 1120px;
+}
+.customize-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+  align-items: start;
+  gap: 26px;
+  margin-top: 28px;
+}
+.customize-preview {
+  position: sticky;
+  top: 18px;
+  padding: 16px;
+  border: 3px solid var(--line);
+  border-radius: 25px 18px 27px 20px;
+  background: #dff1e8;
+  box-shadow: 0 6px 0 #82aa99;
+}
+.slot-picker {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 5px;
+}
+.slot-picker button {
+  min-width: 0;
+  padding: 4px 2px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: #fff9e9;
+  color: var(--ink);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+.slot-picker button.selected {
+  border-color: var(--line);
+  background: var(--sun);
+  box-shadow: 0 3px 0 var(--line);
+}
+.slot-picker .player-avatar {
+  width: 100%;
+}
+.large-avatar-preview {
+  display: grid;
+  min-height: 280px;
+  place-items: center;
+  margin: 14px 0;
+}
+.large-avatar-preview .player-avatar {
+  width: min(260px, 100%);
+}
+.customize-team-toggle {
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+.customize-random-actions {
+  justify-content: center;
+  margin-top: 16px;
+}
+.appearance-galleries {
+  display: grid;
+  gap: 16px;
+}
+.appearance-group {
+  min-width: 0;
+  margin: 0;
+  padding: 13px;
+  border: 2px dashed #b49b72;
+  border-radius: 16px;
+  background: #fffaf0;
+}
+.appearance-group legend {
+  padding: 0 7px;
+  color: var(--clay-dark);
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.appearance-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 8px;
+}
+.appearance-options button {
+  display: grid;
+  min-height: 54px;
+  place-items: center;
+  gap: 4px;
+  padding: 8px 5px;
+  border: 2px solid var(--line);
+  border-radius: 11px 14px 10px 13px;
+  background: #fff9e9;
+  color: var(--ink);
+  box-shadow: 0 3px 0 #bba57d;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+.appearance-options button.selected {
+  background: var(--sun);
+  box-shadow: 0 2px 0 var(--line);
+  transform: translateY(1px);
+}
+.appearance-options i {
+  width: 25px;
+  height: 25px;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+}
+.customize-back {
+  margin-top: 24px;
+  padding: 11px 18px;
 }
 .battle-setup,
 .panel {
@@ -598,10 +809,24 @@ select {
   margin: 0;
   font-size: 1.5rem;
 }
+.picker-heading .button-quiet {
+  flex: 0 0 auto;
+}
 .map-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
+}
+.boundary-rule-control {
+  margin-top: 34px;
+  padding-top: 24px;
+  border-top: 2px dashed #b49b72;
+}
+.boundary-rule-control h3 {
+  margin: 3px 0 16px;
+}
+.boundary-mode-picker {
+  margin-bottom: 8px;
 }
 .map-card {
   position: relative;
@@ -939,6 +1164,12 @@ select {
   gap: 16px;
   margin: 24px 0;
 }
+.online-form-row > .identity-editor,
+.join-room-form > .identity-editor {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 8px 14px;
+}
 .online-form-row label,
 .join-room-form label {
   padding: 16px;
@@ -1251,6 +1482,9 @@ select {
 }
 .winning-team .toy-avatar {
   transform: scale(0.82);
+}
+.winning-team .player-avatar {
+  width: 92px;
 }
 .results::before {
   content: '✦  ✦  ✦';
@@ -1680,13 +1914,19 @@ footer {
     grid-template-columns: repeat(2, 1fr);
   }
   .picker-heading {
-    display: block;
-  }
-  .picker-heading .map-cards {
-    margin-top: 15px;
+    align-items: center;
   }
   .editor-layout {
     grid-template-columns: 1fr;
+  }
+  .customize-layout {
+    grid-template-columns: 1fr;
+  }
+  .customize-preview {
+    position: static;
+  }
+  .large-avatar-preview {
+    min-height: 220px;
   }
   .editor-sidebar {
     position: static;
@@ -1761,6 +2001,23 @@ footer {
     flex: 0 0 auto;
     transform: scale(0.82);
     margin: -7px;
+  }
+  .lobby-seat .player-avatar,
+  .contender .player-avatar {
+    width: 64px;
+  }
+  .customize-panel {
+    padding-inline: 14px;
+  }
+  .slot-picker {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .slot-picker .player-avatar {
+    width: 48px;
+    margin: auto;
+  }
+  .appearance-options {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .lobby-heading {
     display: block;

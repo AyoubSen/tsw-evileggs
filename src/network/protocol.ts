@@ -6,18 +6,28 @@ import {
   type MapId,
   type MatchMode,
 } from '../maps/registry'
-import { TURN_DURATIONS, type TurnDuration } from '../match/config'
+import { TURN_DURATIONS, type LocalMatchConfig, type TurnDuration } from '../match/config'
 import { MAX_WORLD_COORDINATE, POWER_MAX_PERCENT, POWER_MIN_PERCENT } from '../shared/constants'
 import type { MatchCommandInput, CommandRejection } from '../simulation/match/MatchCommand'
 import type { MatchEvent, SimulationMatchResult } from '../simulation/match/MatchEvent'
 import type { SerializedMatchState } from '../simulation/match/MatchState'
 import { SIMULATION_SNAPSHOT_VERSION } from '../simulation/match/MatchState'
 import { WEAPON_ORDER, WEAPON_REGISTRY_VERSION } from '../weapons/registry'
+import {
+  PLAYER_ACCESSORIES,
+  PLAYER_ACCENT_COLORS,
+  PLAYER_APPEARANCE_REGISTRY_VERSION,
+  PLAYER_BODIES,
+  PLAYER_FACES,
+  PLAYER_PATTERNS,
+  PLAYER_PRIMARY_COLORS,
+  type PlayerAppearance,
+} from '../players/appearanceRegistry'
 
 export const PRIVATE_MATCH_ROOM = 'private_match'
-export const PROTOCOL_VERSION = 'private-room-10'
+export const PROTOCOL_VERSION = 'private-room-12'
 export { SIMULATION_SNAPSHOT_VERSION }
-export const CLIENT_BUILD_VERSION = '1.8.0'
+export const CLIENT_BUILD_VERSION = '1.10.2'
 export const ROOM_CODE_LENGTH = 6
 export const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/
 export const NETWORK_MESSAGE_TYPE = 'room'
@@ -28,6 +38,7 @@ export type CompatibilityVersions = {
   snapshot: number
   maps: string
   weapons: string
+  appearances: string
   build: string
 }
 
@@ -36,6 +47,7 @@ export const CURRENT_COMPATIBILITY: CompatibilityVersions = {
   snapshot: SIMULATION_SNAPSHOT_VERSION,
   maps: MAP_REGISTRY_VERSION,
   weapons: WEAPON_REGISTRY_VERSION,
+  appearances: PLAYER_APPEARANCE_REGISTRY_VERSION,
   build: CLIENT_BUILD_VERSION,
 }
 
@@ -107,13 +119,16 @@ export type CreateRoomOptions = {
   playerName: string
   mode: Extract<MatchMode, '1v1' | '2v2' | '3v3'>
   mapId: MapId
+  projectileBoundaryMode: LocalMatchConfig['projectileBoundaryMode']
   turnDurationSeconds: TurnDuration
   compatibility: CompatibilityVersions
+  playerAppearance: PlayerAppearance
 }
 
 export type JoinRoomOptions = {
   playerName: string
   compatibility: CompatibilityVersions
+  playerAppearance: PlayerAppearance
 }
 
 const ONLINE_MAP_ORDER = [
@@ -122,13 +137,30 @@ const ONLINE_MAP_ORDER = [
   ...mapIdsForMode('3v3'),
 ] as [MapId, ...MapId[]]
 
+const ONLINE_PROJECTILE_BOUNDARY_MODES = new Set(
+  ONLINE_MAP_ORDER.flatMap((mapId) => getMap(mapId).projectileBoundary.supportedModes),
+)
+
 const compatibilitySchema = z
   .object({
     protocol: z.string().max(40),
     snapshot: z.number().int().nonnegative(),
     maps: z.string().max(40),
     weapons: z.string().max(40),
+    appearances: z.string().max(40),
     build: z.string().max(40),
+  })
+  .strict()
+
+const playerAppearanceSchema = z
+  .object({
+    version: z.literal(1),
+    body: z.enum(PLAYER_BODIES.map(({ id }) => id)),
+    primaryColor: z.enum(PLAYER_PRIMARY_COLORS.map(({ id }) => id)),
+    accentColor: z.enum(PLAYER_ACCENT_COLORS.map(({ id }) => id)),
+    pattern: z.enum(PLAYER_PATTERNS.map(({ id }) => id)),
+    face: z.enum(PLAYER_FACES.map(({ id }) => id)),
+    accessory: z.enum(PLAYER_ACCESSORIES.map(({ id }) => id)),
   })
   .strict()
 
@@ -137,19 +169,34 @@ export const createRoomOptionsSchema = z
     playerName: z.string().max(64),
     mode: z.enum(['1v1', '2v2', '3v3']),
     mapId: z.enum(ONLINE_MAP_ORDER),
+    projectileBoundaryMode: z.string().refine(
+      (value): value is LocalMatchConfig['projectileBoundaryMode'] =>
+        ONLINE_PROJECTILE_BOUNDARY_MODES.has(value as LocalMatchConfig['projectileBoundaryMode']),
+      { message: 'Projectile boundary mode is not recognized.' },
+    ),
     turnDurationSeconds: z.union(TURN_DURATIONS.map((value) => z.literal(value))),
     compatibility: compatibilitySchema,
+    playerAppearance: playerAppearanceSchema,
   })
   .strict()
   .refine((value) => getMap(value.mapId).mode === value.mode, {
     message: 'Selected map does not support the requested room mode.',
     path: ['mapId'],
   })
+  .refine(
+    (value) =>
+      getMap(value.mapId).projectileBoundary.supportedModes.includes(value.projectileBoundaryMode),
+    {
+      message: 'Selected map does not support the requested projectile boundary mode.',
+      path: ['projectileBoundaryMode'],
+    },
+  )
 
 export const joinRoomOptionsSchema = z
   .object({
     playerName: z.string().max(64),
     compatibility: compatibilitySchema,
+    playerAppearance: playerAppearanceSchema,
   })
   .strict()
 
@@ -242,6 +289,8 @@ export function compatibilityError(value: CompatibilityVersions): string | null 
   if (value.maps !== CURRENT_COMPATIBILITY.maps) return 'Map registry version does not match.'
   if (value.weapons !== CURRENT_COMPATIBILITY.weapons)
     return 'Weapon registry version does not match.'
+  if (value.appearances !== CURRENT_COMPATIBILITY.appearances)
+    return 'Player appearance registry version does not match.'
   if (value.build !== CURRENT_COMPATIBILITY.build) return 'Client build version does not match.'
   return null
 }

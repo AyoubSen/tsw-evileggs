@@ -12,11 +12,14 @@ import { replayChecksum, replayMatch, type MatchReplay } from '../replay/replay'
 import { TERRAIN_MATERIAL } from '../../terrain/materials'
 import { getMap } from '../../maps/registry'
 import type { SimProjectile } from './MatchState'
+import { DEFAULT_PLAYER_APPEARANCES } from '../../players/appearanceRegistry'
 
 const config = {
   mode: '1v1' as const,
   playerNames: ['Lumen', 'Morrow'] as const,
+  playerAppearances: DEFAULT_PLAYER_APPEARANCES.slice(0, 2),
   mapId: 'rolling-hills' as const,
+  projectileBoundaryMode: 'open' as const,
   turnDurationSeconds: 30 as const,
 }
 

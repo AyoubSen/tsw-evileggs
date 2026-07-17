@@ -4,6 +4,7 @@ import {
   type MatchState,
   type SerializedMatchState,
 } from '../match/MatchState'
+import { validatePlayerAppearance } from '../../players/appearanceRegistry'
 
 export function serializeMatchState(state: MatchState): string {
   return JSON.stringify({
@@ -25,6 +26,10 @@ export function deserializeMatchState(payload: string): SerializedMatchState {
   if (
     !snapshot.state ||
     !Array.isArray(snapshot.state.players) ||
+    !snapshot.state.players.every((player) => validatePlayerAppearance(player.appearance)) ||
+    !Array.isArray(snapshot.state.config?.playerAppearances) ||
+    snapshot.state.config.playerAppearances.length !== snapshot.state.players.length ||
+    !snapshot.state.config.playerAppearances.every(validatePlayerAppearance) ||
     !Array.isArray(snapshot.state.mines) ||
     !Array.isArray(snapshot.state.beacons) ||
     !Array.isArray(snapshot.state.teamTurnCursors) ||
@@ -38,6 +43,10 @@ export function deserializeMatchState(payload: string): SerializedMatchState {
     snapshot.state.worldWidth <= 0 ||
     snapshot.state.worldHeight <= 0 ||
     !Number.isFinite(snapshot.state.wind) ||
+    typeof snapshot.state.config?.projectileBoundaryMode !== 'string' ||
+    !(['open', 'reflect', 'wrap'] as readonly string[]).includes(
+      snapshot.state.config.projectileBoundaryMode,
+    ) ||
     !Number.isFinite(snapshot.accumulatorSeconds) ||
     snapshot.accumulatorSeconds < 0
   )

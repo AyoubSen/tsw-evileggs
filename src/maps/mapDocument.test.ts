@@ -54,21 +54,54 @@ const portal = (id: string) => ({
   velocityRetention: 0.8,
 })
 
-describe('map document v3', () => {
+describe('map document v4', () => {
   it('migrates strict v1 documents with an empty object list', () => {
     const current = document()
-    const { objects: _objects, ...v1 } = current
+    const { objects: _objects, projectileBoundary: _projectileBoundary, ...v1 } = current
     const migrated = migrateMapDocument({ ...v1, formatVersion: 1 })
-    expect(migrated.formatVersion).toBe(3)
+    expect(migrated.formatVersion).toBe(4)
     expect(migrated.objects).toEqual([])
+    expect(migrated.projectileBoundary).toEqual({
+      defaultMode: 'open',
+      supportedModes: ['open'],
+      reflectionVelocityRetention: 1,
+    })
   })
 
   it('migrates v2 documents without changing reflector objects', () => {
     const current = document()
     const wall = reflector('wall')
-    const migrated = migrateMapDocument({ ...current, formatVersion: 2, objects: [wall] })
-    expect(migrated.formatVersion).toBe(3)
+    const { projectileBoundary: _projectileBoundary, ...v2 } = current
+    const migrated = migrateMapDocument({ ...v2, formatVersion: 2, objects: [wall] })
+    expect(migrated.formatVersion).toBe(4)
     expect(migrated.objects).toEqual([wall])
+  })
+
+  it('migrates v3 objects and canonicalizes current boundary modes', () => {
+    const current = document()
+    const { projectileBoundary: _projectileBoundary, ...v3 } = current
+    expect(migrateMapDocument({ ...v3, formatVersion: 3, objects: [portal('pair')] })).toMatchObject({
+      objects: [portal('pair')],
+      projectileBoundary: { defaultMode: 'open', supportedModes: ['open'], reflectionVelocityRetention: 1 },
+    })
+    expect(migrateMapDocument({
+      ...current,
+      projectileBoundary: {
+        defaultMode: 'wrap',
+        supportedModes: ['wrap', 'open', 'reflect'],
+        reflectionVelocityRetention: 0.9,
+      },
+    }).projectileBoundary.supportedModes).toEqual(['open', 'reflect', 'wrap'])
+  })
+
+  it('strictly validates projectile boundary metadata', () => {
+    const boundary = document().projectileBoundary
+    expect(() => migrateMapDocument({ ...document(), projectileBoundary: { ...boundary, extra: true } })).toThrow(/unsupported/i)
+    expect(() => migrateMapDocument({ ...document(), projectileBoundary: { ...boundary, supportedModes: [] } })).toThrow(/non-empty/)
+    expect(() => migrateMapDocument({ ...document(), projectileBoundary: { ...boundary, supportedModes: ['open', 'open'] } })).toThrow(/duplicates/)
+    expect(() => migrateMapDocument({ ...document(), projectileBoundary: { ...boundary, supportedModes: ['unknown'] } })).toThrow(/unknown/)
+    expect(() => migrateMapDocument({ ...document(), projectileBoundary: { ...boundary, defaultMode: 'wrap', supportedModes: ['open'] } })).toThrow(/default mode/)
+    expect(() => migrateMapDocument({ ...document(), projectileBoundary: { ...boundary, reflectionVelocityRetention: 0.09 } })).toThrow(/between/)
   })
 
   it('sorts objects canonically and hashes equivalent content identically', () => {

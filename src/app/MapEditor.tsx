@@ -9,6 +9,7 @@ import {
 } from 'react'
 import {
   MAP_FORMAT_VERSION,
+  DEFAULT_PROJECTILE_BOUNDARY,
   MAX_MAP_OBJECTS,
   MAX_REFLECTOR_LENGTH,
   MAX_REFLECTOR_THICKNESS,
@@ -27,6 +28,7 @@ import {
   type MapTheme,
   type MatchMode,
   type ProjectilePortalDefinition,
+  type ProjectileBoundary,
   type ReflectorWallDefinition,
   type SpawnDefinition,
 } from '../maps/mapDocument'
@@ -36,7 +38,7 @@ import { loadEditorDraft, saveEditorDraft } from './editorStorage'
 type SupportedMode = MatchMode
 type EditorTool = 'brush' | 'line' | 'rectangle' | 'fill' | 'spawn' | 'reflector-wall' | 'projectile-portal'
 type EditorDraft = {
-  version: 2
+  version: 3
   id: string
   revision: number
   mode: SupportedMode
@@ -50,6 +52,7 @@ type EditorDraft = {
   cells: Uint8Array
   spawns: SpawnDefinition[]
   objects: MapObjectDefinition[]
+  projectileBoundary: ProjectileBoundary
 }
 
 type MapEditorProps = {
@@ -132,6 +135,10 @@ const cloneDraft = (draft: EditorDraft): EditorDraft => ({
   cells: new Uint8Array(draft.cells),
   spawns: draft.spawns.map((spawn) => ({ ...spawn })),
   objects: cloneObjectsCanonical(draft.objects),
+  projectileBoundary: {
+    ...draft.projectileBoundary,
+    supportedModes: [...draft.projectileBoundary.supportedModes],
+  },
 })
 
 const colorToCss = (color: number) => `#${color.toString(16).padStart(6, '0')}`
@@ -170,7 +177,7 @@ function createDraft(width = 960, height = 540, mode: SupportedMode = '1v1'): Ed
   cells.fill(TERRAIN_MATERIAL.soil, groundCell * cellWidth)
   const groundY = groundCell * cellSize
   return {
-    version: 2,
+    version: 3,
     id: 'untitled-map',
     revision: 1,
     mode,
@@ -184,6 +191,10 @@ function createDraft(width = 960, height = 540, mode: SupportedMode = '1v1'): Ed
     cells,
     spawns: defaultSpawns(width, mode, () => groundY),
     objects: [],
+    projectileBoundary: {
+      ...DEFAULT_PROJECTILE_BOUNDARY,
+      supportedModes: [...DEFAULT_PROJECTILE_BOUNDARY.supportedModes],
+    },
   }
 }
 
@@ -202,6 +213,10 @@ function buildDocument(draft: EditorDraft): MapDocument {
     theme: { ...draft.theme },
     spawns: draft.spawns.map((spawn) => ({ ...spawn })),
     objects: cloneObjectsCanonical(draft.objects),
+    projectileBoundary: {
+      ...draft.projectileBoundary,
+      supportedModes: [...draft.projectileBoundary.supportedModes],
+    },
     terrain: {
       encoding: 'row-rle-v1',
       cellSize: draft.cellSize,
@@ -220,7 +235,7 @@ function draftFromDocument(value: unknown): EditorDraft {
   if (resolved.mode !== '1v1' && resolved.mode !== '2v2' && resolved.mode !== '3v3')
     throw new Error('The editor supports only 1v1, 2v2, and 3v3 maps.')
   return {
-    version: 2,
+    version: 3,
     id: document.id,
     revision: document.revision,
     mode: resolved.mode,
@@ -234,6 +249,10 @@ function draftFromDocument(value: unknown): EditorDraft {
     cells: new Uint8Array(resolved.terrainCells),
     spawns: resolved.spawnPoints.map((spawn) => ({ ...spawn })),
     objects: cloneObjectsCanonical(resolved.objects),
+    projectileBoundary: {
+      ...resolved.projectileBoundary,
+      supportedModes: [...resolved.projectileBoundary.supportedModes],
+    },
   }
 }
 
@@ -245,19 +264,30 @@ export function migrateStoredDraft(value: unknown): EditorDraft {
     objects?: unknown
   }
   const hasBaseFields =
-    (draft.version === 1 || draft.version === 2) &&
+    (draft.version === 1 || draft.version === 2 || draft.version === 3) &&
     (draft.mode === '1v1' || draft.mode === '2v2' || draft.mode === '3v3') &&
     Number.isSafeInteger(draft.width) &&
     Number.isSafeInteger(draft.height) &&
     draft.cells instanceof Uint8Array &&
-    Array.isArray(draft.spawns)
+    Array.isArray(draft.spawns) &&
+    (draft.version !== 3 ||
+      (typeof draft.projectileBoundary === 'object' &&
+        draft.projectileBoundary !== null &&
+        Array.isArray(draft.projectileBoundary.supportedModes)))
   if (!hasBaseFields) throw new Error('No compatible editor draft was found.')
-  if (draft.version === 2 && !Array.isArray(draft.objects))
+  if (draft.version !== 1 && !Array.isArray(draft.objects))
     throw new Error('The editor draft has an invalid object list.')
   return cloneDraft({
     ...draft,
-    version: 2,
+    version: 3,
     objects: draft.version === 1 ? [] : draft.objects as MapObjectDefinition[],
+    projectileBoundary:
+      draft.version === 3 && draft.projectileBoundary
+        ? draft.projectileBoundary
+        : {
+            ...DEFAULT_PROJECTILE_BOUNDARY,
+            supportedModes: [...DEFAULT_PROJECTILE_BOUNDARY.supportedModes],
+          },
   } as EditorDraft)
 }
 

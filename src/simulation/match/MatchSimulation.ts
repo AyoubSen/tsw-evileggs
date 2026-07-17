@@ -14,6 +14,7 @@ import { launchVelocity } from '../aim/aim'
 import { integrateProjectile } from '../projectile/integrate'
 import {
   firstProjectileContact,
+  sweepCircleAgainstBounds,
   sweepCircleAgainstMapObject,
   type ProjectileContact,
 } from '../projectile/contact'
@@ -47,6 +48,7 @@ import {
 } from './MatchState'
 import { isDestructibleMaterial } from '../../terrain/materials'
 import { nextScheduledTurn } from '../turns/teamTurnOrder'
+import { clonePlayerAppearance, type PlayerAppearance } from '../../players/appearanceRegistry'
 
 const CHARACTER_RADIUS = 14
 const MOVE_SPEED = 105
@@ -59,8 +61,9 @@ const SETTLE_TICKS = Math.ceil(0.45 * SIMULATION_HZ)
 const EXPIRED_TICKS = Math.ceil(0.7 * SIMULATION_HZ)
 const MAX_ACCUMULATED_SECONDS = 0.25
 const MAX_BUFFERED_EVENTS = 2048
-const MAX_PROJECTILE_PORTALS_PER_TICK = 8
+const MAX_PROJECTILE_INTERACTIONS_PER_TICK = 16
 const PORTAL_EXIT_EPSILON = 0.05
+const CONTACT_EXIT_EPSILON = 0.05
 
 type SegmentBasis = {
   tangent: Vector
@@ -98,6 +101,9 @@ export class MatchSimulation {
         this.map.width !== this.state.worldWidth ||
         this.map.height !== this.state.worldHeight ||
         this.map.mode !== this.state.config.mode ||
+        !this.map.projectileBoundary.supportedModes.includes(
+          this.state.config.projectileBoundaryMode,
+        ) ||
         this.map.spawnPoints.length !== this.state.players.length
       )
         throw new Error('Match snapshot map does not match the installed map revision.')
@@ -110,7 +116,12 @@ export class MatchSimulation {
     this.terrain = createMapTerrain(map)
     const seed = (options.seed ?? 1) >>> 0 || 1
     const players = map.spawnPoints.map((spawn, index) =>
-      this.createPlayer(`player-${index + 1}`, validated.playerNames[index], spawn),
+      this.createPlayer(
+        `player-${index + 1}`,
+        validated.playerNames[index],
+        validated.playerAppearances[index],
+        spawn,
+      ),
     )
     const activePlayerIndex = players.findIndex(
       (player) => player.teamId === 0 && player.teamSlot === 0,
@@ -156,10 +167,16 @@ export class MatchSimulation {
     }
   }
 
-  private createPlayer(id: string, name: string, spawn: SpawnDefinition): SimPlayer {
+  private createPlayer(
+    id: string,
+    name: string,
+    appearance: PlayerAppearance,
+    spawn: SpawnDefinition,
+  ): SimPlayer {
     return {
       id,
       name,
+      appearance: clonePlayerAppearance(appearance),
       position: { x: spawn.x, y: spawn.y - CHARACTER_RADIUS },
       velocity: { x: 0, y: 0 },
       health: 100,
@@ -515,13 +532,149 @@ export class MatchSimulation {
       let velocity = { ...next.velocity }
       const traversedPortals = new Set<string>()
       let impact: ProjectileContact | null = null
-      for (let traversal = 0; traversal < MAX_PROJECTILE_PORTALS_PER_TICK; traversal += 1) {
+      let movementComplete = false
+      let removedAtBoundary = false
+      for (let interaction = 0; interaction < MAX_PROJECTILE_INTERACTIONS_PER_TICK; interaction += 1) {
         impact = this.projectileCollision(
           { position: movementStart, radius: projectile.radius },
           { position: movementEnd, radius: projectile.radius },
           traversedPortals,
         )
-        if (!impact || impact.kind !== 'portal') break
+        if (!impact) {
+          movementStart = movementEnd
+          movementComplete = true
+          break
+        }
+        if (impact.kind === 'boundary') {
+          const mode = (this.state.config as LocalMatchConfig & {
+            projectileBoundaryMode: 'open' | 'reflect' | 'wrap'
+          }).projectileBoundaryMode ?? 'open'
+          if (mode === 'open' || (mode === 'wrap' && (impact.edge === 'top' || impact.edge === 'bottom'))) {
+            this.emit({
+              type: 'projectile-boundary-removed',
+              projectileId: projectile.id,
+              edge: impact.edge,
+              position: { ...impact.position },
+            })
+            removedAtBoundary = true
+            impact = null
+            break
+          }
+          const remaining = {
+            x: (movementEnd.x - movementStart.x) * (1 - impact.toi),
+            y: (movementEnd.y - movementStart.y) * (1 - impact.toi),
+          }
+          if (mode === 'wrap') {
+            const to = {
+              x: impact.edge === 'left' ? this.state.worldWidth - projectile.radius : projectile.radius,
+              y: impact.position.y,
+            }
+            this.emit({
+              type: 'projectile-wrapped',
+              projectileId: projectile.id,
+              edge: impact.edge,
+              from: { ...impact.position },
+              to: { ...to },
+              velocity: { ...velocity },
+            })
+            movementStart = to
+            movementEnd = { x: to.x + remaining.x, y: to.y + remaining.y }
+            impact = null
+            continue
+          }
+          const retention = (this.map as MapDefinition & {
+            projectileBoundary: { reflectionVelocityRetention: number }
+          }).projectileBoundary.reflectionVelocityRetention
+          const incomingVelocity = { ...velocity }
+          const atHorizontalEdge =
+            (Math.abs(impact.position.x - projectile.radius) <= CONTACT_EXIT_EPSILON &&
+              (velocity.x < 0 || remaining.x < 0)) ||
+            (Math.abs(impact.position.x - (this.state.worldWidth - projectile.radius)) <=
+              CONTACT_EXIT_EPSILON &&
+              (velocity.x > 0 || remaining.x > 0))
+          const atVerticalEdge =
+            (Math.abs(impact.position.y - projectile.radius) <= CONTACT_EXIT_EPSILON &&
+              (velocity.y < 0 || remaining.y < 0)) ||
+            (Math.abs(impact.position.y - (this.state.worldHeight - projectile.radius)) <=
+              CONTACT_EXIT_EPSILON &&
+              (velocity.y > 0 || remaining.y > 0))
+          velocity = {
+            x: (atHorizontalEdge ? -velocity.x : velocity.x) * retention,
+            y: (atVerticalEdge ? -velocity.y : velocity.y) * retention,
+          }
+          const outgoingRemaining = {
+            x: (atHorizontalEdge ? -remaining.x : remaining.x) * retention,
+            y: (atVerticalEdge ? -remaining.y : remaining.y) * retention,
+          }
+          const reflectedPosition = {
+            x:
+              impact.position.x +
+              (atHorizontalEdge
+                ? impact.position.x <= this.state.worldWidth / 2
+                  ? CONTACT_EXIT_EPSILON
+                  : -CONTACT_EXIT_EPSILON
+                : 0),
+            y:
+              impact.position.y +
+              (atVerticalEdge
+                ? impact.position.y <= this.state.worldHeight / 2
+                  ? CONTACT_EXIT_EPSILON
+                  : -CONTACT_EXIT_EPSILON
+                : 0),
+          }
+          this.emit({
+            type: 'projectile-boundary-reflected',
+            projectileId: projectile.id,
+            edge: impact.edge,
+            position: { ...impact.position },
+            incomingVelocity,
+            outgoingVelocity: { ...velocity },
+          })
+          movementStart = reflectedPosition
+          movementEnd = {
+            x: reflectedPosition.x + outgoingRemaining.x,
+            y: reflectedPosition.y + outgoingRemaining.y,
+          }
+          impact = null
+          continue
+        }
+        if (impact.kind === 'reflector') {
+          const incomingVelocity = { ...velocity }
+          const normalVelocity = velocity.x * impact.normal.x + velocity.y * impact.normal.y
+          velocity = {
+            x: (velocity.x - 2 * normalVelocity * impact.normal.x) * impact.object.velocityRetention,
+            y: (velocity.y - 2 * normalVelocity * impact.normal.y) * impact.object.velocityRetention,
+          }
+          const remaining = {
+            x: (movementEnd.x - movementStart.x) * (1 - impact.toi),
+            y: (movementEnd.y - movementStart.y) * (1 - impact.toi),
+          }
+          const normalRemaining = remaining.x * impact.normal.x + remaining.y * impact.normal.y
+          const outgoingRemaining = {
+            x: (remaining.x - 2 * normalRemaining * impact.normal.x) * impact.object.velocityRetention,
+            y: (remaining.y - 2 * normalRemaining * impact.normal.y) * impact.object.velocityRetention,
+          }
+          const reflectedPosition = {
+            x: impact.position.x + impact.normal.x * CONTACT_EXIT_EPSILON,
+            y: impact.position.y + impact.normal.y * CONTACT_EXIT_EPSILON,
+          }
+          this.emit({
+            type: 'projectile-reflected',
+            objectId: impact.object.id,
+            projectileId: projectile.id,
+            position: { ...impact.position },
+            incomingVelocity,
+            outgoingVelocity: { ...velocity },
+          })
+          movementStart = reflectedPosition
+          movementEnd = {
+            x: reflectedPosition.x + outgoingRemaining.x,
+            y: reflectedPosition.y + outgoingRemaining.y,
+          }
+          impact = null
+          continue
+        }
+        if (impact.kind !== 'portal') break
         const source = impact.object[impact.aperture]
         const destinationName = impact.aperture === 'entrance' ? 'exit' : 'entrance'
         const destination = impact.object[destinationName]
@@ -590,40 +743,16 @@ export class MatchSimulation {
         }
         impact = null
       }
-      if (!impact) {
-        if (!this.outOfBounds(movementEnd))
-          nextProjectiles.push({ ...projectile, position: movementEnd, velocity })
+      if (removedAtBoundary) continue
+      if (!impact && !movementComplete) {
+        nextProjectiles.push({ ...projectile, position: movementStart, velocity })
         continue
       }
-      if (impact.kind === 'reflector') {
-        const incomingVelocity = { ...velocity }
-        const normalVelocity =
-          incomingVelocity.x * impact.normal.x + incomingVelocity.y * impact.normal.y
-        const outgoingVelocity = {
-          x:
-            (incomingVelocity.x - 2 * normalVelocity * impact.normal.x) *
-            impact.object.velocityRetention,
-          y:
-            (incomingVelocity.y - 2 * normalVelocity * impact.normal.y) *
-            impact.object.velocityRetention,
-        }
-        nextProjectiles.push({
-          ...projectile,
-          position: {
-            x: impact.position.x + impact.normal.x * 0.05,
-            y: impact.position.y + impact.normal.y * 0.05,
-          },
-          velocity: outgoingVelocity,
-        })
-        this.emit({
-          type: 'projectile-reflected',
-          objectId: impact.object.id,
-          projectileId: projectile.id,
-          position: { ...impact.position },
-          incomingVelocity,
-          outgoingVelocity: { ...outgoingVelocity },
-        })
-      } else if (weapon.mechanic === 'timed-bounce') {
+      if (!impact) {
+        nextProjectiles.push({ ...projectile, position: movementStart, velocity })
+        continue
+      }
+      if (weapon.mechanic === 'timed-bounce') {
         const normalVelocity =
           velocity.x * impact.normal.x + velocity.y * impact.normal.y
         const tangentVelocity = {
@@ -778,14 +907,6 @@ export class MatchSimulation {
             player.radius + next.radius,
       )
       const contacts: Array<ProjectileContact | null> = []
-      if (this.outOfBounds(point))
-        contacts.push({
-          kind: 'boundary',
-          toi: t,
-          position: point,
-          normal: this.boundaryNormal(point, movement),
-          stableId: 'boundary',
-        })
       for (const hitPlayer of hitPlayers) {
         const dx = point.x - hitPlayer.position.x
         const dy = point.y - hitPlayer.position.y
@@ -818,7 +939,17 @@ export class MatchSimulation {
       if (object.type === 'projectile-portal' && ignoredPortalIds.has(object.id)) return null
       return sweepCircleAgainstMapObject(previous.position, next.position, next.radius, object)
     })
-    return firstProjectileContact([terminalContact, ...reflectorContacts])
+    return firstProjectileContact([
+      sweepCircleAgainstBounds(
+        previous.position,
+        next.position,
+        next.radius,
+        this.state.worldWidth,
+        this.state.worldHeight,
+      ),
+      terminalContact,
+      ...reflectorContacts,
+    ])
   }
 
   private segmentBasis(start: Vector, end: Vector): SegmentBasis | null {
@@ -842,17 +973,6 @@ export class MatchSimulation {
       x: (destination.tangent.x * tangent + destination.normal.x * normal) * retention,
       y: (destination.tangent.y * tangent + destination.normal.y * normal) * retention,
     }
-  }
-
-  private boundaryNormal(point: Vector, movement: Vector): Vector {
-    let x = 0
-    let y = 0
-    if (point.x < 0) x = 1
-    else if (point.x > this.state.worldWidth) x = -1
-    if (point.y < 0) y = 1
-    else if (point.y > this.state.worldHeight) y = -1
-    const length = Math.hypot(x, y)
-    return length > Number.EPSILON ? { x: x / length, y: y / length } : this.oppositeDirection(movement)
   }
 
   private terrainImpactNormal(previous: Vector, point: Vector, movement: Vector): Vector {

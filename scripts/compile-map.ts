@@ -24,6 +24,7 @@ const METADATA_KEYS = [
   'cellSize',
   'spawns',
   'objects',
+  'projectileBoundary',
   'theme',
 ] as const
 const THEME_KEYS: Array<keyof MapTheme> = [
@@ -182,6 +183,7 @@ async function main(): Promise<void> {
     theme,
     spawns: metadata.spawns,
     objects: metadata.objects,
+    projectileBoundary: metadata.projectileBoundary,
     terrain: {
       encoding: 'row-rle-v1',
       cellSize: metadata.cellSize,

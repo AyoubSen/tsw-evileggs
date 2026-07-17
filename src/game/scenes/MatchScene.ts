@@ -57,6 +57,15 @@ import {
 } from '../weaponVisualRecipes'
 import { drawShapeRecipe } from '../weaponRenderer'
 import { upcomingTurnIndices } from '../../simulation/turns/teamTurnOrder'
+import {
+  PLAYER_ACCENT_COLORS,
+  PLAYER_PRIMARY_COLORS,
+} from '../../players/appearanceRegistry'
+import {
+  getPlayerVisualRecipe,
+  type PlayerVisualPrimitive,
+  type PlayerVisualRole,
+} from '../../players/playerVisualRecipes'
 
 type BurstEffect = {
   kind: 'explosion' | 'teleport'
@@ -121,7 +130,6 @@ type PortalTransitEffect = {
   lifetime: number
 }
 const ACTOR_VISUAL_SCALE = 0.9
-const ACTOR_COLORS = [0x2863b7, 0xed7090, 0x57b89e, 0xf39a55, 0x8267c7, 0xe2ad2f]
 const TEAM_COLORS = [0x17447f, 0xaa392b]
 const INK_COLOR = 0x24313a
 const HUD_PAPER = 0xfff1c9
@@ -133,6 +141,11 @@ const HUD_DANGER = 0xe65d3d
 const MAX_PROJECTILE_TRAILS = 32
 const MAX_WEAPON_EFFECTS = 40
 const MAX_REFLECTION_EFFECTS = 24
+
+type RenderAppearance = {
+  primary: number
+  accent: number
+}
 
 export class MatchScene extends Phaser.Scene {
   private source!: MatchSource
@@ -1130,6 +1143,127 @@ export class MatchScene extends Phaser.Scene {
     }
   }
 
+  private playerAppearance(player: SimPlayer): RenderAppearance {
+    const appearance = player.appearance
+    const colorOf = (catalog: readonly { id: string; color: string }[], id: string) =>
+      Number.parseInt((catalog.find((entry) => entry.id === id)?.color ?? '#ffffff').slice(1), 16)
+    return {
+      primary: colorOf(PLAYER_PRIMARY_COLORS, appearance.primaryColor),
+      accent: colorOf(PLAYER_ACCENT_COLORS, appearance.accentColor),
+    }
+  }
+
+  private drawPlayerPrimitive(
+    graphics: Phaser.GameObjects.Graphics,
+    primitive: PlayerVisualPrimitive,
+    x: number,
+    y: number,
+    scale: number,
+    facing: number,
+    palette: Readonly<Record<PlayerVisualRole, number>>,
+    alpha: number,
+  ): void {
+    const px = (value: number) => x + (value - 64) * scale * Math.sign(facing || 1)
+    const py = (value: number) => y + (value - 60) * scale
+    if (primitive.fill) graphics.fillStyle(palette[primitive.fill], alpha)
+    if (primitive.stroke)
+      graphics.lineStyle(Math.max(1, (primitive.strokeWidth ?? 1) * scale), palette[primitive.stroke], alpha)
+    if (primitive.kind === 'circle') {
+      if (primitive.fill) graphics.fillCircle(px(primitive.cx), py(primitive.cy), primitive.radius * scale)
+      if (primitive.stroke) graphics.strokeCircle(px(primitive.cx), py(primitive.cy), primitive.radius * scale)
+      return
+    }
+    if (primitive.kind === 'ellipse') {
+      if (primitive.fill) graphics.fillEllipse(px(primitive.cx), py(primitive.cy), primitive.radiusX * 2 * scale, primitive.radiusY * 2 * scale)
+      if (primitive.stroke) graphics.strokeEllipse(px(primitive.cx), py(primitive.cy), primitive.radiusX * 2 * scale, primitive.radiusY * 2 * scale)
+      return
+    }
+    graphics.beginPath()
+    let currentX = 0
+    let currentY = 0
+    for (const command of primitive.commands) {
+      if (command.kind === 'move') {
+        currentX = command.x
+        currentY = command.y
+        graphics.moveTo(px(command.x), py(command.y))
+      } else if (command.kind === 'line') {
+        currentX = command.x
+        currentY = command.y
+        graphics.lineTo(px(command.x), py(command.y))
+      } else if (command.kind === 'curve') {
+        const startX = currentX
+        const startY = currentY
+        for (let step = 1; step <= 8; step += 1) {
+          const t = step / 8
+          const inverse = 1 - t
+          const curveX =
+            inverse ** 3 * startX +
+            3 * inverse ** 2 * t * command.x1 +
+            3 * inverse * t ** 2 * command.x2 +
+            t ** 3 * command.x
+          const curveY =
+            inverse ** 3 * startY +
+            3 * inverse ** 2 * t * command.y1 +
+            3 * inverse * t ** 2 * command.y2 +
+            t ** 3 * command.y
+          graphics.lineTo(px(curveX), py(curveY))
+        }
+        currentX = command.x
+        currentY = command.y
+      } else graphics.closePath()
+    }
+    if (primitive.fill) graphics.fillPath()
+    if (primitive.stroke) graphics.strokePath()
+  }
+
+  private drawAppearance(
+    graphics: Phaser.GameObjects.Graphics,
+    player: SimPlayer,
+    x: number,
+    y: number,
+    size: number,
+    facing = 1,
+    hurt = false,
+    defeated = false,
+    alpha = 1,
+    teamOutline?: number,
+  ): void {
+    const look = this.playerAppearance(player)
+    const recipe = getPlayerVisualRecipe(player.appearance)
+    const s = size / 80
+    const bodyY = y + (defeated ? 5 * s : 0)
+    const primary = hurt ? 0xffffff : this.preferences.highContrastHud ? 0xb8b8b8 : look.primary
+    const accent = this.preferences.highContrastHud ? 0xffffff : look.accent
+    const ink = this.preferences.highContrastHud ? 0x080808 : INK_COLOR
+    const palette = { primary, accent, ink, face: 0xfff1c9, shine: 0xfff8df }
+    this.drawPlayerPrimitive(graphics, recipe.body, x, bodyY, s, facing, palette, alpha)
+    for (const primitive of recipe.pattern)
+      this.drawPlayerPrimitive(graphics, primitive, x, bodyY, s, facing, palette, alpha)
+    this.drawPlayerPrimitive(
+      graphics,
+      { ...recipe.body, fill: undefined },
+      x,
+      bodyY,
+      s,
+      facing,
+      palette,
+      alpha,
+    )
+    for (const primitive of recipe.details)
+      this.drawPlayerPrimitive(graphics, primitive, x, bodyY, s, facing, palette, alpha)
+    if (teamOutline !== undefined)
+      this.drawPlayerPrimitive(
+        graphics,
+        { ...recipe.body, fill: undefined, stroke: 'accent', strokeWidth: 5 },
+        x,
+        bodyY,
+        s,
+        facing,
+        { ...palette, accent: teamOutline },
+        alpha,
+      )
+  }
+
   private renderActors(): void {
     this.actorGraphics.clear()
     this.source.state.players.forEach((player, index) => {
@@ -1162,43 +1296,25 @@ export class MatchScene extends Phaser.Scene {
       this.actorGraphics
         .fillStyle(0x473b31, 0.7)
         .fillEllipse(x + 3 * scale, shadowY + 7 * scale, 32 * scale, 9 * scale)
-      this.actorGraphics
-        .fillStyle(hurt ? 0xffffff : ACTOR_COLORS[index % ACTOR_COLORS.length])
-        .fillRoundedRect(
-          x - 17 * scale,
-          y - (defeated ? 4 : 13) * scale,
-          34 * scale,
-          (defeated ? 16 : 31) * scale,
-          12 * scale,
-        )
-      this.actorGraphics
-        .fillStyle(0xfff6d8)
-        .fillEllipse(x + facing * 3 * scale, y - 3 * scale, 22 * scale, 15 * scale)
-      this.actorGraphics
-        .fillStyle(0x24313a)
-        .fillCircle(x + facing * 7 * scale, y - 4 * scale, 2.8 * scale)
-        .fillCircle(x + facing * scale, y - 4 * scale, 2.8 * scale)
-      this.actorGraphics
-        .lineStyle(2 * scale, 0x24313a)
-        .lineBetween(
-          x + facing * 2 * scale,
-          y + 5 * scale,
-          x + facing * (hurt ? 5 : 8) * scale,
-          y + (hurt ? 8 : 5) * scale,
-        )
-      this.actorGraphics
-        .fillStyle(ACTOR_COLORS[index % ACTOR_COLORS.length])
-        .fillTriangle(
-          x - 13 * facing * scale,
-          y - 13 * scale,
-          x - 4 * facing * scale,
-          y - 25 * scale,
-          x - 3 * facing * scale,
-          y - 11 * scale,
-        )
-      this.actorGraphics
-        .lineStyle(2.5, TEAM_COLORS[player.teamId])
-        .strokeRoundedRect(x - 17 * scale, y - 13 * scale, 34 * scale, 31 * scale, 12 * scale)
+      this.drawAppearance(
+        this.actorGraphics,
+        player,
+        x,
+        y,
+        34 * scale,
+        facing,
+        hurt,
+        defeated,
+        1,
+        TEAM_COLORS[player.teamId],
+      )
+      if (victory)
+        this.actorGraphics
+          .fillStyle(0xf7bd3f)
+          .fillTriangle(x - 9, y - 23, x - 5, y - 34, x, y - 24)
+          .fillTriangle(x - 1, y - 24, x + 4, y - 36, x + 9, y - 23)
+          .lineStyle(2, INK_COLOR)
+          .lineBetween(x - 10, y - 22, x + 10, y - 22)
       if (player.frozenTurnsRemaining > 0) {
         const cryoPalette = resolveWeaponPalette('cryo-shot', this.preferences.highContrastHud)
         this.actorGraphics
@@ -1746,9 +1862,6 @@ export class MatchScene extends Phaser.Scene {
         ? 0x00d9ff
         : 0xff5b72
       : TEAM_COLORS[player.teamId]
-    const portraitColor = this.preferences.highContrastHud
-      ? 0xffffff
-      : ACTOR_COLORS[index % ACTOR_COLORS.length]
     const displayedHealth = Phaser.Math.Clamp(
       this.displayedHealth[index] ?? player.health,
       0,
@@ -1796,20 +1909,9 @@ export class MatchScene extends Phaser.Scene {
         )
     }
 
-    this.hudGraphics
-      .fillStyle(HUD_SHADOW, alpha)
-      .fillCircle(portraitX + (left ? 1 : -1), y + 21, 15)
-      .fillStyle(portraitColor, alpha)
-      .fillCircle(portraitX, y + 19, 13)
-      .lineStyle(2, HUD_PAPER, alpha)
-      .strokeCircle(portraitX, y + 19, 13)
-      .fillStyle(HUD_PAPER, alpha)
-      .fillEllipse(portraitX, y + 18, 15, 9)
-      .fillStyle(HUD_SHADOW, alpha)
-      .fillCircle(portraitX - 3, y + 17, 1.4)
-      .fillCircle(portraitX + 3, y + 17, 1.4)
-      .lineStyle(1.5, HUD_SHADOW, alpha)
-      .lineBetween(portraitX - 3, y + 24, portraitX + 3, y + (player.alive ? 24 : 21))
+    this.hudGraphics.fillStyle(HUD_SHADOW, alpha).fillCircle(portraitX + (left ? 1 : -1), y + 21, 15)
+    this.drawAppearance(this.hudGraphics, player, portraitX, y + 19, 24, left ? 1 : -1, false, !player.alive, alpha)
+    this.hudGraphics.lineStyle(2, HUD_PAPER, alpha).strokeCircle(portraitX, y + 19, 14)
 
     if (!player.alive)
       this.hudGraphics
@@ -1913,18 +2015,16 @@ export class MatchScene extends Phaser.Scene {
           ? 0x00d9ff
           : 0xff5b72
         : TEAM_COLORS[player.teamId]
-      const portraitColor = this.preferences.highContrastHud
-        ? 0xffffff
-        : ACTOR_COLORS[playerIndex % ACTOR_COLORS.length]
       const radius = current ? 22 * urgentPulse : 14
       this.hudGraphics
         .fillStyle(HUD_SHADOW, 0.74)
         .fillCircle(x + 2, tokenY + 2, radius + 2)
-        .fillStyle(current ? (urgent ? HUD_DANGER : HUD_PAPER) : portraitColor)
+        .fillStyle(current ? (urgent ? HUD_DANGER : HUD_PAPER) : HUD_SHADOW)
         .fillCircle(x, tokenY, radius)
         .lineStyle(current ? 4 : 3, teamColor)
         .strokeCircle(x, tokenY, radius)
 
+      this.drawAppearance(this.hudGraphics, player, x, tokenY, current ? 25 : 20, 1, false, !player.alive)
       if (current) {
         if (ratio > 0)
           this.hudGraphics
@@ -1944,14 +2044,6 @@ export class MatchScene extends Phaser.Scene {
             )
         }
       } else {
-        this.hudGraphics
-          .fillStyle(HUD_PAPER)
-          .fillEllipse(x, tokenY, 15, 9)
-          .fillStyle(HUD_SHADOW)
-          .fillCircle(x - 3, tokenY - 1, 1.3)
-          .fillCircle(x + 3, tokenY - 1, 1.3)
-          .lineStyle(1.2, HUD_SHADOW)
-          .lineBetween(x - 3, tokenY + 4, x + 3, tokenY + 4)
         for (let marker = 0; marker <= player.teamSlot; marker += 1)
           this.hudGraphics
             .fillStyle(teamColor)
@@ -2075,6 +2167,8 @@ export class MatchScene extends Phaser.Scene {
         this.audio.play('grenade-bounce')
         return
       case 'projectile-reflected': {
+        const trail = this.projectileTrails.get(event.projectileId)
+        if (trail) trail.points = [{ ...event.position }]
         this.reflectionEffects.push({
           position: { ...event.position },
           direction: normalizeDirection(
@@ -2107,6 +2201,27 @@ export class MatchScene extends Phaser.Scene {
         }
         return
       }
+      case 'projectile-boundary-reflected': {
+        const trail = this.projectileTrails.get(event.projectileId)
+        if (trail) trail.points = [{ ...event.position }]
+        this.reflectionEffects.push({
+          position: { ...event.position },
+          direction: normalizeDirection(event.outgoingVelocity),
+          age: 0,
+          lifetime: this.preferences.reducedMotion ? 0.14 : 0.25,
+          seed: event.sequence,
+        })
+        if (this.reflectionEffects.length > MAX_REFLECTION_EFFECTS) this.reflectionEffects.shift()
+        return
+      }
+      case 'projectile-wrapped': {
+        const trail = this.projectileTrails.get(event.projectileId)
+        if (trail) trail.points = [{ ...event.to }]
+        return
+      }
+      case 'projectile-boundary-removed':
+        this.projectileTrails.delete(event.projectileId)
+        return
       case 'projectile-portaled': {
         const trail = this.projectileTrails.get(event.projectileId)
         if (trail) trail.points = [{ ...event.to }]

@@ -26,6 +26,18 @@ import {
 } from '../network/onlineLifecycle'
 import type { OnlineRoomView } from '../network/roomView'
 import { AudioDirector } from '../audio/AudioDirector'
+import { PlayerAvatar } from './PlayerAvatar'
+import {
+  DEFAULT_PLAYER_APPEARANCES,
+  PLAYER_ACCESSORIES,
+  PLAYER_ACCENT_COLORS,
+  PLAYER_BODIES,
+  PLAYER_FACES,
+  PLAYER_PATTERNS,
+  PLAYER_PRIMARY_COLORS,
+  randomPlayerAppearance,
+  type PlayerAppearance,
+} from '../players/appearanceRegistry'
 
 type Screen =
   | 'menu'
@@ -36,22 +48,12 @@ type Screen =
   | 'online-lobby'
   | 'how-to'
   | 'settings'
+  | 'customize'
   | 'credits'
   | 'editor'
   | 'match'
 type PausePanel = 'main' | 'how-to' | 'settings' | 'confirm-restart' | 'confirm-menu'
 type SessionMode = 'local' | 'online'
-
-type PlayerNumber = 1 | 2 | 3 | 4 | 5 | 6
-
-function ToyAvatar({ player }: { player: PlayerNumber }) {
-  return (
-    <span className={`toy-avatar toy-avatar-${player}`} aria-hidden="true">
-      <i />
-      <b />
-    </span>
-  )
-}
 
 function HeroDiorama() {
   return (
@@ -64,10 +66,10 @@ function HeroDiorama() {
       <span className="hero-hill hill-back" />
       <span className="hero-hill hill-front" />
       <span className="hero-toy hero-toy-left">
-        <ToyAvatar player={1} />
+        <PlayerAvatar appearance={DEFAULT_PLAYER_APPEARANCES[0]} />
       </span>
       <span className="hero-toy hero-toy-right">
-        <ToyAvatar player={2} />
+        <PlayerAvatar appearance={DEFAULT_PLAYER_APPEARANCES[1]} />
       </span>
     </div>
   )
@@ -280,6 +282,46 @@ function MapMechanicLegend({ mapId }: { mapId: MapId }) {
   )
 }
 
+type ProjectileBoundaryMode = LocalMatchConfig['projectileBoundaryMode']
+
+const PROJECTILE_BOUNDARY_COPY: Record<
+  ProjectileBoundaryMode,
+  { label: string; description: string }
+> = {
+  open: { label: 'Open', description: 'Shots leave the battlefield.' },
+  reflect: { label: 'Reflect', description: 'Shots bounce off every world edge.' },
+  wrap: { label: 'Wrap', description: 'Shots cross from one side to the other.' },
+}
+
+function ProjectileBoundaryPicker({
+  config,
+  onChange,
+}: {
+  config: LocalMatchConfig
+  onChange: (mode: ProjectileBoundaryMode) => void
+}) {
+  const supportedModes = getMap(config.mapId).projectileBoundary.supportedModes
+  return (
+    <div className="mode-picker boundary-mode-picker" aria-label="Projectile boundary rule">
+      {supportedModes.map((mode) => (
+        <button
+          type="button"
+          key={mode}
+          className={config.projectileBoundaryMode === mode ? 'selected' : ''}
+          onClick={() => onChange(mode)}
+        >
+          <strong>{PROJECTILE_BOUNDARY_COPY[mode].label}</strong>
+          <span>{PROJECTILE_BOUNDARY_COPY[mode].description}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function projectileBoundaryLabel(mode: ProjectileBoundaryMode): string {
+  return PROJECTILE_BOUNDARY_COPY[mode].label
+}
+
 function Help() {
   return (
     <div className="tutorial-grid">
@@ -461,9 +503,105 @@ function ConnectionTroubleshooting({ message }: { message: string }) {
   )
 }
 
+const APPEARANCE_GROUPS = [
+  { field: 'body', label: 'Body', entries: PLAYER_BODIES },
+  { field: 'primaryColor', label: 'Primary', entries: PLAYER_PRIMARY_COLORS },
+  { field: 'accentColor', label: 'Accent', entries: PLAYER_ACCENT_COLORS },
+  { field: 'pattern', label: 'Pattern', entries: PLAYER_PATTERNS },
+  { field: 'face', label: 'Face', entries: PLAYER_FACES },
+  { field: 'accessory', label: 'Accessory', entries: PLAYER_ACCESSORIES },
+] as const
+
+function CustomizePlayer({
+  appearances,
+  selectedSlot,
+  onSelectSlot,
+  onChange,
+  onBack,
+}: {
+  appearances: readonly PlayerAppearance[]
+  selectedSlot: number
+  onSelectSlot: (slot: number) => void
+  onChange: (slot: number, appearance: PlayerAppearance) => void
+  onBack: () => void
+}) {
+  const [teamBackground, setTeamBackground] = useState(true)
+  const appearance = appearances[selectedSlot] ?? DEFAULT_PLAYER_APPEARANCES[selectedSlot]
+  return (
+    <section className="panel customize-panel">
+      <header className="screen-heading">
+        <p className="eyebrow">OPEN THE DRESS-UP DRAWER</p>
+        <h2>Customize players</h2>
+        <p>Every local slot keeps its own look, ready for local or online play.</p>
+      </header>
+      <div className="customize-layout">
+        <aside className="customize-preview">
+          <div className="slot-picker" role="tablist" aria-label="Local player slot">
+            {appearances.map((item, index) => (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={selectedSlot === index}
+                className={selectedSlot === index ? 'selected' : ''}
+                key={index}
+                onClick={() => onSelectSlot(index)}
+              >
+                <PlayerAvatar appearance={item} label="" />
+                <span>P{index + 1}</span>
+              </button>
+            ))}
+          </div>
+          <div className="large-avatar-preview">
+            <PlayerAvatar
+              appearance={appearance}
+              teamId={selectedSlot % 2}
+              teamBackground={teamBackground}
+              label={`Player ${selectedSlot + 1} appearance preview`}
+            />
+          </div>
+          <label className="toggle customize-team-toggle">
+            <input type="checkbox" checked={teamBackground} onChange={(event) => setTeamBackground(event.target.checked)} />
+            Preview team background
+          </label>
+          <div className="actions customize-random-actions">
+            <button type="button" onClick={() => onChange(selectedSlot, randomPlayerAppearance())}>Randomize</button>
+            <button type="button" className="secondary" onClick={() => onChange(selectedSlot, { ...DEFAULT_PLAYER_APPEARANCES[selectedSlot] })}>Reset</button>
+          </div>
+        </aside>
+        <div className="appearance-galleries">
+          {APPEARANCE_GROUPS.map((group) => (
+            <fieldset className="appearance-group" key={group.field}>
+              <legend>{group.label}</legend>
+              <div className="appearance-options">
+                {group.entries.map((entry) => (
+                  <button
+                    type="button"
+                    className={appearance[group.field] === entry.id ? 'selected' : ''}
+                    aria-pressed={appearance[group.field] === entry.id}
+                    key={entry.id}
+                    onClick={() => onChange(selectedSlot, { ...appearance, [group.field]: entry.id } as PlayerAppearance)}
+                  >
+                    {'color' in entry && <i style={{ backgroundColor: entry.color }} aria-hidden="true" />}
+                    <span>{entry.label}</span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          ))}
+        </div>
+      </div>
+      <button className="button-quiet customize-back" onClick={onBack}>Back</button>
+    </section>
+  )
+}
+
 export function App() {
   const [preferences, setPreferences] = useState<Preferences>(() => loadPreferences())
   const [screen, setScreen] = useState<Screen>('menu')
+  const [customizeSlot, setCustomizeSlot] = useState(0)
+  const [customizeReturnScreen, setCustomizeReturnScreen] = useState<
+    'menu' | 'setup' | 'online-create' | 'online-join'
+  >('menu')
   const [config, setConfig] = useState<LocalMatchConfig>(() =>
     validateMatchConfig(loadPreferences()),
   )
@@ -623,8 +761,12 @@ export function App() {
         current.mapId === authoritativeConfig.mapId &&
         current.mode === authoritativeConfig.mode &&
         current.turnDurationSeconds === authoritativeConfig.turnDurationSeconds &&
+        current.projectileBoundaryMode === authoritativeConfig.projectileBoundaryMode &&
         current.playerNames.length === authoritativeConfig.playerNames.length &&
-        current.playerNames.every((name, index) => name === authoritativeConfig.playerNames[index])
+        current.playerNames.every((name, index) => name === authoritativeConfig.playerNames[index]) &&
+        current.playerAppearances.length === authoritativeConfig.playerAppearances.length &&
+        current.playerAppearances.every((appearance, index) =>
+          JSON.stringify(appearance) === JSON.stringify(authoritativeConfig.playerAppearances[index]))
           ? current
           : authoritativeConfig,
       )
@@ -746,8 +888,10 @@ export function App() {
       validateMatchConfig({
         mode: preferences.lastMode,
         playerNames: preferences.playerNames,
+        playerAppearances: preferences.playerAppearances,
         mapId: preferences.lastMapId,
         turnDurationSeconds: preferences.turnDurationSeconds,
+        projectileBoundaryMode: preferences.projectileBoundaryMode,
       }),
     )
     setScreen('setup')
@@ -760,9 +904,13 @@ export function App() {
       playerNames: preferences.playerNames.map(
         (name, index) => next.playerNames[index] ?? name,
       ),
+      playerAppearances: preferences.playerAppearances.map(
+        (appearance, index) => next.playerAppearances[index] ?? appearance,
+      ),
       lastMode: next.mode,
       lastMapId: next.mapId,
       turnDurationSeconds: next.turnDurationSeconds,
+      projectileBoundaryMode: next.projectileBoundaryMode,
     })
     setResult(null)
     setError(null)
@@ -777,8 +925,10 @@ export function App() {
       validateMatchConfig({
         mode: document.mode,
         playerNames: preferences.playerNames,
+        playerAppearances: preferences.playerAppearances,
         mapId: 'custom-draft',
         turnDurationSeconds: preferences.turnDurationSeconds,
+        projectileBoundaryMode: getMap('custom-draft').projectileBoundary.defaultMode,
       }),
     )
     setPaused(false)
@@ -822,9 +972,13 @@ export function App() {
         playerNames: preferences.playerNames.map((name, index) =>
           index === 0 ? next.playerNames[0] : name,
         ),
+        playerAppearances: preferences.playerAppearances.map((appearance, index) =>
+          index === 0 ? next.playerAppearances[0] : appearance,
+        ),
         lastMode: next.mode,
         lastMapId: next.mapId,
         turnDurationSeconds: next.turnDurationSeconds,
+        projectileBoundaryMode: next.projectileBoundaryMode,
       })
       setConfig(next)
       setScreen('online-lobby')
@@ -866,12 +1020,16 @@ export function App() {
         code,
         config.playerNames[0],
         operation.controller.signal,
+        config.playerAppearances[0],
       )
       if (!activateSession(session, operation.generation, operation.controller)) return
       setPreferences({
         ...preferences,
         playerNames: preferences.playerNames.map((name, index) =>
           index === 0 ? config.playerNames[0] : name,
+        ),
+        playerAppearances: preferences.playerAppearances.map((appearance, index) =>
+          index === 0 ? config.playerAppearances[0] : appearance,
         ),
       })
       setScreen('online-lobby')
@@ -919,18 +1077,24 @@ export function App() {
     setOnlineSession(null)
     if (session) void session.leave().catch(() => undefined)
   }
-  const chooseMap = (mapId: MapId) => setConfig({ ...config, mapId })
+  const chooseMap = (mapId: MapId) => setConfig(validateMatchConfig({ ...config, mapId }))
+  const chooseProjectileBoundaryMode = (projectileBoundaryMode: ProjectileBoundaryMode) =>
+    setConfig(validateMatchConfig({ ...config, projectileBoundaryMode }))
   const chooseGameMode = (mode: GameMode) => {
     const playerNames = preferences.playerNames.map(
       (name, index) => config.playerNames[index] ?? name,
     )
-    setPreferences({ ...preferences, playerNames })
+    const playerAppearances = preferences.playerAppearances.map(
+      (appearance, index) => config.playerAppearances[index] ?? appearance,
+    )
+    setPreferences({ ...preferences, playerNames, playerAppearances })
     setConfig(
       validateMatchConfig({
         ...config,
         mode,
         mapId: defaultMapForMode(mode).id,
         playerNames,
+        playerAppearances,
       }),
     )
   }
@@ -938,6 +1102,26 @@ export function App() {
     const playerNames = [...config.playerNames]
     playerNames[index] = name
     setConfig({ ...config, playerNames })
+  }
+  const updatePlayerAppearance = (index: number, appearance: PlayerAppearance) => {
+    const playerAppearances = preferences.playerAppearances.map((current, slot) =>
+      slot === index ? appearance : current,
+    )
+    setPreferences({ ...preferences, playerAppearances })
+    setConfig((current) => ({
+      ...current,
+      playerAppearances: current.playerAppearances.map((item, slot) =>
+        slot === index ? appearance : item,
+      ),
+    }))
+  }
+  const openCustomize = (
+    returnScreen: 'menu' | 'setup' | 'online-create' | 'online-join',
+    slot = 0,
+  ) => {
+    setCustomizeReturnScreen(returnScreen)
+    setCustomizeSlot(slot)
+    setScreen('customize')
   }
   const onlineRematchUnavailableReason =
     roomView?.result.reason === 'forfeit' ||
@@ -983,6 +1167,9 @@ export function App() {
               >
                 Build a Map <span>›</span>
               </button>
+              <button className="button-quiet button-play button-customize" onClick={() => openCustomize('menu')}>
+                Customize Players <span>›</span>
+              </button>
               <div className="menu-links">
                 <button className="button-quiet" onClick={() => setScreen('how-to')}>
                   How to Play
@@ -1011,6 +1198,16 @@ export function App() {
           onTestPlay={testEditorMap}
         />
       )
+    if (screen === 'customize')
+      return (
+        <CustomizePlayer
+          appearances={preferences.playerAppearances}
+          selectedSlot={customizeSlot}
+          onSelectSlot={setCustomizeSlot}
+          onChange={updatePlayerAppearance}
+          onBack={() => setScreen(customizeReturnScreen)}
+        />
+      )
     if (screen === 'online')
       return (
         <section className="panel online-panel">
@@ -1026,11 +1223,13 @@ export function App() {
                   validateMatchConfig({
                     mode: preferences.lastMode,
                     playerNames: preferences.playerNames,
+                    playerAppearances: preferences.playerAppearances,
                     mapId:
                       getMap(preferences.lastMapId).mode === preferences.lastMode
                         ? preferences.lastMapId
                         : defaultMapForMode(preferences.lastMode).id,
                     turnDurationSeconds: preferences.turnDurationSeconds,
+                    projectileBoundaryMode: preferences.projectileBoundaryMode,
                   }),
                 )
                 setScreen('online-create')
@@ -1043,17 +1242,19 @@ export function App() {
               className="online-choice join-choice"
               onClick={() => {
                 setOnlineError(null)
-                setConfig({
+                setConfig(validateMatchConfig({
                   mode: '1v1',
                   playerNames: preferences.playerNames.map((name, index) =>
                     index === 0 ? name : name || `Player ${index + 1}`,
                   ),
+                  playerAppearances: preferences.playerAppearances,
                   mapId:
                     getMap(preferences.lastMapId).mode === '1v1'
                       ? preferences.lastMapId
                       : defaultMapForMode('1v1').id,
                   turnDurationSeconds: preferences.turnDurationSeconds,
-                })
+                  projectileBoundaryMode: preferences.projectileBoundaryMode,
+                }))
                 setScreen('online-join')
               }}
             >
@@ -1093,6 +1294,14 @@ export function App() {
             ))}
           </div>
           <div className="online-form-row">
+            <button
+              type="button"
+              className="identity-editor"
+              onClick={() => openCustomize('online-create')}
+            >
+              <PlayerAvatar appearance={config.playerAppearances[0]} label="" />
+              <span>Customize your player</span>
+            </button>
             <label>
               <span>Your player name</span>
               <input
@@ -1133,6 +1342,14 @@ export function App() {
               </button>
             ))}
           </div>
+          <div className="boundary-rule-control">
+            <p className="eyebrow">SIDE BOUNDARIES</p>
+            <h3>Choose a projectile rule</h3>
+            <ProjectileBoundaryPicker
+              config={config}
+              onChange={chooseProjectileBoundaryMode}
+            />
+          </div>
           {onlineError && <ConnectionTroubleshooting message={onlineError} />}
           {onlineSlow && (
             <p className="online-wake-message">
@@ -1163,6 +1380,14 @@ export function App() {
           <h2>Unpack the code</h2>
           <p>Spaces and letter case do not matter.</p>
           <div className="join-room-form">
+            <button
+              type="button"
+              className="identity-editor"
+              onClick={() => openCustomize('online-join')}
+            >
+              <PlayerAvatar appearance={config.playerAppearances[0]} label="" />
+              <span>Customize your player</span>
+            </button>
             <label>
               <span>Room code</span>
               <input
@@ -1249,7 +1474,13 @@ export function App() {
                   className={`lobby-seat seat-${seat + 1} team-${teamId}`}
                   key={seat}
                 >
-                  <ToyAvatar player={(seat + 1) as PlayerNumber} />
+                  {player ? (
+                    <PlayerAvatar
+                      appearance={player.appearance}
+                      teamId={teamId}
+                      label={`${player.name}'s appearance`}
+                    />
+                  ) : <span className="empty-avatar" aria-hidden="true">?</span>}
                   <div>
                     <span>
                       {seat === 0 ? 'Host · ' : ''}Team {teamId === 0 ? 'Comet' : 'Ember'} ·
@@ -1282,6 +1513,10 @@ export function App() {
             <div>
               <span>Turn clock</span>
               <strong>{roomView.turnDurationSeconds} seconds</strong>
+            </div>
+            <div>
+              <span>Side boundaries</span>
+              <strong>{projectileBoundaryLabel(roomView.projectileBoundaryMode)}</strong>
             </div>
             <div>
               <span>Start rule</span>
@@ -1358,7 +1593,14 @@ export function App() {
                 {config.playerNames.map((name, index) =>
                   index % 2 === teamId ? (
                     <div className="contender" key={index}>
-                      <ToyAvatar player={(index + 1) as PlayerNumber} />
+                      <button
+                        type="button"
+                        className="contender-avatar-button"
+                        aria-label={`Customize player ${index + 1}`}
+                        onClick={() => openCustomize('setup', index)}
+                      >
+                        <PlayerAvatar appearance={config.playerAppearances[index]} label="" />
+                      </button>
                       <label>
                         <span>Player {Math.floor(index / 2) + 1}</span>
                         <input
@@ -1373,6 +1615,9 @@ export function App() {
               </section>
             ))}
           </div>
+          <button className="button-quiet setup-customize-all" onClick={() => openCustomize('setup')}>
+            Customize all players
+          </button>
           <div className="setup-controls">
             <label>
               <span>Turn clock</span>
@@ -1402,31 +1647,39 @@ export function App() {
                 <p className="eyebrow">BATTLEFIELD</p>
                 <h3>Choose an arena</h3>
               </div>
-              <div className="map-cards">
-                {mapIdsForMode(config.mode).map((id) => (
-                  <button
-                    key={id}
-                    className={`map-card ${config.mapId === id ? 'selected' : ''}`}
-                    onClick={() => chooseMap(id)}
-                  >
-                    <MapPreview mapId={id} />
-                    <strong>{MAPS[id].displayName}</strong>
-                    <em>{MAPS[id].label}</em>
-                    <span>{MAPS[id].description}</span>
-                    <MapMechanicLegend mapId={id} />
-                  </button>
-                ))}
-              </div>
+              <button
+                className="button-quiet"
+                onClick={() => {
+                  const maps = mapIdsForMode(config.mode)
+                  chooseMap(maps[Math.floor(Math.random() * maps.length)])
+                }}
+              >
+                Random map
+              </button>
             </div>
-            <button
-              className="button-quiet"
-              onClick={() => {
-                const maps = mapIdsForMode(config.mode)
-                chooseMap(maps[Math.floor(Math.random() * maps.length)])
-              }}
-            >
-              Random map
-            </button>
+            <div className="map-cards">
+              {mapIdsForMode(config.mode).map((id) => (
+                <button
+                  key={id}
+                  className={`map-card ${config.mapId === id ? 'selected' : ''}`}
+                  onClick={() => chooseMap(id)}
+                >
+                  <MapPreview mapId={id} />
+                  <strong>{MAPS[id].displayName}</strong>
+                  <em>{MAPS[id].label}</em>
+                  <span>{MAPS[id].description}</span>
+                  <MapMechanicLegend mapId={id} />
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="boundary-rule-control">
+            <p className="eyebrow">SIDE BOUNDARIES</p>
+            <h3>Choose a projectile rule</h3>
+            <ProjectileBoundaryPicker
+              config={config}
+              onChange={chooseProjectileBoundaryMode}
+            />
           </div>
           <div className="actions setup-actions">
             <button className="button-primary button-play" onClick={start}>
@@ -1466,9 +1719,9 @@ export function App() {
           <p className="eyebrow">THE TOYBOX LABEL</p>
           <h2>Made for the table</h2>
           <div className="credits-toys">
-            <ToyAvatar player={1} />
+            <PlayerAvatar appearance={DEFAULT_PLAYER_APPEARANCES[0]} />
             <span>✦</span>
-            <ToyAvatar player={2} />
+            <PlayerAvatar appearance={DEFAULT_PLAYER_APPEARANCES[1]} />
           </div>
           <p>{BRAND.footer}</p>
           <p>Built with React, Vite, TypeScript, and Phaser.</p>
@@ -1526,6 +1779,7 @@ export function App() {
               data-player-five-y={roomView.players.find((player) => player.seat === 5)?.y ?? 0}
               data-connection-quality={connectionQuality}
               data-latency-ms={latencyMs ?? ''}
+              data-projectile-boundary-mode={roomView.projectileBoundaryMode}
             >
               <span className={`status-dot ${connectionStatus}`} />
               {connectionStatus === 'failed'
@@ -1539,6 +1793,7 @@ export function App() {
                       : connectionQuality === 'fair'
                         ? 'Connected · fair'
                         : 'Connected'}
+              <span> · {projectileBoundaryLabel(roomView.projectileBoundaryMode)} boundaries</span>
             </output>
           )}
         </div>
@@ -1640,7 +1895,12 @@ export function App() {
             {result.winnerPlayerIndices.length > 0 && (
               <div className="winning-team">
                 {result.winnerPlayerIndices.map((index) => (
-                  <ToyAvatar key={index} player={(index + 1) as PlayerNumber} />
+                  <PlayerAvatar
+                    key={index}
+                    appearance={result.config.playerAppearances[index]}
+                    teamId={index % 2}
+                    label={result.config.playerNames[index]}
+                  />
                 ))}
               </div>
             )}
@@ -1654,7 +1914,7 @@ export function App() {
                   : `${result.config.playerNames[result.winnerIndex]} wins`}
             </h2>
             <p>
-              {getMap(result.config.mapId).displayName} · {result.remainingHealth} health remaining
+              {getMap(result.config.mapId).displayName} · {projectileBoundaryLabel(result.config.projectileBoundaryMode)} boundaries · {result.remainingHealth} health remaining
               · {result.turnsTaken} turns · {result.durationSeconds}s
             </p>
             {matchMode === 'local' ? (
@@ -1728,6 +1988,9 @@ export function App() {
               <p className="eyebrow">ALL PLAYERS READY</p>
               <h2>Battle starts in...</h2>
               <p>{Math.max(1, Math.ceil(roomView.countdownRemainingMs / 1000))}</p>
+              <p>
+                {getMap(roomView.mapId).displayName} · {projectileBoundaryLabel(roomView.projectileBoundaryMode)} boundaries
+              </p>
             </section>
           </div>
         )}

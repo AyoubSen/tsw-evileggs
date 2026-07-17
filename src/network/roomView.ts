@@ -1,5 +1,11 @@
-import type { MapId, MatchMode, TeamId } from '../maps/registry'
+import { getMap, type MapId, type MatchMode, type TeamId } from '../maps/registry'
+import type { LocalMatchConfig } from '../match/config'
 import type { RoomPhase } from './protocol'
+import {
+  DEFAULT_PLAYER_APPEARANCES,
+  sanitizePlayerAppearance,
+  type PlayerAppearance,
+} from '../players/appearanceRegistry'
 
 export type OnlinePlayerView = {
   playerId: string
@@ -14,6 +20,7 @@ export type OnlinePlayerView = {
   x: number
   y: number
   health: number
+  appearance: PlayerAppearance
 }
 
 export type OnlineRoomResultView = {
@@ -32,6 +39,7 @@ export type OnlineRoomView = {
   mode: Extract<MatchMode, '1v1' | '2v2' | '3v3'>
   capacity: number
   mapId: MapId
+  projectileBoundaryMode: LocalMatchConfig['projectileBoundaryMode']
   turnDurationSeconds: 20 | 30 | 45
   countdownRemainingMs: number
   reconnectRemainingMs: number
@@ -46,25 +54,35 @@ export type OnlineRoomView = {
   protocolVersion: string
   mapRegistryVersion: string
   weaponRegistryVersion: string
+  appearanceRegistryVersion: string
   players: OnlinePlayerView[]
   result: OnlineRoomResultView
 }
 
 type SchemaMap<T> = { values(): IterableIterator<T> }
 
+type RawRoomPlayer = Omit<OnlinePlayerView, 'appearance'> & PlayerAppearance
+
 type RawRoomState = Omit<OnlineRoomView, 'players' | 'result' | 'projectileCount'> & {
-  players: SchemaMap<OnlinePlayerView>
+  players: SchemaMap<RawRoomPlayer>
   projectiles: SchemaMap<unknown>
   result: OnlineRoomResultView
 }
 
 export function roomViewFromSchema(state: RawRoomState): OnlineRoomView {
+  const map = getMap(state.mapId)
+  const projectileBoundaryMode = map.projectileBoundary.supportedModes.includes(
+    state.projectileBoundaryMode,
+  )
+    ? state.projectileBoundaryMode
+    : map.projectileBoundary.defaultMode
   return {
     roomCode: state.roomCode,
     phase: state.phase,
     mode: state.mode === '3v3' ? '3v3' : state.mode === '2v2' ? '2v2' : '1v1',
     capacity: Number(state.capacity) || 2,
     mapId: state.mapId,
+    projectileBoundaryMode,
     turnDurationSeconds: state.turnDurationSeconds,
     countdownRemainingMs: state.countdownRemainingMs,
     reconnectRemainingMs: state.reconnectRemainingMs,
@@ -79,6 +97,7 @@ export function roomViewFromSchema(state: RawRoomState): OnlineRoomView {
     protocolVersion: state.protocolVersion,
     mapRegistryVersion: state.mapRegistryVersion,
     weaponRegistryVersion: state.weaponRegistryVersion,
+    appearanceRegistryVersion: state.appearanceRegistryVersion,
     players: [...state.players.values()]
       .map((player) => ({
         playerId: player.playerId,
@@ -98,6 +117,7 @@ export function roomViewFromSchema(state: RawRoomState): OnlineRoomView {
         x: 'x' in player ? Number(player.x) : 0,
         y: 'y' in player ? Number(player.y) : 0,
         health: 'health' in player ? Number(player.health) : 100,
+        appearance: sanitizePlayerAppearance(player, DEFAULT_PLAYER_APPEARANCES[player.seat]),
       }))
       .sort((left, right) => left.seat - right.seat),
     result: {

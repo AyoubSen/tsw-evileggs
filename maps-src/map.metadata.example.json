@@ -6,6 +6,11 @@
   "description": "Replace this with an original map description.",
   "label": "External source",
   "cellSize": 2,
+  "projectileBoundary": {
+    "defaultMode": "open",
+    "supportedModes": ["open", "reflect", "wrap"],
+    "reflectionVelocityRetention": 0.9
+  },
   "spawns": [
     { "x": 180, "y": 680, "teamId": 0, "teamSlot": 0, "facing": 1 },
     { "x": 1548, "y": 680, "teamId": 1, "teamSlot": 0, "facing": -1 },

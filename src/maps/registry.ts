@@ -9,8 +9,10 @@ import {
   playerCountForMode,
   resolveMapDocument,
   spawnSeatForIndex,
+  DEFAULT_PROJECTILE_BOUNDARY,
   type MapDocument,
   type MapObjectDefinition,
+  type ProjectileBoundary,
   type MapTheme,
   type MatchMode,
   type ResolvedMap,
@@ -32,7 +34,7 @@ export type MapId =
   | 'fossil-wake'
   | 'custom-draft'
 
-export const MAP_REGISTRY_VERSION = 'maps-8'
+export const MAP_REGISTRY_VERSION = 'maps-9'
 export type MapDefinition = Omit<ResolvedMap, 'id'> & { id: MapId }
 export type { MapDocument, MapTheme, MatchMode, SpawnDefinition, TeamId } from './mapDocument'
 
@@ -76,9 +78,10 @@ type RasterPainter = {
   carveEllipse: (centerX: number, centerY: number, radiusX: number, radiusY: number) => void
 }
 
-type RasterMapSource = Omit<MapDocument, 'format' | 'formatVersion' | 'terrain' | 'objects'> & {
+type RasterMapSource = Omit<MapDocument, 'format' | 'formatVersion' | 'terrain' | 'objects' | 'projectileBoundary'> & {
   paint: (painter: RasterPainter) => void
   objects?: readonly MapObjectDefinition[]
+  projectileBoundary?: ProjectileBoundary
 }
 
 const registeredMap = (map: ResolvedMap): MapDefinition => map as MapDefinition
@@ -179,6 +182,7 @@ function createRasterMap(source: RasterMapSource): MapDefinition {
     theme: source.theme,
     spawns: source.spawns,
     objects: source.objects ? [...source.objects] : [],
+    projectileBoundary: source.projectileBoundary ?? DEFAULT_PROJECTILE_BOUNDARY,
     terrain: {
       encoding: 'row-rle-v1',
       cellSize: TERRAIN_SCALE,

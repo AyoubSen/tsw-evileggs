@@ -5,7 +5,7 @@ import {
 } from '../terrain/materials'
 import type { Vector } from '../shared/types'
 
-export const MAP_FORMAT_VERSION = 3
+export const MAP_FORMAT_VERSION = 4
 export const MAX_MAP_OBJECTS = 32
 export const MIN_REFLECTOR_LENGTH = 16
 export const MAX_REFLECTOR_LENGTH = 1024
@@ -16,6 +16,17 @@ export const MAX_REFLECTOR_VELOCITY_RETENTION = 1
 export const MAX_REFLECTOR_TOTAL_LENGTH = 8192
 export const SPAWN_OBJECT_CLEARANCE = 40
 export type MatchMode = '1v1' | '2v2' | '3v3'
+export type ProjectileBoundaryMode = 'open' | 'reflect' | 'wrap'
+export type ProjectileBoundary = {
+  defaultMode: ProjectileBoundaryMode
+  supportedModes: ProjectileBoundaryMode[]
+  reflectionVelocityRetention: number
+}
+export const DEFAULT_PROJECTILE_BOUNDARY: ProjectileBoundary = {
+  defaultMode: 'open',
+  supportedModes: ['open', 'reflect', 'wrap'],
+  reflectionVelocityRetention: 0.9,
+}
 export type TeamId = 0 | 1
 export const PLAYER_COUNT_BY_MODE: Record<MatchMode, number> = { '1v1': 2, '2v2': 4, '3v3': 6 }
 
@@ -88,9 +99,14 @@ export type MapDocumentV2 = MapDocumentBase & {
   formatVersion: 2
   objects: ReflectorWallDefinition[]
 }
+export type MapDocumentV3 = MapDocumentBase & {
+  formatVersion: 3
+  objects: MapObjectDefinition[]
+}
 export type MapDocument = MapDocumentBase & {
   formatVersion: typeof MAP_FORMAT_VERSION
   objects: MapObjectDefinition[]
+  projectileBoundary: ProjectileBoundary
 }
 
 export type ResolvedMap = Omit<MapDocument, 'terrain'> & {
@@ -104,12 +120,13 @@ export type ResolvedMap = Omit<MapDocument, 'terrain'> & {
 
 type HeightFieldSource = Omit<
   MapDocument,
-  'format' | 'formatVersion' | 'spawns' | 'terrain' | 'objects'
+  'format' | 'formatVersion' | 'spawns' | 'terrain' | 'objects' | 'projectileBoundary'
 > & {
   terrainScale: number
   spawnXs: readonly number[]
   surfaceAt: (x: number) => number
   objects?: readonly MapObjectDefinition[]
+  projectileBoundary?: ProjectileBoundary
 }
 
 export type MaterialRectangle = {
@@ -135,10 +152,11 @@ export function spawnSeatForIndex(index: number): Pick<SpawnDefinition, 'teamId'
   }
 }
 
-type ShapeMapSource = Omit<MapDocument, 'format' | 'formatVersion' | 'terrain' | 'objects'> & {
+type ShapeMapSource = Omit<MapDocument, 'format' | 'formatVersion' | 'terrain' | 'objects' | 'projectileBoundary'> & {
   terrainScale: number
   rectangles: readonly MaterialRectangle[]
   objects?: readonly MapObjectDefinition[]
+  projectileBoundary?: ProjectileBoundary
 }
 
 const DOCUMENT_KEYS_V1 = [
@@ -158,6 +176,7 @@ const DOCUMENT_KEYS_V1 = [
 ] as const
 const DOCUMENT_KEYS_V2 = [...DOCUMENT_KEYS_V1, 'objects'] as const
 const DOCUMENT_KEYS_V3 = DOCUMENT_KEYS_V2
+const DOCUMENT_KEYS_V4 = [...DOCUMENT_KEYS_V3, 'projectileBoundary'] as const
 const THEME_KEYS = [
   'sky',
   'sun',
@@ -182,6 +201,12 @@ const REFLECTOR_KEYS = [
 const PROJECTILE_PORTAL_KEYS = ['id', 'type', 'entrance', 'exit', 'velocityRetention'] as const
 const PORTAL_APERTURE_KEYS = ['start', 'end', 'thickness'] as const
 const VECTOR_KEYS = ['x', 'y'] as const
+const PROJECTILE_BOUNDARY_KEYS = [
+  'defaultMode',
+  'supportedModes',
+  'reflectionVelocityRetention',
+] as const
+const PROJECTILE_BOUNDARY_MODES: readonly ProjectileBoundaryMode[] = ['open', 'reflect', 'wrap']
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -242,14 +267,38 @@ function compareObjectIds(left: MapObjectDefinition, right: MapObjectDefinition)
   return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
 }
 
+function cloneProjectileBoundary(value: unknown): ProjectileBoundary {
+  const source = record(value, 'Projectile boundary')
+  exactKeys(source, PROJECTILE_BOUNDARY_KEYS, 'Projectile boundary')
+  if (!Array.isArray(source.supportedModes) || source.supportedModes.length === 0)
+    throw new Error('Projectile boundary supported modes must be a non-empty array.')
+  if (source.supportedModes.some((mode) => !PROJECTILE_BOUNDARY_MODES.includes(mode as ProjectileBoundaryMode)))
+    throw new Error('Projectile boundary contains an unknown supported mode.')
+  if (new Set(source.supportedModes).size !== source.supportedModes.length)
+    throw new Error('Projectile boundary supported modes must not contain duplicates.')
+  if (!source.supportedModes.includes(source.defaultMode))
+    throw new Error('Projectile boundary default mode must be supported.')
+  if (
+    !Number.isFinite(source.reflectionVelocityRetention) ||
+    (source.reflectionVelocityRetention as number) < 0.1 ||
+    (source.reflectionVelocityRetention as number) > 1
+  )
+    throw new Error('Projectile boundary reflection velocity retention must be between 0.1 and 1.')
+  return {
+    defaultMode: source.defaultMode as ProjectileBoundaryMode,
+    supportedModes: PROJECTILE_BOUNDARY_MODES.filter((mode) => source.supportedModes.includes(mode)),
+    reflectionVelocityRetention: source.reflectionVelocityRetention as number,
+  }
+}
+
 export function migrateMapDocument(value: unknown): MapDocument {
   const source = record(value, 'Map document')
   const version = source.formatVersion
-  if (source.format !== 'mossfire-map' || (version !== 1 && version !== 2 && version !== MAP_FORMAT_VERSION))
+  if (source.format !== 'mossfire-map' || (version !== 1 && version !== 2 && version !== 3 && version !== MAP_FORMAT_VERSION))
     throw new Error('Unsupported map document format.')
   exactKeys(
     source,
-    version === 1 ? DOCUMENT_KEYS_V1 : version === 2 ? DOCUMENT_KEYS_V2 : DOCUMENT_KEYS_V3,
+    version === 1 ? DOCUMENT_KEYS_V1 : version === 2 ? DOCUMENT_KEYS_V2 : version === 3 ? DOCUMENT_KEYS_V3 : DOCUMENT_KEYS_V4,
     'Map document',
   )
 
@@ -286,7 +335,11 @@ export function migrateMapDocument(value: unknown): MapDocument {
       cellSize: terrain.cellSize as number,
       rows: terrain.rows.map((row) => (Array.isArray(row) ? [...row] : row)) as number[][],
     },
-    objects: objects.map((object) => cloneObject(object, version === MAP_FORMAT_VERSION)).sort(compareObjectIds),
+    objects: objects.map((object) => cloneObject(object, version >= 3)).sort(compareObjectIds),
+    projectileBoundary:
+      version === MAP_FORMAT_VERSION
+        ? cloneProjectileBoundary(source.projectileBoundary)
+        : { defaultMode: 'open', supportedModes: ['open'], reflectionVelocityRetention: 1 },
   }
 }
 
@@ -586,6 +639,7 @@ export function createHeightFieldDocument(source: HeightFieldSource): MapDocumen
     theme: source.theme,
     spawns,
     objects: source.objects ? source.objects.map(cloneObject).sort(compareObjectIds) : [],
+    projectileBoundary: cloneProjectileBoundary(source.projectileBoundary ?? DEFAULT_PROJECTILE_BOUNDARY),
     terrain: {
       encoding: 'row-rle-v1',
       cellSize: source.terrainScale,
@@ -626,6 +680,7 @@ export function createShapeMapDocument(source: ShapeMapSource): MapDocument {
     theme: source.theme,
     spawns: source.spawns,
     objects: source.objects ? source.objects.map(cloneObject).sort(compareObjectIds) : [],
+    projectileBoundary: cloneProjectileBoundary(source.projectileBoundary ?? DEFAULT_PROJECTILE_BOUNDARY),
     terrain: {
       encoding: 'row-rle-v1',
       cellSize: source.terrainScale,

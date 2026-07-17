@@ -3,6 +3,7 @@ import type { WeaponId } from '../../weapons/registry'
 import type { SimBeacon, SimMine, SimProjectile, TerrainOperation } from './MatchState'
 import type { Vector } from '../../shared/types'
 import type { TeamId } from '../../maps/registry'
+import type { ProjectileBoundaryEdge } from '../projectile/contact'
 
 export type SimulationMatchResult = {
   config: LocalMatchConfig
@@ -58,6 +59,28 @@ export type MatchEvent =
       to: Vector
       incomingVelocity: Vector
       outgoingVelocity: Vector
+    })
+  | (EventEnvelope & {
+      type: 'projectile-boundary-reflected'
+      projectileId: string
+      edge: ProjectileBoundaryEdge
+      position: Vector
+      incomingVelocity: Vector
+      outgoingVelocity: Vector
+    })
+  | (EventEnvelope & {
+      type: 'projectile-wrapped'
+      projectileId: string
+      edge: 'left' | 'right'
+      from: Vector
+      to: Vector
+      velocity: Vector
+    })
+  | (EventEnvelope & {
+      type: 'projectile-boundary-removed'
+      projectileId: string
+      edge: ProjectileBoundaryEdge
+      position: Vector
     })
   | (EventEnvelope & { type: 'cluster-split'; actionId: string; position: Vector })
   | (EventEnvelope & {

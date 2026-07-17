@@ -2,16 +2,18 @@ import type { LocalMatchConfig } from '../../match/config'
 import type { MapId, TeamId } from '../../maps/registry'
 import type { Vector } from '../../shared/types'
 import type { WeaponId, WeaponInventory } from '../../weapons/registry'
+import type { PlayerAppearance } from '../../players/appearanceRegistry'
 
 export const SIMULATION_HZ = 60
 export const FIXED_TICK_SECONDS = 1 / SIMULATION_HZ
-export const SIMULATION_SNAPSHOT_VERSION = 7
+export const SIMULATION_SNAPSHOT_VERSION = 9
 
 export type MatchPhase = 'input' | 'projectile' | 'settling' | 'expired' | 'victory'
 
 export type SimPlayer = {
   id: string
   name: string
+  appearance: PlayerAppearance
   position: Vector
   velocity: Vector
   health: number

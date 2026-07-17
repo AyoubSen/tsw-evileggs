@@ -24,6 +24,11 @@ import {
 } from './connectionErrors'
 import { NetworkConfigurationError, joinHttpUrl, runtimeNetworkConfig } from './networkConfig'
 import { waitForGameServer } from './serverWarmup'
+import {
+  DEFAULT_PLAYER_APPEARANCES,
+  sanitizePlayerAppearance,
+  type PlayerAppearance,
+} from '../players/appearanceRegistry'
 
 export const ONLINE_RECONNECT_STORAGE_KEY = 'toybox-artillery:online-reconnection'
 
@@ -203,8 +208,10 @@ export class OnlineRoomSession {
         playerName,
         mode: config.mode,
         mapId: config.mapId,
+        projectileBoundaryMode: config.projectileBoundaryMode,
         turnDurationSeconds: config.turnDurationSeconds,
         compatibility: CURRENT_COMPATIBILITY,
+        playerAppearance: sanitizePlayerAppearance(config.playerAppearances[0]),
       }
       const room = await client.create(PRIVATE_MATCH_ROOM, options)
       if (signal?.aborted) {
@@ -224,6 +231,7 @@ export class OnlineRoomSession {
     codeInput: string,
     playerName: string,
     signal?: AbortSignal,
+    playerAppearance: Readonly<PlayerAppearance> = DEFAULT_PLAYER_APPEARANCES[0],
   ): Promise<OnlineRoomSession> {
     try {
       throwIfOnlineStartupAborted(signal)
@@ -232,7 +240,11 @@ export class OnlineRoomSession {
       const roomId = await resolvePrivateRoom(code, signal)
       throwIfOnlineStartupAborted(signal)
       const client = new Client(runtimeNetworkConfig().colyseusUrl)
-      const options: JoinRoomOptions = { playerName, compatibility: CURRENT_COMPATIBILITY }
+      const options: JoinRoomOptions = {
+        playerName,
+        playerAppearance: sanitizePlayerAppearance(playerAppearance),
+        compatibility: CURRENT_COMPATIBILITY,
+      }
       const room = await client.joinById(roomId, options)
       if (signal?.aborted) {
         await closeCancelledRoom(room)

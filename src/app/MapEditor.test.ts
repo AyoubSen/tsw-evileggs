@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { migrateStoredDraft } from './MapEditor'
 
 describe('editor draft migration', () => {
-  it('preserves a v1 draft and adds an empty v2 object list', () => {
+  it('preserves a v1 draft and adds current object and boundary defaults', () => {
     const migrated = migrateStoredDraft({
       version: 1,
       id: 'saved-map',
@@ -28,6 +28,15 @@ describe('editor draft migration', () => {
       cells: new Uint8Array(160 * 90),
       spawns: [],
     })
-    expect(migrated).toMatchObject({ version: 2, id: 'saved-map', revision: 3, objects: [] })
+    expect(migrated).toMatchObject({
+      version: 3,
+      id: 'saved-map',
+      revision: 3,
+      objects: [],
+      projectileBoundary: {
+        defaultMode: 'open',
+        supportedModes: ['open', 'reflect', 'wrap'],
+      },
+    })
   })
 })

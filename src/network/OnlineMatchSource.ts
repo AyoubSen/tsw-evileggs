@@ -26,6 +26,7 @@ import {
   resolveTeleportDestination,
 } from '../simulation/weapons/teleport'
 import { WEAPON_ORDER, WEAPONS, type WeaponInventory } from '../weapons/registry'
+import { sanitizePlayerAppearance } from '../players/appearanceRegistry'
 
 type StateListener = (state: MatchState) => void
 type PendingCommand = {
@@ -52,6 +53,13 @@ type SchemaPlayer = {
   facing: -1 | 1
   selectedWeapon: MatchState['players'][number]['selectedWeapon']
   ammunition: { get(key: string): number | undefined }
+  version: number
+  body: string
+  primaryColor: string
+  accentColor: string
+  pattern: string
+  face: string
+  accessory: string
 }
 
 type SchemaProjectile = {
@@ -451,6 +459,7 @@ export class OnlineMatchSource implements MatchSource {
       if (projected.teamId === 0 || projected.teamId === 1) player.teamId = projected.teamId
       if (Number.isSafeInteger(projected.teamSlot)) player.teamSlot = projected.teamSlot
       player.selectedWeapon = projected.selectedWeapon
+      player.appearance = sanitizePlayerAppearance(projected, player.appearance)
       player.inventory = Object.fromEntries(
         WEAPON_ORDER.map((weaponId) => [weaponId, ammo(projected.ammunition.get(weaponId) ?? 0)]),
       ) as WeaponInventory
@@ -577,6 +586,32 @@ export class OnlineMatchSource implements MatchSource {
           projectile.velocity = { ...event.outgoingVelocity }
           this.projectileSamples.set(projectile.id, [])
         }
+      }
+      if (event.type === 'projectile-boundary-reflected' && this.snapshotState) {
+        const projectile = this.snapshotState.projectiles.find(
+          (candidate) => candidate.id === event.projectileId,
+        )
+        if (projectile) {
+          projectile.position = { ...event.position }
+          projectile.velocity = { ...event.outgoingVelocity }
+          this.projectileSamples.set(projectile.id, [])
+        }
+      }
+      if (event.type === 'projectile-wrapped' && this.snapshotState) {
+        const projectile = this.snapshotState.projectiles.find(
+          (candidate) => candidate.id === event.projectileId,
+        )
+        if (projectile) {
+          projectile.position = { ...event.to }
+          projectile.velocity = { ...event.velocity }
+          this.projectileSamples.set(projectile.id, [])
+        }
+      }
+      if (event.type === 'projectile-boundary-removed' && this.snapshotState) {
+        this.snapshotState.projectiles = this.snapshotState.projectiles.filter(
+          (projectile) => projectile.id !== event.projectileId,
+        )
+        this.projectileSamples.delete(event.projectileId)
       }
       if (event.type === 'projectile-portaled' && this.snapshotState) {
         const projectile = this.snapshotState.projectiles.find(

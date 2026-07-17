@@ -4,9 +4,11 @@ import {
   clientRoomMessageSchema,
   compatibilityError,
   createRoomOptionsSchema,
+  joinRoomOptionsSchema,
   isRoomCode,
   normalizeRoomCode,
 } from './protocol'
+import { DEFAULT_PLAYER_APPEARANCES } from '../players/appearanceRegistry'
 
 describe('online protocol validation', () => {
   it('normalizes human-entered room codes', () => {
@@ -89,11 +91,12 @@ describe('online protocol validation', () => {
 
   it('reports explicit compatibility failures', () => {
     expect(CURRENT_COMPATIBILITY).toMatchObject({
-      protocol: 'private-room-10',
-      snapshot: 7,
-      maps: 'maps-8',
+      protocol: 'private-room-12',
+      snapshot: 9,
+      maps: 'maps-9',
       weapons: 'weapons-4',
-      build: '1.8.0',
+      appearances: 'appearances-2',
+      build: '1.10.2',
     })
     expect(compatibilityError(CURRENT_COMPATIBILITY)).toBeNull()
     expect(compatibilityError({ ...CURRENT_COMPATIBILITY, maps: 'maps-old' })).toMatch(
@@ -102,6 +105,33 @@ describe('online protocol validation', () => {
     expect(compatibilityError({ ...CURRENT_COMPATIBILITY, build: 'old-client' })).toMatch(
       /Client build/,
     )
+    expect(
+      compatibilityError({ ...CURRENT_COMPATIBILITY, appearances: 'appearances-old' }),
+    ).toMatch(/appearance registry/i)
+  })
+
+  it('requires a strict registered appearance for create and join options', () => {
+    const join = {
+      playerName: 'Nova',
+      compatibility: CURRENT_COMPATIBILITY,
+      playerAppearance: DEFAULT_PLAYER_APPEARANCES[0],
+    }
+    expect(joinRoomOptionsSchema.safeParse(join).success).toBe(true)
+    expect(joinRoomOptionsSchema.safeParse({ ...join, playerAppearance: undefined }).success).toBe(
+      false,
+    )
+    expect(
+      joinRoomOptionsSchema.safeParse({
+        ...join,
+        playerAppearance: { ...DEFAULT_PLAYER_APPEARANCES[0], body: 'unknown' },
+      }).success,
+    ).toBe(false)
+    expect(
+      joinRoomOptionsSchema.safeParse({
+        ...join,
+        playerAppearance: { ...DEFAULT_PLAYER_APPEARANCES[0], extra: true },
+      }).success,
+    ).toBe(false)
   })
 
   it('admits the new official maps only for their supported team modes', () => {
@@ -119,8 +149,10 @@ describe('online protocol validation', () => {
           playerName: 'Nova',
           mode,
           mapId,
+          projectileBoundaryMode: 'open',
           turnDurationSeconds: 30,
           compatibility: CURRENT_COMPATIBILITY,
+          playerAppearance: DEFAULT_PLAYER_APPEARANCES[0],
         }).success,
       ).toBe(true)
     }

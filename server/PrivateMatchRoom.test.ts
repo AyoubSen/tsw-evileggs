@@ -9,16 +9,23 @@ import { windForTurn } from '../src/simulation/wind/wind'
 import { WEAPON_ORDER } from '../src/weapons/registry'
 import { HEALTH_RESPONSE, server } from './app.config'
 import { PrivateMatchRoom } from './rooms/PrivateMatchRoom'
+import { DEFAULT_PLAYER_APPEARANCES } from '../src/players/appearanceRegistry'
 import { roomCodeRegistry } from './roomCodeRegistry'
 
 const createOptions = {
   playerName: 'Host',
   mode: '1v1' as const,
   mapId: 'rolling-hills' as const,
+  projectileBoundaryMode: 'open' as const,
   turnDurationSeconds: 30 as const,
   compatibility: CURRENT_COMPATIBILITY,
+  playerAppearance: DEFAULT_PLAYER_APPEARANCES[0],
 }
-const joinOptions = { playerName: 'Guest', compatibility: CURRENT_COMPATIBILITY }
+const joinOptions = {
+  playerName: 'Guest',
+  playerAppearance: DEFAULT_PLAYER_APPEARANCES[1],
+  compatibility: CURRENT_COMPATIBILITY,
+}
 const DEPLOYED_WEB_ORIGIN = 'https://evileggs.vercel.app'
 const HTTP_ENDPOINT = 'http://127.0.0.1:2568'
 

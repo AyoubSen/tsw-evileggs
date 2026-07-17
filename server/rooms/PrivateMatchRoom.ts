@@ -24,6 +24,7 @@ import type { MatchCommand } from '../../src/simulation/match/MatchCommand'
 import type { MatchEvent, SimulationMatchResult } from '../../src/simulation/match/MatchEvent'
 import { MatchSimulation } from '../../src/simulation/match/MatchSimulation'
 import { FIXED_TICK_SECONDS } from '../../src/simulation/match/MatchState'
+import { sanitizePlayerAppearance } from '../../src/players/appearanceRegistry'
 import { matchStateChecksum } from '../../src/simulation/serialization/matchSerialization'
 import { roomLog } from '../logger'
 import { roomCodeRegistry } from '../roomCodeRegistry'
@@ -119,10 +120,12 @@ export class PrivateMatchRoom extends Room<{
     this.state.mode = parsed.data.mode
     this.state.capacity = capacity
     this.state.mapId = parsed.data.mapId
+    this.state.projectileBoundaryMode = parsed.data.projectileBoundaryMode
     this.state.turnDurationSeconds = parsed.data.turnDurationSeconds
     this.state.protocolVersion = CURRENT_COMPATIBILITY.protocol
     this.state.mapRegistryVersion = CURRENT_COMPATIBILITY.maps
     this.state.weaponRegistryVersion = CURRENT_COMPATIBILITY.weapons
+    this.state.appearanceRegistryVersion = CURRENT_COMPATIBILITY.appearances
     this.metadata = {
       code: entry.code,
       phase: 'waiting',
@@ -152,6 +155,10 @@ export class PrivateMatchRoom extends Room<{
   }
 
   onJoin(client: Client, options: unknown): void {
+    const parsed = createRoomOptionsSchema.safeParse(options)
+    const joinParsed = joinRoomOptionsSchema.safeParse(options)
+    const joinOptions = parsed.success ? parsed.data : joinParsed.success ? joinParsed.data : null
+    if (!joinOptions) throw new ServerError(ErrorCode.INVALID_PAYLOAD, 'Invalid join request.')
     const playerName =
       typeof options === 'object' && options !== null && 'playerName' in options
         ? (options as { playerName: unknown }).playerName
@@ -170,6 +177,14 @@ export class PrivateMatchRoom extends Room<{
       DEFAULT_PLAYER_NAMES[seat] ?? `Player ${seat + 1}`,
     )
     player.sessionId = client.sessionId
+    const appearance = sanitizePlayerAppearance(joinOptions.playerAppearance)
+    player.version = appearance.version
+    player.body = appearance.body
+    player.primaryColor = appearance.primaryColor
+    player.accentColor = appearance.accentColor
+    player.pattern = appearance.pattern
+    player.face = appearance.face
+    player.accessory = appearance.accessory
     this.state.players.set(playerId, player)
     client.userData = {
       playerId,
@@ -322,7 +337,20 @@ export class PrivateMatchRoom extends Room<{
     const config: LocalMatchConfig = {
       mode: this.state.mode as LocalMatchConfig['mode'],
       playerNames: players.map((player) => player!.name),
+      playerAppearances: players.map((player) =>
+        sanitizePlayerAppearance({
+          version: player!.version,
+          body: player!.body,
+          primaryColor: player!.primaryColor,
+          accentColor: player!.accentColor,
+          pattern: player!.pattern,
+          face: player!.face,
+          accessory: player!.accessory,
+        }),
+      ),
       mapId: this.state.mapId as LocalMatchConfig['mapId'],
+      projectileBoundaryMode: this.state
+        .projectileBoundaryMode as LocalMatchConfig['projectileBoundaryMode'],
       turnDurationSeconds: this.state
         .turnDurationSeconds as LocalMatchConfig['turnDurationSeconds'],
     }

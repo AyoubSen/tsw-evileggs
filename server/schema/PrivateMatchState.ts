@@ -32,6 +32,13 @@ export const RoomPlayerState = schema({
   facing: { type: 'int8', default: 1 },
   selectedWeapon: { type: 'string', default: 'basic-rocket' },
   ammunition: { map: 'int16', default: new MapSchema<number>() },
+  version: { type: 'uint8', default: 1 },
+  body: { type: 'string', default: 'classic' },
+  primaryColor: { type: 'string', default: 'shell' },
+  accentColor: { type: 'string', default: 'gold' },
+  pattern: { type: 'string', default: 'solid' },
+  face: { type: 'string', default: 'smile' },
+  accessory: { type: 'string', default: 'none' },
 })
 export type RoomPlayerState = SchemaType<typeof RoomPlayerState>
 
@@ -92,10 +99,12 @@ export const PrivateMatchState = schema({
   mode: { type: 'string', default: '1v1' },
   capacity: { type: 'uint8', default: 2 },
   mapId: { type: 'string', default: 'rolling-hills' },
+  projectileBoundaryMode: { type: 'string', default: '' },
   turnDurationSeconds: { type: 'uint8', default: 30 },
   protocolVersion: { type: 'string', default: '' },
   mapRegistryVersion: { type: 'string', default: '' },
   weaponRegistryVersion: { type: 'string', default: '' },
+  appearanceRegistryVersion: { type: 'string', default: '' },
   countdownRemainingMs: { type: 'uint16', default: 0 },
   reconnectRemainingMs: { type: 'uint16', default: 0 },
   matchGeneration: { type: 'uint32', default: 0 },
@@ -134,6 +143,13 @@ function projectPlayer(target: RoomPlayerState, source: SimPlayer): void {
   target.teamId = source.teamId
   target.teamSlot = source.teamSlot
   target.selectedWeapon = source.selectedWeapon
+  target.version = source.appearance.version
+  target.body = source.appearance.body
+  target.primaryColor = source.appearance.primaryColor
+  target.accentColor = source.appearance.accentColor
+  target.pattern = source.appearance.pattern
+  target.face = source.appearance.face
+  target.accessory = source.appearance.accessory
   for (const weaponId of WEAPON_ORDER)
     target.ammunition.set(weaponId, ammo(source.inventory[weaponId]))
 }

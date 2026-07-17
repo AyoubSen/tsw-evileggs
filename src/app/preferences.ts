@@ -1,13 +1,25 @@
 import { BRAND } from './branding'
-import { DEFAULT_PLAYER_NAMES, validateMatchConfig, type TurnDuration } from '../match/config'
+import {
+  DEFAULT_PLAYER_NAMES,
+  validateMatchConfig,
+  type LocalMatchConfig,
+  type TurnDuration,
+} from '../match/config'
 import { getMap, type MapId, type MatchMode } from '../maps/registry'
+import {
+  DEFAULT_PLAYER_APPEARANCES,
+  sanitizePlayerAppearance,
+  type PlayerAppearance,
+} from '../players/appearanceRegistry'
 
 export type Preferences = {
-  version: 1
+  version: 2
   playerNames: string[]
+  playerAppearances: PlayerAppearance[]
   lastMode: MatchMode
   lastMapId: MapId
   turnDurationSeconds: TurnDuration
+  projectileBoundaryMode: LocalMatchConfig['projectileBoundaryMode']
   reducedMotion: boolean
   highContrastHud: boolean
   cameraShake: boolean
@@ -20,11 +32,13 @@ export type Preferences = {
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
-  version: 1,
+  version: 2,
   playerNames: [...DEFAULT_PLAYER_NAMES],
+  playerAppearances: DEFAULT_PLAYER_APPEARANCES.map((appearance) => ({ ...appearance })),
   lastMode: '1v1',
   lastMapId: 'rolling-hills',
   turnDurationSeconds: 30,
+  projectileBoundaryMode: 'open',
   reducedMotion: false,
   highContrastHud: false,
   cameraShake: true,
@@ -45,9 +59,13 @@ export function loadPreferences(
     const raw = storage?.getItem(storageKey)
     if (!raw) return DEFAULT_PREFERENCES
     const parsed: unknown = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object' || (parsed as { version?: unknown }).version !== 1)
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      ![1, 2].includes((parsed as { version?: number }).version ?? 0)
+    )
       return DEFAULT_PREFERENCES
-    const value = parsed as Partial<Preferences>
+    const value = parsed as Partial<Preferences> & { version: 1 | 2 }
     const playerNames = DEFAULT_PLAYER_NAMES.map((fallback, index) => {
       const name = value.playerNames?.[index]
       return typeof name === 'string' && name.trim() ? name.trim().slice(0, 18) : fallback
@@ -57,13 +75,20 @@ export function loadPreferences(
       playerNames,
       mapId: value.lastMapId,
       turnDurationSeconds: value.turnDurationSeconds,
+      projectileBoundaryMode: value.projectileBoundaryMode,
+      playerAppearances: value.playerAppearances,
     })
     return {
       ...DEFAULT_PREFERENCES,
       ...config,
       playerNames,
+      playerAppearances: DEFAULT_PLAYER_APPEARANCES.map((fallback, index) =>
+        sanitizePlayerAppearance(value.playerAppearances?.[index], fallback),
+      ),
+      version: 2,
       lastMode: config.mode,
       lastMapId: getMap(config.mapId).id,
+      projectileBoundaryMode: config.projectileBoundaryMode,
       reducedMotion: value.reducedMotion === true,
       highContrastHud: value.highContrastHud === true,
       cameraShake: value.cameraShake !== false,
