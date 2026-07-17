@@ -2160,7 +2160,7 @@ export function App() {
   }
   return (
     <main
-      className={`app-shell ${screen === 'match' ? 'match-active' : ''} ${screen === 'editor' ? 'editor-active' : ''} ${preferences.reducedMotion ? 'reduced-motion' : ''} ${preferences.highContrastHud ? 'high-contrast' : ''}`}
+      className={`app-shell ${screen === 'menu' ? 'menu-active' : ''} ${screen === 'match' ? 'match-active' : ''} ${screen === 'editor' ? 'editor-active' : ''} ${preferences.reducedMotion ? 'reduced-motion' : ''} ${preferences.highContrastHud ? 'high-contrast' : ''}`}
       onPointerDownCapture={() => void audioRef.current?.unlock()}
       onKeyDownCapture={() => void audioRef.current?.unlock()}
       onClickCapture={(event) => {
