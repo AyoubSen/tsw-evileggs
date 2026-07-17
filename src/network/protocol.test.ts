@@ -12,6 +12,7 @@ import {
   DEFAULT_PLAYER_APPEARANCES,
   sanitizePlayerAppearance,
 } from '../players/appearanceRegistry'
+import { cloneArsenalRules, DEFAULT_ARSENAL_RULES } from '../match/arsenal'
 
 describe('online protocol validation', () => {
   it('normalizes human-entered room codes', () => {
@@ -94,12 +95,12 @@ describe('online protocol validation', () => {
 
   it('reports explicit compatibility failures', () => {
     expect(CURRENT_COMPATIBILITY).toMatchObject({
-      protocol: 'private-room-13',
-      snapshot: 10,
+      protocol: 'private-room-15',
+      snapshot: 11,
       maps: 'maps-9',
       weapons: 'weapons-4',
-      appearances: 'appearances-3.0.0',
-      build: '1.11.0',
+      appearances: 'appearances-3.0.3',
+      build: '1.12.0',
     })
     expect(compatibilityError(CURRENT_COMPATIBILITY)).toBeNull()
     expect(compatibilityError({ ...CURRENT_COMPATIBILITY, maps: 'maps-old' })).toMatch(
@@ -169,6 +170,7 @@ describe('online protocol validation', () => {
           turnDurationSeconds: 30,
           compatibility: CURRENT_COMPATIBILITY,
           playerAppearance: DEFAULT_PLAYER_APPEARANCES[0],
+          arsenal: cloneArsenalRules(DEFAULT_ARSENAL_RULES),
         }).success,
       ).toBe(true)
     }
@@ -180,6 +182,31 @@ describe('online protocol validation', () => {
         mapId: 'switchback-quarry',
         turnDurationSeconds: 30,
         compatibility: CURRENT_COMPATIBILITY,
+      }).success,
+    ).toBe(false)
+  })
+
+  it('requires a complete arsenal with an unlimited fallback', () => {
+    const options = {
+      playerName: 'Nova',
+      mode: '1v1' as const,
+      mapId: 'rolling-hills' as const,
+      projectileBoundaryMode: 'open',
+      turnDurationSeconds: 30,
+      compatibility: CURRENT_COMPATIBILITY,
+      playerAppearance: DEFAULT_PLAYER_APPEARANCES[0],
+      arsenal: cloneArsenalRules(DEFAULT_ARSENAL_RULES),
+    }
+    expect(createRoomOptionsSchema.safeParse(options).success).toBe(true)
+    expect(
+      createRoomOptionsSchema.safeParse({
+        ...options,
+        arsenal: {
+          ...options.arsenal,
+          ammunition: Object.fromEntries(
+            Object.keys(options.arsenal.ammunition).map((id) => [id, 1]),
+          ),
+        },
       }).success,
     ).toBe(false)
   })

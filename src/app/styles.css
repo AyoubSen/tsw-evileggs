@@ -115,7 +115,13 @@ textarea:focus-visible {
   -webkit-text-stroke: 0;
   text-shadow: none;
 }
-.brand p:last-child {
+.brand-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+.brand-meta > p {
   max-width: 250px;
   margin: 0;
   color: #66584a;
@@ -889,6 +895,62 @@ select {
 }
 .boundary-mode-picker {
   margin-bottom: 8px;
+}
+.arsenal-rule-control {
+  margin-top: 22px;
+  padding-top: 22px;
+  border-top: 2px dashed #b49b72;
+}
+.arsenal-rule-control summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: #fff9e9;
+  cursor: pointer;
+  list-style: none;
+}
+.arsenal-rule-control summary span { display: grid; gap: 2px; }
+.arsenal-rule-control summary small { color: #66584a; font-weight: 700; }
+.arsenal-rule-control summary em { color: var(--clay-dark); font-style: normal; font-weight: 900; text-transform: capitalize; }
+.arsenal-preset-picker { display: inline-flex; gap: 4px; margin: 16px 0; padding: 4px; border: 2px solid var(--line); border-radius: 14px; background: #e7dcc3; }
+.arsenal-preset-picker button { min-width: 92px; padding: 8px 14px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); font-weight: 900; text-transform: capitalize; box-shadow: none; }
+.arsenal-preset-picker button.selected { background: #fff9e9; box-shadow: 0 2px 0 #b49b72, inset 0 0 0 2px var(--clay); }
+.arsenal-weapon-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.arsenal-weapon-control { min-width: 0; display: grid; grid-template-columns: 22px 58px minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; column-gap: 10px; row-gap: 5px; padding: 10px; border: 2px solid #c9b58d; border-radius: 14px; background: #fff9e9; color: var(--ink); font-size: .82rem; font-weight: 800; box-shadow: 0 2px 0 rgb(73 60 47 / .12); }
+.arsenal-enabled-toggle { grid-column: 1; grid-row: 1 / 3; width: 17px; height: 17px; margin: 0; accent-color: #238650; }
+.arsenal-weapon-control .weapon-icon { grid-column: 2; grid-row: 1 / 3; width: 58px; height: 48px; padding: 5px; overflow: visible; border: 1px solid #b9ab90; border-radius: 11px; background: #e7dcc3; filter: drop-shadow(0 2px 0 rgb(36 49 58 / .14)); }
+.arsenal-weapon-name { grid-column: 3; grid-row: 1; min-width: 0; line-height: 1.1; }
+.arsenal-weapon-control select { grid-column: 3; grid-row: 2; width: 100%; min-width: 0; max-width: 150px; padding: 6px 28px 6px 8px; }
+.arsenal-weapon-control.disabled { opacity: .55; background: #eee5d2; box-shadow: none; }
+.arsenal-note { margin: 10px 2px 0; color: #66584a; font-size: .78rem; font-weight: 700; }
+.profile-progression { margin: 18px 0; padding: 16px; border: 2px solid var(--line); border-radius: 18px 14px 20px 15px; background: #fff9e9; box-shadow: 0 3px 0 var(--line); }
+.profile-progression header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.profile-progression header div { display: grid; }
+.profile-progression header b { color: var(--clay-dark); }
+.progression-meter { height: 13px; margin-top: 12px; overflow: hidden; border: 2px solid var(--line); border-radius: 999px; background: #e7dcc3; }
+.progression-meter span { display: block; height: 100%; background: var(--sun); }
+.progression-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 14px 0 18px; }
+.progression-stats span { display: grid; padding: 8px; border: 1px solid #b49b72; border-radius: 10px; text-align: center; font-size: .75rem; }
+.progression-stats b { font-size: 1.1rem; }
+.profile-progression h3 { margin: 0 0 8px; }
+.recent-match-list { display: grid; gap: 6px; }
+.recent-match-row { display: grid; grid-template-columns: 52px 1fr auto; gap: 8px; padding: 8px 10px; border-radius: 9px; background: #eee5d2; font-size: .78rem; }
+.recent-match-row strong { text-transform: uppercase; }
+.recent-match-row.win strong { color: #238650; }
+.recent-match-row.loss strong { color: var(--clay-dark); }
+.post-match-reward { display: grid; gap: 2px; padding: 10px 14px; border: 2px solid #238650; border-radius: 12px; background: #dff2df; color: var(--ink); }
+.post-match-reward span { font-size: .8rem; }
+@media (max-width: 850px) {
+  .arsenal-weapon-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .arsenal-preset-picker { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .arsenal-preset-picker button { min-width: 0; padding-inline: 10px; }
+  .arsenal-weapon-grid { grid-template-columns: 1fr; }
 }
 .map-card {
   position: relative;
@@ -2005,7 +2067,14 @@ footer {
   }
 }
 @media (max-width: 620px) {
-  .brand p:last-child {
+  .brand {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .brand-meta {
+    width: 100%;
+  }
+  .brand-meta > p {
     display: none;
   }
   .team-roster-grid {
@@ -2140,4 +2209,67 @@ footer {
   .editor-validation {
     flex-direction: column;
   }
+}
+.account-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.account-loading {
+  color: #66584a;
+  font-size: .76rem;
+  font-weight: 900;
+}
+.account-button {
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 3px 0 var(--line);
+  font-size: .78rem;
+  font-weight: 900;
+  line-height: 1;
+  transition: transform .14s ease, box-shadow .14s ease, filter .14s ease;
+}
+.account-button-primary {
+  background: var(--ink);
+  color: var(--paper);
+}
+.account-button:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 var(--line);
+}
+.account-button:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--line);
+}
+
+.profile-panel { max-width: 42rem; }
+.profile-identity { display: flex; align-items: center; gap: .8rem; margin: 1rem 0; }
+.profile-identity p { margin: .2rem 0 0; opacity: .72; }
+.profile-field-label, .profile-game-fields label > span, .account-delete-confirm label > span { display: block; color: var(--clay-dark); font-size: .7rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.profile-game-fields { display: grid; gap: .8rem; margin: 1rem 0; }
+.profile-game-fields > label, .profile-appearance { padding: .9rem; border: 2px solid var(--line); border-radius: 14px; background: #fffaf0; }
+.profile-game-fields small, .profile-appearance small { display: block; margin: .25rem 0 .6rem; color: #66584a; font-weight: 700; }
+.profile-game-fields input, .account-delete-confirm input { width: 100%; padding: .65rem; border: 2px solid var(--line); border-radius: 10px; background: #fff9e9; color: var(--ink); font-weight: 900; }
+.profile-appearance { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .8rem; }
+.profile-appearance .player-avatar { width: 64px; }
+.profile-appearance button, .account-retry { padding: .65rem .8rem; border: 2px solid var(--line); border-radius: 10px; background: #eee3fa; color: #594495; box-shadow: 0 3px 0 var(--line); font-weight: 900; }
+.account-service-notice { padding: .8rem; border: 2px solid #a36b17; border-radius: .7rem; background: #fff0b8; color: #69450d; }
+.account-header-notice { max-width: none !important; color: #8b271f !important; font-size: .7rem !important; }
+.account-sync-state { display: grid; gap: .3rem; padding: .75rem; border: 2px solid #789b8c; border-radius: .7rem; background: #eff9f3; }
+.account-sync-state small { color: #66584a; }
+.account-sync-state.has-error, .danger { color: #8e251d; }
+.profile-import-choice, .account-delete-confirm { padding: 1rem; border: 2px solid currentColor; border-radius: .7rem; background: #fffaf0; }
+.account-delete-confirm label { display: block; margin: .8rem 0; }
+.profile-import-choice button, .account-delete-confirm button { margin: .25rem .4rem .25rem 0; }
+.profile-actions { display: grid; gap: .65rem; margin: 1rem 0; }
+
+@media (max-width: 600px) {
+  .account-controls { justify-content: flex-end; }
+  .profile-appearance { grid-template-columns: auto 1fr; }
+  .profile-appearance button { grid-column: 1 / -1; }
 }

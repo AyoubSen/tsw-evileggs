@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { ReflectorWallDefinition } from '../../maps/mapDocument'
 import {
+  compareProjectileContacts,
   firstProjectileContact,
+  sweepCircleAgainstBounds,
   sweepCircleAgainstReflector,
+  type ProjectileContact,
 } from './contact'
 
 const wall = (overrides: Partial<ReflectorWallDefinition> = {}): ReflectorWallDefinition => ({
@@ -68,5 +71,58 @@ describe('reflector projectile contacts', () => {
       wall({ id: 'a-wall' }),
     )
     expect(firstProjectileContact([laterId, earlierId])).toMatchObject({ stableId: 'a-wall' })
+  })
+})
+
+describe('projectile contact ordering and boundaries', () => {
+  const contact = (kind: ProjectileContact['kind'], stableId: string): ProjectileContact => {
+    const base = { toi: 0.5, position: { x: 10, y: 10 }, normal: { x: 1, y: 0 }, stableId }
+    if (kind === 'boundary') return { ...base, kind, edge: 'left' }
+    if (kind === 'player') return { ...base, kind, playerId: stableId }
+    if (kind === 'reflector') return { ...base, kind, object: wall({ id: stableId }) }
+    if (kind === 'portal')
+      return {
+        ...base,
+        kind,
+        aperture: 'entrance',
+        object: {
+          id: stableId,
+          type: 'projectile-portal',
+          entrance: { start: { x: 0, y: 0 }, end: { x: 0, y: 20 }, thickness: 4 },
+          exit: { start: { x: 50, y: 0 }, end: { x: 50, y: 20 }, thickness: 4 },
+          velocityRetention: 1,
+        },
+      }
+    return { ...base, kind }
+  }
+
+  it('keeps equal-time gameplay priority stable', () => {
+    const orderedKinds: ProjectileContact['kind'][] = [
+      'boundary',
+      'player',
+      'reflector',
+      'portal',
+      'terrain',
+    ]
+    const contacts = orderedKinds.map((kind) => contact(kind, kind))
+    expect([...contacts].reverse().sort(compareProjectileContacts).map(({ kind }) => kind)).toEqual(
+      orderedKinds,
+    )
+  })
+
+  it.each([
+    [{ x: 20, y: 50 }, { x: -20, y: 50 }, 'left'],
+    [{ x: 80, y: 50 }, { x: 120, y: 50 }, 'right'],
+    [{ x: 50, y: 20 }, { x: 50, y: -20 }, 'top'],
+    [{ x: 50, y: 80 }, { x: 50, y: 120 }, 'bottom'],
+  ] as const)('sweeps a projectile against the %s boundary', (start, end, edge) => {
+    expect(sweepCircleAgainstBounds(start, end, 5, 100, 100)).toMatchObject({
+      kind: 'boundary',
+      edge,
+    })
+  })
+
+  it('does not invent a contact for stationary projectiles', () => {
+    expect(sweepCircleAgainstBounds({ x: 5, y: 5 }, { x: 5, y: 5 }, 5, 100, 100)).toBeNull()
   })
 })

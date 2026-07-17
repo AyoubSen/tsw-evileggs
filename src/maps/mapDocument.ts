@@ -498,7 +498,11 @@ export function resolveMapDocument(value: unknown): ResolvedMap {
     throw new Error(`Map mode ${document.mode} requires ${expectedPlayers} spawns.`)
   for (const [index, spawn] of document.spawns.entries()) {
     const seat = spawnSeatForIndex(index)
-    if (spawn.teamId !== seat.teamId || spawn.teamSlot !== seat.teamSlot)
+    if (
+      spawn.teamId !== seat.teamId ||
+      spawn.teamSlot !== seat.teamSlot ||
+      spawn.facing !== seat.facing
+    )
       throw new Error('Map spawns must use canonical seat order A1, B1, A2, B2, A3, B3.')
     if (
       !Number.isFinite(spawn.x) ||

@@ -574,6 +574,11 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
 }
 
 export function validateWeaponRegistry(): boolean {
+  if (
+    new Set(WEAPON_ORDER).size !== WEAPON_ORDER.length ||
+    Object.keys(WEAPONS).length !== WEAPON_ORDER.length
+  )
+    return false
   return WEAPON_ORDER.every((id) => {
     const weapon = WEAPONS[id]
     const finite = [
@@ -608,6 +613,7 @@ export function validateWeaponRegistry(): boolean {
       weapon.freezeTurns ?? 0,
     ]
     return (
+      weapon?.id === id &&
       finite.every((value) => Number.isFinite(value) && value >= 0) &&
       (weapon.ammunition === 'unlimited' ||
         (Number.isSafeInteger(weapon.ammunition) && weapon.ammunition > 0)) &&
@@ -623,7 +629,21 @@ export function validateWeaponRegistry(): boolean {
         weapon.pelletCount > 0 ||
         weapon.mechanic === 'melee') &&
       (weapon.mechanic !== 'mine' ||
-        (weapon.aimMode === 'self' && weapon.mineRadius > 0 && weapon.mineTriggerRadius > 0))
+        (weapon.aimMode === 'self' && weapon.mineRadius > 0 && weapon.mineTriggerRadius > 0)) &&
+      (weapon.mechanic !== 'scatter' || (weapon.pelletCount > 0 && weapon.pelletRange > 0)) &&
+      (weapon.mechanic !== 'cluster' ||
+        (weapon.clusterChildCount > 0 &&
+          weapon.clusterChildDamage > 0 &&
+          weapon.clusterChildSpeed > 0)) &&
+      (weapon.mechanic !== 'teleport' ||
+        (weapon.aimMode === 'target-position' &&
+          weapon.teleportEdgeMargin > 0 &&
+          weapon.teleportPlayerClearance > 0)) &&
+      (weapon.mechanic !== 'melee' || (weapon.meleeRange ?? 0) > 0) &&
+      (weapon.mechanic !== 'beacon' ||
+        (weapon.beaconDelaySeconds ?? 0) > 0 && (weapon.beaconBombCount ?? 0) > 0) &&
+      (weapon.mechanic !== 'remote-split' || (weapon.remoteSplitAngleRadians ?? 0) > 0) &&
+      (weapon.mechanic !== 'freeze' || (weapon.freezeTurns ?? 0) > 0)
     )
   })
 }
@@ -633,14 +653,19 @@ export function isWeaponId(value: unknown): value is WeaponId {
 }
 
 export type WeaponInventory = Record<WeaponId, number | 'unlimited'>
-export function createWeaponInventory(): WeaponInventory {
+export function createWeaponInventory(starting?: Readonly<WeaponInventory>): WeaponInventory {
   return Object.fromEntries(
-    WEAPON_ORDER.map((id) => [id, WEAPONS[id].ammunition]),
+    WEAPON_ORDER.map((id) => [id, starting?.[id] ?? WEAPONS[id].ammunition]),
   ) as WeaponInventory
+}
+export function firstUsableWeapon(inventory: Readonly<WeaponInventory>): WeaponId | null {
+  return WEAPON_ORDER.find((id) => inventory[id] === 'unlimited' || inventory[id] > 0) ?? null
 }
 export function canUseWeapon(inventory: WeaponInventory, id: WeaponId): boolean {
   return inventory[id] === 'unlimited' || inventory[id] > 0
 }
 export function consumeWeapon(inventory: WeaponInventory, id: WeaponId): WeaponInventory {
-  return inventory[id] === 'unlimited' ? inventory : { ...inventory, [id]: inventory[id] - 1 }
+  return inventory[id] === 'unlimited'
+    ? inventory
+    : { ...inventory, [id]: Math.max(0, inventory[id] - 1) }
 }

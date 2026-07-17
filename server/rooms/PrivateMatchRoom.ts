@@ -28,6 +28,10 @@ import { sanitizePlayerAppearance } from '../../src/players/appearanceRegistry'
 import { matchStateChecksum } from '../../src/simulation/serialization/matchSerialization'
 import { roomLog } from '../logger'
 import { roomCodeRegistry } from '../roomCodeRegistry'
+import { gameTicketStore } from '../account/gameTickets'
+import { MatchBalanceTracker } from './MatchBalanceTracker'
+import { activeProgressionRepository, type ProgressionParticipant } from '../account/progressionRepository'
+import { cloneArsenalRules, DEFAULT_ARSENAL_RULES, type ArsenalRules } from '../../src/match/arsenal'
 import {
   MatchResultState,
   PrivateMatchState,
@@ -52,6 +56,7 @@ type RoomMetadata = {
 }
 
 type ClientData = {
+  clerkUserId?: string
   playerId: string
   seat: number
   commandWindowStartedAt: number
@@ -92,6 +97,9 @@ export class PrivateMatchRoom extends Room<{
   private reconnectGraceSeconds = RECONNECT_GRACE_SECONDS
   private readonly reconnectDeadlines = new Map<string, number>()
   private matchHasBegun = false
+  private balanceTracker = new MatchBalanceTracker()
+  private arsenal: ArsenalRules = cloneArsenalRules(DEFAULT_ARSENAL_RULES)
+  private progressionParticipants: ProgressionParticipant[] = []
 
   messages: Messages<this> = {
     [NETWORK_MESSAGE_TYPE]: (client: Client, payload: unknown) =>
@@ -110,7 +118,7 @@ export class PrivateMatchRoom extends Room<{
       throw new ServerError(ErrorCode.INVALID_PAYLOAD, 'Invalid private-room configuration.')
     const incompatibility = compatibilityError(parsed.data.compatibility)
     if (incompatibility)
-      throw new ServerError(ErrorCode.AUTH_FAILED, `Incompatible game version: ${incompatibility}`)
+      throw new ServerError(ErrorCode.APPLICATION_ERROR, `Incompatible game version: ${incompatibility}`)
 
     const capacity = PLAYER_COUNT_BY_MODE[parsed.data.mode]
     this.maxClients = capacity
@@ -122,6 +130,7 @@ export class PrivateMatchRoom extends Room<{
     this.state.mapId = parsed.data.mapId
     this.state.projectileBoundaryMode = parsed.data.projectileBoundaryMode
     this.state.turnDurationSeconds = parsed.data.turnDurationSeconds
+    this.arsenal = cloneArsenalRules(parsed.data.arsenal)
     this.state.protocolVersion = CURRENT_COMPATIBILITY.protocol
     this.state.mapRegistryVersion = CURRENT_COMPATIBILITY.maps
     this.state.weaponRegistryVersion = CURRENT_COMPATIBILITY.weapons
@@ -139,19 +148,23 @@ export class PrivateMatchRoom extends Room<{
     roomLog('room-created', { roomId: this.roomId, roomCode: this.roomCode })
   }
 
-  onAuth(_client: Client, options: unknown): boolean {
+  onAuth(_client: Client, options: unknown): { clerkUserId?: string } {
     const parsed = createRoomOptionsSchema.safeParse(options)
     const joinParsed = joinRoomOptionsSchema.safeParse(options)
     const data = parsed.success ? parsed.data : joinParsed.success ? joinParsed.data : null
     if (!data) throw new ServerError(ErrorCode.INVALID_PAYLOAD, 'Invalid join request.')
     const incompatibility = compatibilityError(data.compatibility)
     if (incompatibility)
-      throw new ServerError(ErrorCode.AUTH_FAILED, `Incompatible game version: ${incompatibility}`)
+      throw new ServerError(ErrorCode.APPLICATION_ERROR, `Incompatible game version: ${incompatibility}`)
     if (this.state.phase !== 'waiting')
       throw new ServerError(ErrorCode.APPLICATION_ERROR, 'This match has already started.')
     if (this.state.players.size >= this.state.capacity)
       throw new ServerError(ErrorCode.APPLICATION_ERROR, 'This private room is already full.')
-    return true
+    if (!data.gameTicket) return {}
+    const clerkUserId = gameTicketStore.consume(data.gameTicket)
+    if (!clerkUserId)
+      throw new ServerError(ErrorCode.AUTH_FAILED, 'The supplied game identity ticket is invalid or expired.')
+    return { clerkUserId }
   }
 
   onJoin(client: Client, options: unknown): void {
@@ -159,6 +172,11 @@ export class PrivateMatchRoom extends Room<{
     const joinParsed = joinRoomOptionsSchema.safeParse(options)
     const joinOptions = parsed.success ? parsed.data : joinParsed.success ? joinParsed.data : null
     if (!joinOptions) throw new ServerError(ErrorCode.INVALID_PAYLOAD, 'Invalid join request.')
+    const clerkUserId = typeof (client.auth as { clerkUserId?: unknown } | undefined)?.clerkUserId === 'string'
+      ? (client.auth as { clerkUserId: string }).clerkUserId
+      : undefined
+    if (clerkUserId && this.clients.some((other) => (other.userData as ClientData | undefined)?.clerkUserId === clerkUserId))
+      throw new ServerError(ErrorCode.APPLICATION_ERROR, 'This signed-in account already occupies a seat.')
     const playerName =
       typeof options === 'object' && options !== null && 'playerName' in options
         ? (options as { playerName: unknown }).playerName
@@ -188,6 +206,11 @@ export class PrivateMatchRoom extends Room<{
     player.accessory = appearance.accessory
     this.state.players.set(playerId, player)
     client.userData = {
+      ...(
+        clerkUserId
+          ? { clerkUserId }
+          : {}
+      ),
       playerId,
       seat,
       commandWindowStartedAt: this.clock.currentTime,
@@ -355,6 +378,7 @@ export class PrivateMatchRoom extends Room<{
         .projectileBoundaryMode as LocalMatchConfig['projectileBoundaryMode'],
       turnDurationSeconds: this.state
         .turnDurationSeconds as LocalMatchConfig['turnDurationSeconds'],
+      arsenal: cloneArsenalRules(this.arsenal),
     }
     this.state.matchGeneration += 1
     this.simulation = new MatchSimulation(config, {
@@ -368,6 +392,11 @@ export class PrivateMatchRoom extends Room<{
     this.receivedOrder = 0
     this.commandQueue = []
     this.recentEvents = []
+    this.progressionParticipants = players.map((_, seat) => {
+      const client = this.clients.find((candidate) => (candidate.userData as ClientData | undefined)?.seat === seat)
+      return { seat, teamId: (seat % 2) as TeamId, clerkUserId: (client?.userData as ClientData | undefined)?.clerkUserId ?? null }
+    })
+    this.balanceTracker = new MatchBalanceTracker()
     this.state.projectiles.clear()
     this.state.mines.clear()
     this.state.beacons.clear()
@@ -517,6 +546,7 @@ export class PrivateMatchRoom extends Room<{
   }
 
   private deliverEvents(events: MatchEvent[]): void {
+    this.balanceTracker.record(events)
     this.recentEvents.push(...events)
     if (this.recentEvents.length > MAX_RECENT_EVENTS)
       this.recentEvents.splice(0, this.recentEvents.length - MAX_RECENT_EVENTS)
@@ -588,9 +618,27 @@ export class PrivateMatchRoom extends Room<{
       reason,
     } satisfies ServerRoomMessage)
     this.updatePhaseListing()
+    const progression = activeProgressionRepository()
+    if (progression && this.progressionParticipants.some(({ clerkUserId }) => clerkUserId)) {
+      const completion = {
+        id: this.simulation.state.matchId,
+        mode: result.config.mode,
+        mapId: result.config.mapId,
+        reason,
+        winnerTeamId: result.winnerTeamId,
+        isDraw: result.winnerTeamId === null,
+        turnsTaken: result.turnsTaken,
+        durationSeconds: result.durationSeconds,
+        participants: this.progressionParticipants.map((participant) => ({ ...participant })),
+      }
+      void progression.recordCompletedMatch(completion).then((created) =>
+        roomLog('progression-recorded', { matchId: completion.id, created }),
+      ).catch(() => roomLog('progression-failed', { matchId: completion.id }))
+    }
     roomLog('match-result', {
       roomCode: this.roomCode,
       reason,
+      balance: JSON.stringify(this.balanceTracker.summary()),
       winnerSeat: result.winnerIndex,
       tick: this.simulation.state.tick,
     })

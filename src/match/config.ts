@@ -11,6 +11,7 @@ import {
   sanitizePlayerAppearance,
   type PlayerAppearance,
 } from '../players/appearanceRegistry'
+import { sanitizeArsenalRules, type ArsenalRules } from './arsenal'
 
 export const DEFAULT_PLAYER_NAMES = ['Lumen', 'Morrow', 'Nova', 'Bramble', 'Sable', 'Quill'] as const
 export { PLAYER_COUNT_BY_MODE }
@@ -24,6 +25,7 @@ export type LocalMatchConfig = {
   mapId: MapId
   turnDurationSeconds: TurnDuration
   projectileBoundaryMode: ProjectileBoundaryMode
+  arsenal: ArsenalRules
 }
 
 export function sanitizePlayerName(value: unknown, fallback: string): string {
@@ -62,5 +64,6 @@ export function validateMatchConfig(
     )
       ? (value!.projectileBoundaryMode as ProjectileBoundaryMode)
       : map.projectileBoundary.defaultMode,
+    arsenal: sanitizeArsenalRules(value?.arsenal),
   }
 }

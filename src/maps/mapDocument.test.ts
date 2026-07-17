@@ -55,6 +55,12 @@ const portal = (id: string) => ({
 })
 
 describe('map document v4', () => {
+  it('rejects a spawn facing away from its canonical opponent', () => {
+    const current = document()
+    current.spawns[0].facing = -1
+    expect(() => resolveMapDocument(current)).toThrow('canonical seat order')
+  })
+
   it('migrates strict v1 documents with an empty object list', () => {
     const current = document()
     const { objects: _objects, projectileBoundary: _projectileBoundary, ...v1 } = current

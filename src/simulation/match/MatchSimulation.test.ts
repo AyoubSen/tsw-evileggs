@@ -13,6 +13,7 @@ import { TERRAIN_MATERIAL } from '../../terrain/materials'
 import { getMap } from '../../maps/registry'
 import type { SimProjectile } from './MatchState'
 import { DEFAULT_PLAYER_APPEARANCES } from '../../players/appearanceRegistry'
+import { ARSENAL_PRESETS, cloneArsenalRules, DEFAULT_ARSENAL_RULES } from '../../match/arsenal'
 
 const config = {
   mode: '1v1' as const,
@@ -21,6 +22,7 @@ const config = {
   mapId: 'rolling-hills' as const,
   projectileBoundaryMode: 'open' as const,
   turnDurationSeconds: 30 as const,
+  arsenal: cloneArsenalRules(DEFAULT_ARSENAL_RULES),
 }
 
 function command(
@@ -69,6 +71,30 @@ function placeActiveProjectileInTerrain(simulation: MatchSimulation, x = 400): v
 }
 
 describe('authoritative commands', () => {
+  it('enforces a custom arsenal and configured starting ammunition', () => {
+    const custom = {
+      ...config,
+      arsenal: {
+        presetId: 'custom' as const,
+        ammunition: {
+          ...ARSENAL_PRESETS.classic.ammunition,
+          'basic-rocket': 0 as const,
+          'pocket-knife': 'unlimited' as const,
+          'old-shoe': 1,
+        },
+      },
+    }
+    const simulation = new MatchSimulation(custom)
+    expect(simulation.activePlayer.selectedWeapon).toBe('high-arc-mortar')
+    expect(simulation.activePlayer.inventory['old-shoe']).toBe(1)
+    expect(
+      simulation.applyCommand(command(simulation, { type: 'select-weapon', weaponId: 'basic-rocket' })),
+    ).toMatchObject({ accepted: false, reason: 'invalid-weapon' })
+    expect(
+      simulation.applyCommand(command(simulation, { type: 'select-weapon', weaponId: 'old-shoe' })),
+    ).toMatchObject({ accepted: true })
+  })
+
   it('rejects non-active players, invalid power, duplicate fire, and stale turns', () => {
     const simulation = new MatchSimulation(config)
     const nonActiveMove = {
@@ -549,7 +575,7 @@ describe('terrain, snapshots, and replay', () => {
     fireDown(simulation)
     simulation.step(20)
     const payload = serializeMatchState(simulation.state)
-    expect(deserializeMatchState(payload).version).toBe(7)
+    expect(deserializeMatchState(payload).version).toBe(11)
     const restored = restoreMatchSimulation(payload)
     expect(matchStateChecksum(restored.state)).toBe(matchStateChecksum(simulation.state))
     expect([...restored.getTerrain().cells]).toEqual([...simulation.getTerrain().cells])

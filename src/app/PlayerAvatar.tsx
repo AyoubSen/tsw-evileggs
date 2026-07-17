@@ -17,6 +17,56 @@ function WeaponSvg({ recipe, weaponId }: { recipe: ShapeRecipe; weaponId: Weapon
   })}</>
 }
 
+function weaponRecipeViewBox(recipe: ShapeRecipe): string {
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  const include = (x: number, y: number, padding = 0) => {
+    minX = Math.min(minX, x - padding)
+    minY = Math.min(minY, y - padding)
+    maxX = Math.max(maxX, x + padding)
+    maxY = Math.max(maxY, y + padding)
+  }
+  for (const item of recipe.primitives) {
+    if (item.kind === 'polygon') {
+      const padding = (item.strokeWidth ?? 0) / 2
+      item.points.forEach((point) => include(point.x, point.y, padding))
+    } else if (item.kind === 'line') {
+      const padding = item.width / 2 + (item.outlineWidth ?? 0)
+      include(item.from.x, item.from.y, padding)
+      include(item.to.x, item.to.y, padding)
+    } else if (item.kind === 'circle') {
+      const radius = item.radius + (item.strokeWidth ?? 0) / 2
+      include(item.center.x, item.center.y, radius)
+    } else {
+      const stroke = (item.strokeWidth ?? 0) / 2
+      include(item.center.x - item.radiusX, item.center.y - item.radiusY, stroke)
+      include(item.center.x + item.radiusX, item.center.y + item.radiusY, stroke)
+    }
+  }
+  if (![minX, minY, maxX, maxY].every(Number.isFinite)) return '-34 -25 68 50'
+  const width = Math.max(1, maxX - minX)
+  const height = Math.max(1, maxY - minY)
+  const padding = Math.max(width, height) * 0.14
+  return `${minX - padding} ${minY - padding} ${width + padding * 2} ${height + padding * 2}`
+}
+
+export function WeaponIcon({ weaponId, className = '' }: { weaponId: WeaponId; className?: string }) {
+  const weapon = getWeaponVisual(weaponId)
+  return (
+    <svg
+      className={`weapon-icon ${className}`}
+      viewBox={weaponRecipeViewBox(weapon.held)}
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <WeaponSvg recipe={weapon.held} weaponId={weaponId} />
+    </svg>
+  )
+}
+
 export function PlayerAvatar({ appearance, label = 'Player appearance', teamId = 0, teamBackground = false, highContrast = false, className = '', pose = 'idle', facing = 1, weaponId, hurt = false, frozen = false, compact = false }: PlayerAvatarProps) {
   const clipId = `${useId().replace(/:/g, '')}-body`
   const primary = PLAYER_PRIMARY_COLORS.find((entry) => entry.id === appearance.primaryColor)!.color

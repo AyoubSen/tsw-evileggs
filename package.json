@@ -1,7 +1,7 @@
 {
   "name": "project-shellshock",
   "private": true,
-  "version": "1.11.0",
+  "version": "1.12.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n web,server -c cyan,magenta \"pnpm dev:web\" \"pnpm dev:server\"",
@@ -18,17 +18,24 @@
     "test:browser": "playwright test",
     "map:compile": "tsx scripts/compile-map.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@clerk/backend": "^3.11.7",
+    "@clerk/react": "^6.12.5",
     "@colyseus/core": "0.17.44",
     "@colyseus/schema": "4.0.27",
     "@colyseus/sdk": "0.17.43",
     "@colyseus/tools": "0.17.19",
     "@colyseus/ws-transport": "0.17.13",
+    "@neondatabase/serverless": "^1.1.0",
     "@vitejs/plugin-react": "latest",
     "colyseus": "0.17.10",
     "cors": "^2.8.6",
+    "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
     "phaser": "latest",
     "react": "latest",
@@ -46,6 +53,7 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "concurrently": "^9.2.4",
+    "drizzle-kit": "^0.31.10",
     "eslint": "latest",
     "eslint-plugin-react-hooks": "latest",
     "eslint-plugin-react-refresh": "latest",

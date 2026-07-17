@@ -43,6 +43,7 @@ export const LATENCY_STALE_THRESHOLD_MS = 10_000
 type StatusListener = (status: ConnectionStatus, message?: string) => void
 type QualityListener = (quality: ConnectionQuality, latencyMs: number | null) => void
 type RoomViewListener = (view: OnlineRoomView) => void
+export type GameTicketProvider = () => Promise<string>
 
 let nextSessionGeneration = 0
 
@@ -56,7 +57,9 @@ export function playerFacingError(
   if (/full|locked/i.test(message)) return new Error('That private room is already full.')
   if (/already started|match-started/i.test(message))
     return new Error('That room match has already started.')
-  if (/incompatible|version|auth/i.test(message))
+  if (/identity|ticket|auth(?:entication|orization)? failed/i.test(message))
+    return new Error('Your signed-in game identity could not be verified. Please try again.')
+  if (/incompatible|version/i.test(message))
     return new Error('Your game version is not compatible with this room.')
   if (/not found|invalid room|room-not-found/i.test(message))
     return new Error('That room code is no longer active.')
@@ -200,6 +203,7 @@ export class OnlineRoomSession {
     playerName: string,
     config: LocalMatchConfig,
     signal?: AbortSignal,
+    gameTicketProvider?: GameTicketProvider,
   ): Promise<OnlineRoomSession> {
     try {
       if (config.mode !== '1v1' && config.mode !== '2v2' && config.mode !== '3v3')
@@ -214,8 +218,10 @@ export class OnlineRoomSession {
         mapId: config.mapId,
         projectileBoundaryMode: config.projectileBoundaryMode,
         turnDurationSeconds: config.turnDurationSeconds,
+        arsenal: config.arsenal,
         compatibility: CURRENT_COMPATIBILITY,
         playerAppearance: { ...config.playerAppearances[0] },
+        ...(gameTicketProvider ? { gameTicket: await gameTicketProvider() } : {}),
       }
       const room = await client.create(PRIVATE_MATCH_ROOM, options)
       if (signal?.aborted) {
@@ -226,7 +232,6 @@ export class OnlineRoomSession {
     } catch (caught) {
       if (isOnlineLifecycleCancellation(caught)) throw caught
       if (signal?.aborted) throw new OnlineLifecycleCancellation('aborted-startup')
-      if (import.meta.env.DEV) console.error('Online room creation failed', caught)
       throw playerFacingError(caught, 'realtime')
     }
   }
@@ -236,6 +241,7 @@ export class OnlineRoomSession {
     playerName: string,
     signal?: AbortSignal,
     playerAppearance: Readonly<PlayerAppearance> = DEFAULT_PLAYER_APPEARANCES[0],
+    gameTicketProvider?: GameTicketProvider,
   ): Promise<OnlineRoomSession> {
     try {
       throwIfOnlineStartupAborted(signal)
@@ -249,6 +255,7 @@ export class OnlineRoomSession {
         playerName,
         playerAppearance: { ...playerAppearance },
         compatibility: CURRENT_COMPATIBILITY,
+        ...(gameTicketProvider ? { gameTicket: await gameTicketProvider() } : {}),
       }
       const room = await client.joinById(roomId, options)
       if (signal?.aborted) {

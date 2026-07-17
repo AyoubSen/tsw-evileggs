@@ -25,9 +25,10 @@ import {
   type PlayerAppearance,
 } from '../players/appearanceRegistry'
 import { APP_VERSION } from '../version'
+import type { ArsenalRules } from '../match/arsenal'
 
 export const PRIVATE_MATCH_ROOM = 'private_match'
-export const PROTOCOL_VERSION = 'private-room-13'
+export const PROTOCOL_VERSION = 'private-room-15'
 export { SIMULATION_SNAPSHOT_VERSION }
 export const CLIENT_BUILD_VERSION = APP_VERSION
 export const ROOM_CODE_LENGTH = 6
@@ -123,14 +124,17 @@ export type CreateRoomOptions = {
   mapId: MapId
   projectileBoundaryMode: LocalMatchConfig['projectileBoundaryMode']
   turnDurationSeconds: TurnDuration
+  arsenal: ArsenalRules
   compatibility: CompatibilityVersions
   playerAppearance: PlayerAppearance
+  gameTicket?: string
 }
 
 export type JoinRoomOptions = {
   playerName: string
   compatibility: CompatibilityVersions
   playerAppearance: PlayerAppearance
+  gameTicket?: string
 }
 
 const ONLINE_MAP_ORDER = [
@@ -167,6 +171,24 @@ const playerAppearanceSchema = z
   })
   .strict()
 
+const gameTicketSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/)
+const ammunitionValueSchema = z.union([z.literal('unlimited'), z.number().int().min(0).max(99)])
+const arsenalSchema = z
+  .object({
+    presetId: z.enum(['standard', 'classic', 'chaos', 'custom']),
+    ammunition: z.object(
+      Object.fromEntries(WEAPON_ORDER.map((id) => [id, ammunitionValueSchema])) as Record<
+        (typeof WEAPON_ORDER)[number],
+        typeof ammunitionValueSchema
+      >,
+    ).strict(),
+  })
+  .strict()
+  .refine((value) => WEAPON_ORDER.some((id) => value.ammunition[id] === 'unlimited'), {
+    message: 'At least one weapon must have unlimited ammunition.',
+    path: ['ammunition'],
+  })
+
 export const createRoomOptionsSchema = z
   .object({
     playerName: z.string().max(64),
@@ -178,8 +200,10 @@ export const createRoomOptionsSchema = z
       { message: 'Projectile boundary mode is not recognized.' },
     ),
     turnDurationSeconds: z.union(TURN_DURATIONS.map((value) => z.literal(value))),
+    arsenal: arsenalSchema,
     compatibility: compatibilitySchema,
     playerAppearance: playerAppearanceSchema,
+    gameTicket: gameTicketSchema.optional(),
   })
   .strict()
   .refine((value) => getMap(value.mapId).mode === value.mode, {
@@ -200,6 +224,7 @@ export const joinRoomOptionsSchema = z
     playerName: z.string().max(64),
     compatibility: compatibilitySchema,
     playerAppearance: playerAppearanceSchema,
+    gameTicket: gameTicketSchema.optional(),
   })
   .strict()
 

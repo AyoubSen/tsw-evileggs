@@ -18,6 +18,9 @@
   "include": [
     "server",
     "src/maps",
+    "src/app/preferences.ts",
+    "src/players",
+    "src/profile",
     "src/match",
     "src/network/protocol.ts",
     "src/shared",

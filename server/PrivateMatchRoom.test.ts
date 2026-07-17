@@ -11,6 +11,7 @@ import { HEALTH_RESPONSE, server } from './app.config'
 import { PrivateMatchRoom } from './rooms/PrivateMatchRoom'
 import { DEFAULT_PLAYER_APPEARANCES } from '../src/players/appearanceRegistry'
 import { roomCodeRegistry } from './roomCodeRegistry'
+import { cloneArsenalRules, DEFAULT_ARSENAL_RULES } from '../src/match/arsenal'
 
 const createOptions = {
   playerName: 'Host',
@@ -20,6 +21,7 @@ const createOptions = {
   turnDurationSeconds: 30 as const,
   compatibility: CURRENT_COMPATIBILITY,
   playerAppearance: DEFAULT_PLAYER_APPEARANCES[0],
+  arsenal: cloneArsenalRules(DEFAULT_ARSENAL_RULES),
 }
 const joinOptions = {
   playerName: 'Guest',

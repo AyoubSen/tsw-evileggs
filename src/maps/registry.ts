@@ -821,7 +821,11 @@ export function hasSafeSpawns(map: MapDefinition): boolean {
   const expectedPlayers = playerCountForMode(map.mode)
   const seatsAreCanonical = map.spawnPoints.every((spawn, index) => {
     const seat = spawnSeatForIndex(index)
-    return spawn.teamId === seat.teamId && spawn.teamSlot === seat.teamSlot
+    return (
+      spawn.teamId === seat.teamId &&
+      spawn.teamSlot === seat.teamSlot &&
+      spawn.facing === seat.facing
+    )
   })
   return (
     map.spawnPoints.length === expectedPlayers &&

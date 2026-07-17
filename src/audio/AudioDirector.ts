@@ -9,6 +9,7 @@ export type SoundCue =
   | 'grenade-bounce'
   | 'reflector-hit'
   | 'portal-transit'
+  | 'boundary-wrap'
   | 'grenade-fuse'
   | 'scatter-fire'
   | 'cluster-fire'
@@ -53,10 +54,31 @@ export type AudioPreferences = {
   soundEffectsVolume: number
 }
 
-type AudioContextLike = Pick<
-  AudioContext,
-  'state' | 'currentTime' | 'destination' | 'createOscillator' | 'createGain' | 'resume' | 'close'
->
+type AudioParamLike = {
+  setValueAtTime(value: number, startTime: number): unknown
+  exponentialRampToValueAtTime(value: number, endTime: number): unknown
+}
+type OscillatorLike = {
+  type: 'sine' | 'square' | 'sawtooth' | 'triangle' | 'custom'
+  frequency: AudioParamLike
+  onended: (() => void) | null
+  connect(destination: unknown): unknown
+  start(when?: number): void
+  stop(when?: number): void
+}
+type GainLike = {
+  gain: AudioParamLike
+  connect(destination: unknown): unknown
+}
+type AudioContextLike = {
+  state: string
+  currentTime: number
+  destination: unknown
+  createOscillator(): OscillatorLike
+  createGain(): GainLike
+  resume(): Promise<unknown>
+  close(): Promise<unknown>
+}
 
 const frequencies: Record<SoundCue, readonly [number, number, number]> = {
   'menu-select': [520, 680, 0.045],
@@ -69,6 +91,7 @@ const frequencies: Record<SoundCue, readonly [number, number, number]> = {
   'grenade-bounce': [310, 220, 0.07],
   'reflector-hit': [1800, 420, 0.1],
   'portal-transit': [420, 1320, 0.16],
+  'boundary-wrap': [980, 520, 0.1],
   'grenade-fuse': [780, 680, 0.045],
   'scatter-fire': [190, 85, 0.11],
   'cluster-fire': [145, 75, 0.17],
@@ -112,12 +135,14 @@ export class AudioDirector {
   private context: AudioContextLike | null = null
   private unlocked = false
   private preferences: AudioPreferences
-  private activeOscillators = new Set<OscillatorNode>()
+  private activeOscillators = new Set<OscillatorLike>()
 
   constructor(
     preferences: AudioPreferences,
     private readonly createContext: () => AudioContextLike | null = () => {
-      const Context = globalThis.AudioContext
+      const Context = (globalThis as unknown as {
+        AudioContext?: new () => AudioContextLike
+      }).AudioContext
       return Context ? new Context() : null
     },
   ) {

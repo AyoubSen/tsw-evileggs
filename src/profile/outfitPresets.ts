@@ -29,6 +29,7 @@ export interface OutfitPresetRepository {
 }
 
 const validId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/
+const validSyncRevision = /^(0|[1-9][0-9]{0,19})$/
 
 export function sanitizeOutfitPresetName(value: unknown, fallback = 'Outfit'): string {
   const sanitized = typeof value === 'string'
@@ -66,14 +67,14 @@ export function sanitizeOutfitPreset(value: unknown): OutfitPreset | null {
     ...(preset.scope === 'local' || preset.scope === 'account' || preset.scope === 'shared'
       ? { scope: preset.scope }
       : {}),
-    ...(typeof preset.syncRevision === 'string'
+    ...(typeof preset.syncRevision === 'string' && validSyncRevision.test(preset.syncRevision)
       ? { syncRevision: preset.syncRevision.slice(0, 128) }
       : {}),
   }
   return validateOutfitPreset(candidate) ? candidate : null
 }
 
-function sanitizeOutfitPresetRecord(value: unknown): OutfitPresetRecord | null {
+export function sanitizeOutfitPresetRecord(value: unknown): OutfitPresetRecord | null {
   if (!value || typeof value !== 'object') return null
   const source = value as Record<string, unknown>
   if (source.deleted !== true) return sanitizeOutfitPreset(value)
@@ -96,7 +97,7 @@ function sanitizeOutfitPresetRecord(value: unknown): OutfitPresetRecord | null {
     ...(source.scope === 'local' || source.scope === 'account' || source.scope === 'shared'
       ? { scope: source.scope }
       : {}),
-    ...(typeof source.syncRevision === 'string'
+    ...(typeof source.syncRevision === 'string' && validSyncRevision.test(source.syncRevision)
       ? { syncRevision: source.syncRevision.slice(0, 128) }
       : {}),
   }

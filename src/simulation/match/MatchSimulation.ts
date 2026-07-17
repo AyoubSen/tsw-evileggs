@@ -24,6 +24,7 @@ import {
   canUseWeapon,
   consumeWeapon,
   createWeaponInventory,
+  firstUsableWeapon,
   type WeaponDefinition,
   type WeaponId,
 } from '../../weapons/registry'
@@ -121,6 +122,7 @@ export class MatchSimulation {
         validated.playerNames[index],
         validated.playerAppearances[index],
         spawn,
+        validated.arsenal.ammunition,
       ),
     )
     const activePlayerIndex = players.findIndex(
@@ -172,7 +174,11 @@ export class MatchSimulation {
     name: string,
     appearance: PlayerAppearance,
     spawn: SpawnDefinition,
+    startingInventory: Readonly<import('../../weapons/registry').WeaponInventory>,
   ): SimPlayer {
+    const inventory = createWeaponInventory(startingInventory)
+    const selectedWeapon = firstUsableWeapon(inventory)
+    if (!selectedWeapon) throw new Error('Match arsenal must contain a usable weapon.')
     return {
       id,
       name,
@@ -189,8 +195,8 @@ export class MatchSimulation {
       moveDirection: 0,
       frozenTurnsRemaining: 0,
       frozenAppliedTurn: 0,
-      selectedWeapon: 'basic-rocket',
-      inventory: createWeaponInventory(),
+      selectedWeapon,
+      inventory,
     }
   }
 
@@ -300,7 +306,11 @@ export class MatchSimulation {
       player.grounded = false
       this.emit({ type: 'player-jumped', playerId: player.id })
     } else if (command.type === 'select-weapon') {
-      if (!WEAPON_ORDER.includes(command.weaponId)) return rejected('invalid-weapon')
+      if (
+        !WEAPON_ORDER.includes(command.weaponId) ||
+        this.state.config.arsenal.ammunition[command.weaponId] === 0
+      )
+        return rejected('invalid-weapon')
       if (!canUseWeapon(player.inventory, command.weaponId)) return rejected('no-ammunition')
       player.selectedWeapon = command.weaponId
       this.emit({ type: 'weapon-selected', playerId: player.id, weaponId: command.weaponId })
@@ -317,6 +327,7 @@ export class MatchSimulation {
     activation: WeaponActivation,
   ): CommandRejection | null {
     const weapon = WEAPONS[player.selectedWeapon]
+    if (this.state.config.arsenal.ammunition[weapon.id] === 0) return 'invalid-weapon'
     if (!canUseWeapon(player.inventory, weapon.id)) return 'no-ammunition'
     if (activation.kind !== weapon.aimMode) return 'invalid-command'
     if (activation.kind === 'directional') {
@@ -1367,8 +1378,10 @@ export class MatchSimulation {
     this.state.players.forEach((player) => {
       player.moveDirection = 0
     })
-    if (!canUseWeapon(this.activePlayer.inventory, this.activePlayer.selectedWeapon))
-      this.activePlayer.selectedWeapon = 'basic-rocket'
+    if (!canUseWeapon(this.activePlayer.inventory, this.activePlayer.selectedWeapon)) {
+      const fallback = firstUsableWeapon(this.activePlayer.inventory)
+      if (fallback) this.activePlayer.selectedWeapon = fallback
+    }
     this.emit({ type: 'turn-started', playerId: this.activePlayer.id, wind: this.state.wind })
   }
 

@@ -42,6 +42,7 @@ import {
   mapIdsForMode,
 } from '../maps/registry'
 import { PLAYER_COUNT_BY_MODE } from '../maps/mapDocument'
+import { assessOfficialMap } from '../maps/mapAssessment'
 
 describe('explosions', () => {
   it('uses linear damage falloff and no damage outside the blast', () => {
@@ -228,6 +229,39 @@ describe('turn machine', () => {
     ]
     expect(upcomingTurnIndices(players, 0, [1, 0], 4)).toEqual([0, 3, 4, 5])
   })
+
+  it('projects complete repeated 3v3 cycles after eliminations', () => {
+    const players = [
+      { teamId: 0 as const, alive: true },
+      { teamId: 1 as const, alive: false },
+      { teamId: 0 as const, alive: false },
+      { teamId: 1 as const, alive: true },
+      { teamId: 0 as const, alive: true },
+      { teamId: 1 as const, alive: true },
+    ]
+    expect(upcomingTurnIndices(players, 0, [1, 0], 8)).toEqual([0, 3, 4, 5, 0, 3, 4, 5])
+  })
+
+  it('keeps alternating teams for every viable six-player elimination mask', () => {
+    for (let mask = 0; mask < 64; mask += 1) {
+      const players = Array.from({ length: 6 }, (_, index) => ({
+        teamId: (index % 2) as 0 | 1,
+        alive: (mask & (1 << index)) !== 0,
+      }))
+      const activePlayerIndex = players.findIndex((player) => player.alive)
+      if (
+        activePlayerIndex < 0 ||
+        !players.some((player) => player.alive && player.teamId === 0) ||
+        !players.some((player) => player.alive && player.teamId === 1)
+      )
+        continue
+      const turns = upcomingTurnIndices(players, activePlayerIndex, [0, 0], 18)
+      expect(turns).toHaveLength(18)
+      expect(turns.every((index) => players[index].alive)).toBe(true)
+      for (let index = 1; index < turns.length; index += 1)
+        expect(players[turns[index]].teamId).not.toBe(players[turns[index - 1]].teamId)
+    }
+  })
 })
 
 describe('terrain mask', () => {
@@ -251,6 +285,7 @@ describe('weapons', () => {
     expect(used['timed-grenade']).toBe(2)
     expect(second['timed-grenade']).toBe(3)
     expect(consumeWeapon(first, 'basic-rocket')['basic-rocket']).toBe('unlimited')
+    expect(consumeWeapon({ ...first, 'timed-grenade': 0 }, 'timed-grenade')['timed-grenade']).toBe(0)
     expect(canUseWeapon({ ...first, teleporter: 0 }, 'teleporter')).toBe(false)
   })
 
@@ -317,5 +352,13 @@ describe('maps', () => {
       'twin-peaks',
       'ruined-foundry',
     ])
+  })
+
+  it('passes every official map through the shared balance assessment', () => {
+    for (const id of MAP_ORDER) {
+      const assessment = assessOfficialMap(MAPS[id])
+      expect(assessment.issues, id).toEqual([])
+      expect(assessment.metrics.minimumSpawnDistance, id).toBeGreaterThan(60)
+    }
   })
 })

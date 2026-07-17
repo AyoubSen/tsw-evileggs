@@ -258,7 +258,7 @@ export function resolvePlayerPose(
     id,
     rig,
     rearArm: { shoulder: rig.shoulder, hand: rig.rearHand },
-    frontArm: oneHanded ? null : { shoulder: { x: rig.shoulder.x + 6, y: rig.shoulder.y - 7 }, hand: rig.frontHand },
+    frontArm: oneHanded ? null : { shoulder: { x: rig.shoulder.x + 6, y: rig.shoulder.y - 2 }, hand: rig.frontHand },
     weaponOrigin: rig.weaponGrip,
     bodyOffset,
     weaponRotation: poseRotation,

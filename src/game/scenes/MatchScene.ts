@@ -57,6 +57,8 @@ import {
 } from '../weaponVisualRecipes'
 import { drawShapeRecipe } from '../weaponRenderer'
 import { upcomingTurnIndices } from '../../simulation/turns/teamTurnOrder'
+import { commandRejectionFeedback, combatHudHint, visibleTurnCount } from '../combatPresentation'
+import { fitWorldZoom, followWorldZoom, clampedCameraScroll } from '../camera'
 import {
   PLAYER_ACCENT_COLORS,
   PLAYER_PRIMARY_COLORS,
@@ -129,8 +131,11 @@ type ReflectionEffect = {
   seed: number
 }
 type PortalTransitEffect = {
+  kind: 'portal' | 'wrap' | 'exit'
   entrance: Vector
   exit: Vector
+  incomingDirection: Vector
+  outgoingDirection: Vector
   age: number
   lifetime: number
 }
@@ -261,7 +266,7 @@ export class MatchScene extends Phaser.Scene {
         strokeThickness: 2,
       }),
     )
-    this.turnTimelineTexts = Array.from({ length: 4 }, () =>
+    this.turnTimelineTexts = Array.from({ length: 6 }, () =>
       this.add
         .text(0, 0, '', {
           ...hudStyle,
@@ -554,7 +559,7 @@ export class MatchScene extends Phaser.Scene {
     void this.source.sendCommand(command).then((result) => {
       if (!result.accepted && result.reason !== 'navigation-cancelled') {
         onRejected?.()
-        this.bannerOverride = 'Action not available'
+        this.bannerOverride = commandRejectionFeedback(result.reason)
         this.turnBannerDuration = 0.65
       }
     })
@@ -681,6 +686,10 @@ export class MatchScene extends Phaser.Scene {
     if (weaponId) {
       const ammo = this.source.activePlayer.inventory[weaponId]
       if (ammo === 'unlimited' || ammo > 0) this.selectWeapon(weaponId)
+      else {
+        this.bannerOverride = 'No ammunition'
+        this.turnBannerDuration = 0.65
+      }
       event.preventDefault()
       return
     }
@@ -753,6 +762,10 @@ export class MatchScene extends Phaser.Scene {
           type: 'activate-weapon',
           activation: { kind: 'target-position', target: this.teleportTarget },
         })
+      else {
+        this.bannerOverride = 'Choose safe ground'
+        this.turnBannerDuration = 0.65
+      }
     } else if (this.selectedWeapon().aimMode === 'self')
       this.send({ type: 'activate-weapon', activation: { kind: 'self' } })
     else {
@@ -797,12 +810,13 @@ export class MatchScene extends Phaser.Scene {
 
   private weaponAtViewportPoint(point: Vector): WeaponId | null {
     const layout = this.weaponRackLayout()
+    const weapons = this.enabledWeaponIds()
     if (point.y < layout.rackY || point.y > layout.rackY + layout.rackHeight) return null
     const index = Math.round(
       (point.x - layout.rackX - layout.rackPadding - layout.weaponRadius) /
         (layout.weaponDiameter + layout.rackGap),
     )
-    const weaponId = WEAPON_ORDER[index]
+    const weaponId = weapons[index]
     if (!weaponId) return null
     const centerX =
       layout.rackX +
@@ -875,10 +889,11 @@ export class MatchScene extends Phaser.Scene {
 
   private cycleWeapon(direction: -1 | 1): void {
     const player = this.source.activePlayer
-    const current = WEAPON_ORDER.indexOf(this.selectedWeapon().id)
-    for (let offset = 1; offset <= WEAPON_ORDER.length; offset += 1) {
-      const index = (current + direction * offset + WEAPON_ORDER.length) % WEAPON_ORDER.length
-      const weaponId = WEAPON_ORDER[index]
+    const weapons = this.enabledWeaponIds()
+    const current = weapons.indexOf(this.selectedWeapon().id)
+    for (let offset = 1; offset <= weapons.length; offset += 1) {
+      const index = (current + direction * offset + weapons.length) % weapons.length
+      const weaponId = weapons[index]
       const ammo = player.inventory[weaponId]
       if (ammo === 'unlimited' || ammo > 0) {
         this.selectWeapon(weaponId)
@@ -930,7 +945,7 @@ export class MatchScene extends Phaser.Scene {
 
   private fitCameraZoom(): number {
     const { worldWidth, worldHeight } = this.source.state
-    return Math.min(VIEWPORT_WIDTH / worldWidth, VIEWPORT_HEIGHT / worldHeight)
+    return fitWorldZoom(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, worldWidth, worldHeight)
   }
 
   private logicalCameraZoom(): number {
@@ -942,7 +957,7 @@ export class MatchScene extends Phaser.Scene {
     const camera = this.cameras.main
     const fitZoom = this.fitCameraZoom()
     const showingOverview = this.preferences.cameraMode === 'fit' || this.introDuration > 0
-    const targetZoom = showingOverview ? fitZoom : Math.min(1, fitZoom * 1.32)
+    const targetZoom = showingOverview ? fitZoom : followWorldZoom(fitZoom)
     const focus = showingOverview
       ? { x: state.worldWidth / 2, y: state.worldHeight / 2 }
       : (state.projectiles[0]?.position ??
@@ -951,18 +966,14 @@ export class MatchScene extends Phaser.Scene {
     const easing = this.preferences.reducedMotion ? 1 : 1 - Math.exp(-delta * 6)
     const logicalZoom = Phaser.Math.Linear(this.logicalCameraZoom(), targetZoom, easing)
     camera.setZoom(logicalZoom * this.renderScale)
-    const visibleWidth = VIEWPORT_WIDTH / logicalZoom
-    const visibleHeight = VIEWPORT_HEIGHT / logicalZoom
-    const targetScrollX = Phaser.Math.Clamp(
-      focus.x - visibleWidth / 2,
-      0,
-      Math.max(0, state.worldWidth - visibleWidth),
+    const targetScroll = clampedCameraScroll(
+      focus,
+      { width: state.worldWidth, height: state.worldHeight },
+      { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+      logicalZoom,
     )
-    const targetScrollY = Phaser.Math.Clamp(
-      focus.y - visibleHeight / 2,
-      0,
-      Math.max(0, state.worldHeight - visibleHeight),
-    )
+    const targetScrollX = targetScroll.x
+    const targetScrollY = targetScroll.y
     const nextScrollX = Phaser.Math.Linear(camera.scrollX, targetScrollX, easing)
     const nextScrollY = Phaser.Math.Linear(camera.scrollY, targetScrollY, easing)
     const worldUnitsPerPixel = 1 / Math.max(camera.zoom, Number.EPSILON)
@@ -1318,7 +1329,7 @@ export class MatchScene extends Phaser.Scene {
       if (!defeated)
         this.renderHeldWeapon(
           { x, y }, weaponPose.direction, weaponPose.weaponId, reaction, facing,
-          player.appearance.body, 'rear',
+          player.appearance, 'rear',
         )
       this.drawAppearance(
         this.actorGraphics,
@@ -1363,7 +1374,7 @@ export class MatchScene extends Phaser.Scene {
           weaponPose.weaponId,
           reaction,
           facing,
-          player.appearance.body,
+          player.appearance,
           'front',
         )
     })
@@ -1420,7 +1431,7 @@ export class MatchScene extends Phaser.Scene {
     weaponId: WeaponId,
     reaction: Reaction | undefined,
     facing: number,
-    body: SimPlayer['appearance']['body'],
+    appearance: SimPlayer['appearance'],
     layer: 'rear' | 'front',
   ): void {
     const presentation = getWeaponPresentation(weaponId)
@@ -1435,9 +1446,16 @@ export class MatchScene extends Phaser.Scene {
     const recoil = policy.recoilDistance * (1 - recoilProgress)
     let forward = normalizeDirection(direction, { x: facing, y: 0 })
     const firing = reaction?.fireWeapon === weaponId && firedAge >= 0 && recoilProgress < 1
+    const poseId = poseIdForWeapon(visual.pose, firing)
+    const baseComposition = resolvePlayerComposition({
+      appearance,
+      weaponId,
+      pose: poseId,
+      progress: recoilProgress,
+    })
     if (firing && !this.preferences.reducedMotion) {
       const side = Math.sign(facing) || 1
-      const poseRotation = resolvePlayerComposition({ appearance: { ...this.source.activePlayer.appearance, body }, weaponId, pose: poseIdForWeapon(visual.pose, true), progress: recoilProgress }).pose.weaponRotation * side
+      const poseRotation = baseComposition.pose.weaponRotation * side
       const cosine = Math.cos(poseRotation)
       const sine = Math.sin(poseRotation)
       forward = {
@@ -1445,13 +1463,19 @@ export class MatchScene extends Phaser.Scene {
         y: forward.x * sine + forward.y * cosine,
       }
     }
+    const bodyScale = (34 * ACTOR_VISUAL_SCALE) / 80
+    const bodyPoint = (point: Readonly<{ x: number; y: number }>) => ({
+      x: actorCenter.x + (point.x - 64) * bodyScale * Math.sign(facing || 1),
+      y: actorCenter.y + (point.y - 60) * bodyScale,
+    })
+    const weaponAnchor = bodyPoint(baseComposition.pose.weaponOrigin)
     const origin = {
       x:
-        actorCenter.x -
+        weaponAnchor.x -
         forward.x * recoil -
         (firing && visual.pose === 'throw' ? forward.x * (1 - recoilProgress) * 5 : 0),
       y:
-        actorCenter.y -
+        weaponAnchor.y -
         forward.y * recoil +
         (!this.preferences.reducedMotion &&
         reaction?.equippedAt !== undefined &&
@@ -1463,16 +1487,10 @@ export class MatchScene extends Phaser.Scene {
     const handedness = heldWeaponHandedness(forward, facing)
     const posePoint = (x: number, y: number) =>
       transformLocalPoint(origin, forward, { x, y: y * handedness })
-    const poseId = poseIdForWeapon(visual.pose, firing)
-    const characterPose = resolvePlayerComposition({ appearance: { ...this.source.activePlayer.appearance, body }, origin, direction: forward, scale: modelScale, mirror: handedness < 0, weaponId, pose: poseId, progress: recoilProgress }).pose
+    const characterPose = resolvePlayerComposition({ appearance, origin, direction: forward, scale: modelScale, mirror: handedness < 0, weaponId, pose: poseId, progress: recoilProgress }).pose
     const hands = resolveWeaponHandAnchors(characterPose, presentation.grip, presentation.body.length, presentation.muzzle.x, modelScale)
     const grip = posePoint(hands.grip.x, hands.grip.y * handedness)
     const support = hands.support ? posePoint(hands.support.x, hands.support.y * handedness) : null
-    const bodyScale = (34 * ACTOR_VISUAL_SCALE) / 80
-    const bodyPoint = (point: Readonly<{ x: number; y: number }>) => ({
-      x: actorCenter.x + (point.x - 64) * bodyScale * Math.sign(facing || 1),
-      y: actorCenter.y + (point.y - 60) * bodyScale,
-    })
     const shoulderBack = bodyPoint(characterPose.rearArm.shoulder)
     const shoulderFront = characterPose.frontArm ? bodyPoint(characterPose.frontArm.shoulder) : null
 
@@ -1725,17 +1743,18 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private weaponRackLayout() {
+    const weaponCount = this.enabledWeaponIds().length
     const rackMaxWidth = VIEWPORT_WIDTH - 40
     const rackGap = 6
     const rackPadding = 10
     const weaponDiameter = Math.min(
       48,
-      (rackMaxWidth - rackPadding * 2 - rackGap * (WEAPON_ORDER.length - 1)) /
-        WEAPON_ORDER.length,
+       (rackMaxWidth - rackPadding * 2 - rackGap * (weaponCount - 1)) /
+        weaponCount,
     )
     const rackWidth =
-      weaponDiameter * WEAPON_ORDER.length +
-      rackGap * (WEAPON_ORDER.length - 1) +
+      weaponDiameter * weaponCount +
+      rackGap * (weaponCount - 1) +
       rackPadding * 2
     const rackX = (VIEWPORT_WIDTH - rackWidth) / 2
     const rackY = VIEWPORT_HEIGHT - 70
@@ -1751,6 +1770,10 @@ export class MatchScene extends Phaser.Scene {
       weaponRadius: weaponDiameter / 2,
       weaponCenterY: rackY + 27,
     }
+  }
+
+  private enabledWeaponIds(): WeaponId[] {
+    return WEAPON_ORDER.filter((id) => this.source.state.config.arsenal.ammunition[id] !== 0)
   }
 
   private renderHud(): void {
@@ -1778,7 +1801,8 @@ export class MatchScene extends Phaser.Scene {
       .strokeRoundedRect(rackX, rackY, rackWidth, rackHeight, rackHeight / 2)
       .fillStyle(0x24313a, 0.94)
       .fillRoundedRect(VIEWPORT_WIDTH / 2 - 220, rackY - 25, 440, 20, 10)
-    WEAPON_ORDER.forEach((id, index) => {
+    const enabledWeapons = this.enabledWeaponIds()
+    enabledWeapons.forEach((id, index) => {
       const ammo = this.source.activePlayer.inventory[id]
       const available = ammo === 'unlimited' || ammo > 0
       const selected = this.selectedWeapon().id === id
@@ -1822,12 +1846,15 @@ export class MatchScene extends Phaser.Scene {
         .fillStyle(selected ? 0xfff4d8 : 0x18272c, 0.96)
         .fillRoundedRect(centerX - 12, weaponCenterY + weaponRadius - 8, 24, 13, 6)
       this.weaponHudTexts[index]
+        .setVisible(true)
         .setPosition(centerX, weaponCenterY + weaponRadius - 6)
         .setOrigin(0.5, 0)
         .setAlpha(available || selected || this.preferences.highContrastHud ? 1 : 0.5)
         .setColor(selected ? '#24313a' : '#fff8df')
         .setText(ammoLabel)
     })
+    for (let index = enabledWeapons.length; index < this.weaponHudTexts.length; index += 1)
+      this.weaponHudTexts[index].setVisible(false)
     this.canvas.setAttribute('data-wind', String(state.wind))
     this.canvas.setAttribute(
       'data-effect-count',
@@ -1836,22 +1863,24 @@ export class MatchScene extends Phaser.Scene {
           this.damageEffects.length +
           this.traceEffects.length +
           this.weaponEffects.length +
-          this.reflectionEffects.length,
+          this.reflectionEffects.length +
+          this.portalTransitEffects.length,
       ),
     )
-    const hint =
-      this.canTriggerActiveWeapon()
-        ? 'Space now to split into two rockets'
-        : this.source.activePlayer.frozenTurnsRemaining > 0 &&
-            state.turnNumber > this.source.activePlayer.frozenAppliedTurn
-          ? 'Frozen · aim and fire, but movement is locked'
-          : this.selectedWeapon().aimMode === 'target-position'
-        ? 'Point at safe ground · Space to warp'
-        : this.selectedWeapon().aimMode === 'self'
-          ? 'Face a clear ledge · Space to deploy'
-        : this.selectedWeapon().powerMode === 'fixed'
-          ? 'Short-range spread · Space to fire'
-          : `Power ${Math.round((this.dragPreview ?? this.shotAim).power)}% · drag toward target · Space to fire`
+    const hint = combatHudHint({
+      paused: state.paused,
+      phase: state.phase,
+      canControl: this.source.canControlActivePlayer(),
+      activePlayerName: this.source.activePlayer.name,
+      canTriggerRemote: this.canTriggerActiveWeapon(),
+      movementLocked:
+        this.source.activePlayer.frozenTurnsRemaining > 0 &&
+        state.turnNumber > this.source.activePlayer.frozenAppliedTurn,
+      aimMode: this.selectedWeapon().aimMode,
+      powerMode: this.selectedWeapon().powerMode,
+      power: Math.round((this.dragPreview ?? this.shotAim).power),
+      remoteSplitSelected: this.selectedWeapon().mechanic === 'remote-split',
+    })
     this.bottomHud
       .setPosition(VIEWPORT_WIDTH / 2, rackY - 23)
       .setOrigin(0.5, 0)
@@ -1938,7 +1967,7 @@ export class MatchScene extends Phaser.Scene {
     }
 
     this.hudGraphics.fillStyle(HUD_SHADOW, alpha).fillCircle(portraitX + (left ? 1 : -1), y + 21, 15)
-    this.drawAppearance(this.hudGraphics, player, portraitX, y + 19, 24, left ? 1 : -1, false, !player.alive, alpha, undefined, undefined, 'normal', true)
+    this.drawAppearance(this.hudGraphics, player, portraitX, y + 19, 24, left ? 1 : -1, false, !player.alive, alpha, undefined, undefined, 'normal', false)
     this.hudGraphics.lineStyle(2, HUD_PAPER, alpha).strokeCircle(portraitX, y + 19, 14)
 
     if (!player.alive)
@@ -2002,7 +2031,7 @@ export class MatchScene extends Phaser.Scene {
     const duration = Math.max(1, state.config.turnDurationSeconds)
     const ratio = Phaser.Math.Clamp(this.source.timerRemainingSeconds / duration, 0, 1)
     const urgent = state.phase === 'input' && remaining <= 5
-    const visibleTurns = state.config.mode === '1v1' ? 2 : 4
+    const visibleTurns = visibleTurnCount(state.config.mode)
     const turnIndices = upcomingTurnIndices(
       state.players,
       state.activePlayerIndex,
@@ -2052,7 +2081,7 @@ export class MatchScene extends Phaser.Scene {
         .lineStyle(current ? 4 : 3, teamColor)
         .strokeCircle(x, tokenY, radius)
 
-      this.drawAppearance(this.hudGraphics, player, x, tokenY, current ? 25 : 20, 1, false, !player.alive, 1, undefined, undefined, 'normal', true)
+      this.drawAppearance(this.hudGraphics, player, x, tokenY, current ? 25 : 20, 1, false, !player.alive, 1, undefined, undefined, 'normal', false)
       if (current) {
         if (ratio > 0)
           this.hudGraphics
@@ -2234,28 +2263,64 @@ export class MatchScene extends Phaser.Scene {
         if (trail) trail.points = [{ ...event.position }]
         this.reflectionEffects.push({
           position: { ...event.position },
-          direction: normalizeDirection(event.outgoingVelocity),
+          direction: normalizeDirection(
+            {
+              x: event.outgoingVelocity.x - event.incomingVelocity.x,
+              y: event.outgoingVelocity.y - event.incomingVelocity.y,
+            },
+            normalizeDirection(event.outgoingVelocity),
+          ),
           age: 0,
           lifetime: this.preferences.reducedMotion ? 0.14 : 0.25,
           seed: event.sequence,
         })
         if (this.reflectionEffects.length > MAX_REFLECTION_EFFECTS) this.reflectionEffects.shift()
+        if (this.visualTime - this.lastReflectionAudioAt > 0.04) {
+          this.audio.play('reflector-hit')
+          this.lastReflectionAudioAt = this.visualTime
+        }
         return
       }
       case 'projectile-wrapped': {
         const trail = this.projectileTrails.get(event.projectileId)
         if (trail) trail.points = [{ ...event.to }]
+        const direction = normalizeDirection(event.velocity)
+        this.portalTransitEffects.push({
+          kind: 'wrap',
+          entrance: { ...event.from },
+          exit: { ...event.to },
+          incomingDirection: direction,
+          outgoingDirection: direction,
+          age: 0,
+          lifetime: this.preferences.reducedMotion ? 0.14 : 0.28,
+        })
+        if (this.portalTransitEffects.length > 20) this.portalTransitEffects.shift()
+        this.audio.play('boundary-wrap')
         return
       }
-      case 'projectile-boundary-removed':
+      case 'projectile-boundary-removed': {
         this.projectileTrails.delete(event.projectileId)
+        this.portalTransitEffects.push({
+          kind: 'exit',
+          entrance: { ...event.position },
+          exit: { ...event.position },
+          incomingDirection: { x: 0, y: 0 },
+          outgoingDirection: { x: 0, y: 0 },
+          age: 0,
+          lifetime: this.preferences.reducedMotion ? 0.12 : 0.22,
+        })
+        if (this.portalTransitEffects.length > 20) this.portalTransitEffects.shift()
         return
+      }
       case 'projectile-portaled': {
         const trail = this.projectileTrails.get(event.projectileId)
         if (trail) trail.points = [{ ...event.to }]
         this.portalTransitEffects.push({
+          kind: 'portal',
           entrance: { ...event.from },
           exit: { ...event.to },
+          incomingDirection: normalizeDirection(event.incomingVelocity),
+          outgoingDirection: normalizeDirection(event.outgoingVelocity),
           age: 0,
           lifetime: this.preferences.reducedMotion ? 0.18 : 0.38,
         })
@@ -2542,18 +2607,30 @@ export class MatchScene extends Phaser.Scene {
     for (const effect of this.portalTransitEffects) {
       const progress = Phaser.Math.Clamp(effect.age / effect.lifetime, 0, 1)
       const alpha = 1 - progress
-      for (const [index, position] of [effect.entrance, effect.exit].entries()) {
+      const positions = effect.kind === 'exit' ? [effect.entrance] : [effect.entrance, effect.exit]
+      for (const [index, position] of positions.entries()) {
         const radius = this.preferences.reducedMotion ? 8 : 7 + progress * 16
+        const color = effect.kind === 'wrap' ? 0xffd166 : index === 0 ? 0x63c8e8 : 0xef8bb5
         this.overlayGraphics
-          .lineStyle(index === 0 ? 3 : 4, index === 0 ? 0x63c8e8 : 0xef8bb5, alpha)
+          .lineStyle(index === 0 ? 3 : 4, color, alpha)
           .strokeCircle(position.x, position.y, radius)
           .fillStyle(0xfff8df, alpha * 0.7)
           .fillCircle(position.x, position.y, 3)
       }
-      if (!this.preferences.reducedMotion)
-        this.overlayGraphics
-          .lineStyle(1.5, 0xfff8df, alpha * 0.45)
-          .lineBetween(effect.entrance.x, effect.entrance.y, effect.exit.x, effect.exit.y)
+      if (effect.kind !== 'exit') {
+        for (const [position, direction] of [
+          [effect.entrance, effect.incomingDirection],
+          [effect.exit, effect.outgoingDirection],
+        ] as const)
+          this.overlayGraphics
+            .lineStyle(2, 0xfff8df, alpha)
+            .lineBetween(
+              position.x - direction.x * 9,
+              position.y - direction.y * 9,
+              position.x + direction.x * 9,
+              position.y + direction.y * 9,
+            )
+      }
     }
     for (const effect of this.reflectionEffects) {
       const progress = Phaser.Math.Clamp(effect.age / effect.lifetime, 0, 1)

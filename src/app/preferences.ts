@@ -16,9 +16,10 @@ import {
   migrateOutfitPresets,
   type OutfitPreset,
 } from '../profile/outfitPresets'
+import { cloneArsenalRules, DEFAULT_ARSENAL_RULES, type ArsenalRules } from '../match/arsenal'
 
 export type Preferences = {
-  version: 4
+  version: 5
   playerNames: string[]
   playerAppearances: PlayerAppearance[]
   outfitPresets: OutfitPreset[]
@@ -26,6 +27,7 @@ export type Preferences = {
   lastMapId: MapId
   turnDurationSeconds: TurnDuration
   projectileBoundaryMode: LocalMatchConfig['projectileBoundaryMode']
+  arsenal: ArsenalRules
   reducedMotion: boolean
   highContrastHud: boolean
   cameraShake: boolean
@@ -38,7 +40,7 @@ export type Preferences = {
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
-  version: 4,
+  version: 5,
   playerNames: [...DEFAULT_PLAYER_NAMES],
   playerAppearances: DEFAULT_PLAYER_APPEARANCES.map((appearance) => ({ ...appearance })),
   outfitPresets: [],
@@ -46,6 +48,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lastMapId: 'rolling-hills',
   turnDurationSeconds: 30,
   projectileBoundaryMode: 'open',
+  arsenal: cloneArsenalRules(DEFAULT_ARSENAL_RULES),
   reducedMotion: false,
   highContrastHud: false,
   cameraShake: true,
@@ -70,10 +73,10 @@ export function loadPreferences(
     if (
       !parsed ||
       typeof parsed !== 'object' ||
-      ![1, 2, 3, 4].includes((parsed as { version?: number }).version ?? 0)
+      ![1, 2, 3, 4, 5].includes((parsed as { version?: number }).version ?? 0)
     )
       return DEFAULT_PREFERENCES
-    const value = parsed as Partial<Preferences> & { version: 1 | 2 | 3 | 4 }
+    const value = parsed as Partial<Preferences> & { version: 1 | 2 | 3 | 4 | 5 }
     const playerNames = DEFAULT_PLAYER_NAMES.map((fallback, index) => {
       const name = value.playerNames?.[index]
       return typeof name === 'string' && name.trim() ? name.trim().slice(0, 18) : fallback
@@ -85,6 +88,7 @@ export function loadPreferences(
       turnDurationSeconds: value.turnDurationSeconds,
       projectileBoundaryMode: value.projectileBoundaryMode,
       playerAppearances: value.playerAppearances,
+      arsenal: value.arsenal,
     })
     const quarantinedAppearances: unknown[] = []
     const playerAppearances = DEFAULT_PLAYER_APPEARANCES.map((fallback, index) => {
@@ -110,10 +114,11 @@ export function loadPreferences(
         repositoryRecords.length > 0
           ? repositoryRecords
           : migrateOutfitPresets(value.outfitPresets),
-      version: 4,
+      version: 5,
       lastMode: config.mode,
       lastMapId: getMap(config.mapId).id,
       projectileBoundaryMode: config.projectileBoundaryMode,
+      arsenal: config.arsenal,
       reducedMotion: value.reducedMotion === true,
       highContrastHud: value.highContrastHud === true,
       cameraShake: value.cameraShake !== false,

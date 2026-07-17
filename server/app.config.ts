@@ -6,9 +6,19 @@ import { allowedWebOrigins, isAllowedOrigin } from './environment'
 import { PrivateMatchRoom } from './rooms/PrivateMatchRoom'
 import { roomCodeRegistry } from './roomCodeRegistry'
 import { HEALTH_RESPONSE } from '../src/network/healthProtocol'
+import { accountEnvironment } from './environment'
+import { createDatabase } from './db/client'
+import { DrizzleAccountRepository } from './account/repository'
+import { installAccountRoutes } from './account/routes'
+import { configureProgressionRepository, DrizzleProgressionRepository } from './account/progressionRepository'
 
 const origins = allowedWebOrigins()
 const corsPolicy = createCorsPolicy(origins)
+const account = accountEnvironment()
+const database = account.enabled ? createDatabase(account.databaseUrl!) : null
+const accountRepository = database ? new DrizzleAccountRepository(database) : undefined
+const progressionRepository = database ? new DrizzleProgressionRepository(database) : undefined
+configureProgressionRepository(progressionRepository ?? null)
 corsPolicy.installForColyseus()
 export { HEALTH_RESPONSE }
 
@@ -24,6 +34,12 @@ export const server = defineServer({
   express: (app) => {
     app.use(corsPolicy.expressMiddleware)
     app.get('/health', (_request, response) => response.json(HEALTH_RESPONSE))
+    installAccountRoutes(
+      app,
+      account,
+      accountRepository,
+      progressionRepository,
+    )
     app.get('/api/private-rooms/:code', (request, response) => {
       const code = normalizeRoomCode(request.params.code)
       if (!isRoomCode(code)) {

@@ -15,7 +15,7 @@ pnpm install
 pnpm dev
 ```
 
-`pnpm dev` runs Vite and the Colyseus server together. Use `pnpm dev:web` or `pnpm dev:server` to run one side. Copy `.env.example` to `.env` when the defaults are not suitable. `VITE_GAME_HTTP_BASE_URL` selects the custom health and room-code HTTP base. `VITE_COLYSEUS_URL` separately selects the Colyseus SDK endpoint used for matchmaking and realtime transport. `PORT` selects the server port, and `ALLOWED_WEB_ORIGINS` is the comma-separated HTTP/WebSocket origin allowlist. Production online play fails clearly when either browser endpoint is missing, and server startup fails when the origin allowlist is missing.
+`pnpm dev` runs Vite and the Colyseus server together. Use `pnpm dev:web` or `pnpm dev:server` to run one side. Copy `.env.example` to `.env` when the defaults are not suitable. `VITE_GAME_HTTP_BASE_URL` selects the custom HTTP base, including optional account APIs. `VITE_COLYSEUS_URL` separately selects the realtime endpoint. Set `VITE_CLERK_PUBLISHABLE_KEY` to enable sign-in and cloud sync; omit it for the unchanged guest-only experience. `PORT` selects the server port, and `ALLOWED_WEB_ORIGINS` is the comma-separated HTTP/WebSocket origin allowlist.
 
 Other useful commands:
 
@@ -96,8 +96,9 @@ The match HUD uses compact mirrored team plates with portrait tokens, ten-segmen
 - **PrivateMatchRoom** in `server/rooms/PrivateMatchRoom.ts` owns mode-specific two/four/six-player capacity, fixed team seats, the online `MatchSimulation`, 60 Hz command/tick loop, ready/countdown flow, Schema projection, snapshots, sequenced events, disconnect pause, team forfeit, and unanimous rematch.
 - **Colyseus Schema** patches complete player ammunition maps, frozen-player fields, projectiles, persistent mines, active bomb beacons, and room state every 50 ms (20 Hz). The authoritative simulation still runs at 60 Hz; clients interpolate only visual positions between patches.
 - **Private room codes** are six-character aliases held by the single-process registry in `server/roomCodeRegistry.ts` and resolved by `server/app.config.ts`. They are invitations, not authentication secrets.
-- **Player customization** provides six locally persisted v2 loadouts with four body silhouettes, validated primary/accent palettes, six patterns, eight faces, eight accessories, and four victory styles. Shared pose rigs, combat/HUD previews, accessory safety, readability warnings, state expressions, and named outfit presets keep setup and in-match presentation aligned. Presets use account-ready stable records but remain local until account sync exists.
-- **Shared protocol validation** and explicit protocol/snapshot/map/weapon/appearance/build versions live in `src/network/protocol.ts`. The current compatibility contract is protocol `private-room-13`, snapshot `10`, map registry `maps-9`, weapon registry `weapons-4`, appearance registry `appearances-3.0.0`, and client build `1.11.0`.
+- **Player customization** provides six locally persisted v2 loadouts with four body silhouettes, validated primary/accent palettes, six patterns, eight faces, eight accessories, and four victory styles. Shared pose rigs, combat/HUD previews, accessory safety, readability warnings, state expressions, and named outfit presets keep setup and in-match presentation aligned.
+- **Optional accounts and persistence** use Clerk for verified sessions and Neon Postgres through Drizzle for account preferences and outfit presets. Guest local/private play remains independent of Clerk and Neon. Signed-in realtime identity uses short-lived, single-use server tickets rather than exposing Clerk tokens to Colyseus room state.
+- **Shared protocol validation** and explicit protocol/snapshot/map/weapon/appearance/build versions live in `src/network/protocol.ts`. The current compatibility contract is protocol `private-room-14`, snapshot `10`, map registry `maps-9`, weapon registry `weapons-4`, appearance registry `appearances-3.0.3`, and client build `1.12.0`.
 - **Weapon registry and inventories** live in `src/weapons/registry.ts`; shared definitions are separate from scene runtime behaviour.
 - **Weapon presentation recipes and renderer** in `src/game/weaponVisualRecipes.ts` and `src/game/weaponRenderer.ts` own client-only held models, dedicated icons, projectile subtypes, semantic effects/audio, contrast palettes, and motion policy without affecting simulation collision. `src/game/weaponPresentation.ts` retains shared pose geometry and compatibility helpers.
 - **Map documents and registry** live in `src/maps/`; they own versioned material grids, world dimensions, visual themes, and explicit `x`/`y` team spawns independently of scenes. `maps-src/README.md` documents external PNG authoring.
@@ -151,6 +152,7 @@ The Vercel project must define these build-time variables:
 ```text
 VITE_GAME_HTTP_BASE_URL=/game-server
 VITE_COLYSEUS_URL=https://tsw-evileggs.onrender.com
+VITE_CLERK_PUBLISHABLE_KEY=pk_live_...
 ```
 
 `vercel.json` rewrites `/game-server/:path*` to `https://tsw-evileggs.onrender.com/:path*`. The browser therefore requests `/game-server/health` and `/game-server/api/private-rooms/:code` from the frontend origin. The rewrite preserves the server's safe health JSON and room-code resolver behavior. Colyseus matchmaking and its WebSocket still connect directly to Render through `VITE_COLYSEUS_URL`; they are not sent through the Vercel rewrite.
@@ -160,7 +162,18 @@ The Render service must define:
 ```text
 ALLOWED_WEB_ORIGINS=https://evileggs.vercel.app
 DEVELOPMENT_LOGGING=false
+AUTH_ENABLED=true
+CLERK_SECRET_KEY=sk_live_...
+CLERK_WEBHOOK_SIGNING_SECRET=whsec_...
+CLERK_AUTHORIZED_PARTIES=https://evileggs.vercel.app
+DATABASE_URL=postgresql://...
 ```
+
+Create the Neon database, set `DATABASE_URL`, and apply all committed migrations with `pnpm db:migrate` as an explicit deployment step before starting the new server version. Do not run migrations automatically in every server process. In Clerk, configure the production frontend origin and subscribe to `user.deleted` at the full webhook URL `https://tsw-evileggs.onrender.com/api/clerk/webhooks`. `CLERK_WEBHOOK_SIGNING_SECRET` must be the signing secret for that endpoint, not a Clerk API key. Leave `AUTH_ENABLED=false` to deploy a fully functional guest-only game; account configuration is then optional.
+
+`GET /api/account/capabilities` is public and returns `{ "account": { "enabled": true } }` when account APIs are configured, or the same response with `false` in guest-only mode. It is deliberately limited to availability and never returns environment values or configuration diagnostics.
+
+Production account variables are `AUTH_ENABLED=true`, `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SIGNING_SECRET`, `CLERK_AUTHORIZED_PARTIES`, and `DATABASE_URL`. Production startup fails if any are absent. Keep all secret values server-side; only `VITE_CLERK_PUBLISHABLE_KEY` is safe for the browser.
 
 Keep `ENABLE_TEST_ROUTES` unset in production. The existing exact-origin CORS and WebSocket checks remain required and must not be replaced with a wildcard.
 
@@ -186,8 +199,9 @@ When testing the deployed-style same-origin path locally, set `VITE_GAME_HTTP_BA
 - The event queue is capped and intended to be drained every simulation update; events are presentation notifications, not reconstruction data.
 - Character physics remain intentionally simple, and authoritative floating-point math assumes the same JavaScript runtime semantics on server and replay hosts.
 - Private-room lookup is intentionally in-memory and single-process. Restarting the server invalidates room codes and active matches.
+- Account rate limits and single-use game tickets are also in-memory and process-local. Run one game-server instance while ticket issuance is enabled: a ticket issued by one instance cannot be consumed by another, and restarts invalidate outstanding tickets. Redis or distributed ticket storage is not implemented.
 - Online 2v2 and 3v3 use fixed balanced team assignment; team choice, substitutions, and uneven teams are not supported.
-- There are no accounts, authentication, public matchmaking, database, Redis, rankings, spectators, or horizontal scaling.
+- There is no public matchmaking, Redis, rankings, spectators, or horizontal scaling. Accounts and database persistence are optional and controlled by `AUTH_ENABLED`.
 - Online rendering uses buffered interpolation and bounded extrapolation without rollback or local movement prediction, so very high latency still affects responsiveness.
 - A separately deployed web client must set both browser endpoints. Custom HTTP can use the Vercel same-origin rewrite, but Colyseus matchmaking and WebSocket traffic remain direct to the public TLS server and may still be blocked by local privacy or network policy. The server must set its public port/address and exact `ALLOWED_WEB_ORIGINS`.
 

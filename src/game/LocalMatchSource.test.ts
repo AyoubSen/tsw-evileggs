@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { LocalMatchSource } from './LocalMatchSource'
 import { DEFAULT_PLAYER_APPEARANCES } from '../players/appearanceRegistry'
+import { cloneArsenalRules, DEFAULT_ARSENAL_RULES } from '../match/arsenal'
 
 describe('LocalMatchSource presentation lifecycle', () => {
   it('advances its presentation revision when a restart replaces state', () => {
@@ -11,6 +12,7 @@ describe('LocalMatchSource presentation lifecycle', () => {
       playerNames: ['Lumen', 'Morrow'],
       playerAppearances: DEFAULT_PLAYER_APPEARANCES.slice(0, 2).map((appearance) => ({ ...appearance })),
       turnDurationSeconds: 30,
+      arsenal: cloneArsenalRules(DEFAULT_ARSENAL_RULES),
     })
     const matchId = source.state.matchId
     expect(source.presentationRevision).toBe(1)

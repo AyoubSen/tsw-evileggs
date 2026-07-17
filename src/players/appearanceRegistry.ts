@@ -1,23 +1,23 @@
-export const PLAYER_APPEARANCE_REGISTRY_VERSION = 'appearances-3.0.0' as const
+export const PLAYER_APPEARANCE_REGISTRY_VERSION = 'appearances-3.0.3' as const
 
 const immutableCatalog = <const T extends readonly object[]>(entries: T): T =>
   Object.freeze(entries.map((entry) => Object.freeze(entry))) as unknown as T
 
 const rig = (shoulderY: number, faceY: number, accessoryY: number, accessoryScale = 1, accessoryX = 0) => Object.freeze({
-  shoulder: Object.freeze({ x: 59, y: shoulderY }),
-  rearHand: Object.freeze({ x: 70, y: shoulderY + 7 }),
-  frontHand: Object.freeze({ x: 78, y: shoulderY + 2 }),
-  weaponGrip: Object.freeze({ x: 70, y: shoulderY + 7 }),
+  shoulder: Object.freeze({ x: 61, y: shoulderY }),
+  rearHand: Object.freeze({ x: 68, y: shoulderY + 7 }),
+  frontHand: Object.freeze({ x: 74, y: shoulderY + 2 }),
+  weaponGrip: Object.freeze({ x: 67, y: shoulderY + 7 }),
   faceSafe: Object.freeze({ x: 64, y: faceY }),
   accessory: Object.freeze({ x: 64, y: accessoryY }),
   accessoryFit: Object.freeze({ x: accessoryX, y: accessoryY - 29, scale: accessoryScale }),
 })
 
 export const PLAYER_BODIES = immutableCatalog([
-  { id: 'classic', label: 'Classic', recipe: Object.freeze({ shape: 'egg', scale: 1, rig: rig(62, 64, 29) }) },
-  { id: 'round', label: 'Round', recipe: Object.freeze({ shape: 'round', scale: 1.04, rig: rig(60, 63, 31, 1.08) }) },
-  { id: 'tall', label: 'Tall', recipe: Object.freeze({ shape: 'tall', scale: 1, rig: rig(61, 62, 26, 0.92) }) },
-  { id: 'scrambled', label: 'Scrambled', recipe: Object.freeze({ shape: 'scrambled', scale: 0.98, rig: rig(62, 64, 30, 1.1, -1) }) },
+  { id: 'classic', label: 'Classic', recipe: Object.freeze({ shape: 'egg', scale: 1, rig: rig(78, 64, 29) }) },
+  { id: 'round', label: 'Round', recipe: Object.freeze({ shape: 'round', scale: 1.04, rig: rig(76, 63, 31, 1.08) }) },
+  { id: 'tall', label: 'Tall', recipe: Object.freeze({ shape: 'tall', scale: 1, rig: rig(77, 62, 26, 0.92) }) },
+  { id: 'scrambled', label: 'Scrambled', recipe: Object.freeze({ shape: 'scrambled', scale: 0.98, rig: rig(78, 64, 30, 1.1, -1) }) },
 ] as const)
 
 export const PLAYER_PRIMARY_COLORS = immutableCatalog([

@@ -26,7 +26,7 @@ import {
 } from '../network/onlineLifecycle'
 import type { OnlineRoomView } from '../network/roomView'
 import { AudioDirector } from '../audio/AudioDirector'
-import { PlayerAvatar } from './PlayerAvatar'
+import { PlayerAvatar, WeaponIcon } from './PlayerAvatar'
 import {
   DEFAULT_PLAYER_APPEARANCES,
   PLAYER_ACCESSORIES,
@@ -42,13 +42,24 @@ import {
   type PlayerAppearance,
 } from '../players/appearanceRegistry'
 import type { PlayerPoseId } from '../players/playerVisualRecipes'
-import type { WeaponId } from '../weapons/registry'
+import { WEAPONS, WEAPON_ORDER, type WeaponId, type WeaponInventory } from '../weapons/registry'
+import {
+  ARSENAL_PRESETS,
+  arsenalSummary,
+  cloneArsenalRules,
+  sanitizeArsenalRules,
+  type ArsenalRules,
+} from '../match/arsenal'
 import {
   MAX_OUTFIT_PRESETS,
   makeOutfitPreset,
   sanitizeOutfitPresetName,
   type OutfitPreset,
 } from '../profile/outfitPresets'
+import { AccountAvatar, useOptionalAuth } from '../account/auth'
+import { useAccountSync } from '../account/sync'
+import { createGameTicket, getAccountCapabilities, getProgression } from '../account/client'
+import { progressionReward, type ProgressionOverview } from '../shared/progression'
 
 type Screen =
   | 'menu'
@@ -59,6 +70,7 @@ type Screen =
   | 'online-lobby'
   | 'how-to'
   | 'settings'
+  | 'profile'
   | 'customize'
   | 'credits'
   | 'editor'
@@ -342,6 +354,77 @@ function ProjectileBoundaryPicker({
 
 function projectileBoundaryLabel(mode: ProjectileBoundaryMode): string {
   return PROJECTILE_BOUNDARY_COPY[mode].label
+}
+
+function ArsenalRulesPanel({
+  rules,
+  onChange,
+}: {
+  rules: ArsenalRules
+  onChange: (rules: ArsenalRules) => void
+}) {
+  const updateAmount = (weaponId: WeaponId, amount: WeaponInventory[WeaponId]) =>
+    onChange(
+      sanitizeArsenalRules({
+        presetId: 'custom',
+        ammunition: { ...rules.ammunition, [weaponId]: amount },
+      }),
+    )
+  return (
+    <details className="arsenal-rule-control">
+      <summary>
+        <span><strong>Arsenal rules</strong><small>{arsenalSummary(rules)}</small></span>
+        <em>{rules.presetId === 'custom' ? 'Custom' : rules.presetId}</em>
+      </summary>
+      <div className="arsenal-preset-picker" aria-label="Arsenal preset">
+        {(['standard', 'classic', 'chaos'] as const).map((presetId) => (
+          <button
+            type="button"
+            key={presetId}
+            className={rules.presetId === presetId ? 'selected' : ''}
+            onClick={() => onChange(cloneArsenalRules(ARSENAL_PRESETS[presetId]))}
+          >
+            {presetId}
+          </button>
+        ))}
+      </div>
+      <div className="arsenal-weapon-grid">
+        {WEAPON_ORDER.map((weaponId) => {
+          const amount = rules.ammunition[weaponId]
+          const enabled = amount === 'unlimited' || amount > 0
+          return (
+            <label className={`arsenal-weapon-control ${enabled ? '' : 'disabled'}`} key={weaponId}>
+              <input
+                className="arsenal-enabled-toggle"
+                type="checkbox"
+                checked={enabled}
+                onChange={(event) =>
+                  updateAmount(weaponId, event.target.checked ? WEAPONS[weaponId].ammunition : 0)
+                }
+              />
+              <WeaponIcon weaponId={weaponId} />
+              <span className="arsenal-weapon-name">{WEAPONS[weaponId].displayName}</span>
+              <select
+                aria-label={`${WEAPONS[weaponId].displayName} ammunition`}
+                disabled={!enabled}
+                value={amount}
+                onChange={(event) =>
+                  updateAmount(
+                    weaponId,
+                    event.target.value === 'unlimited' ? 'unlimited' : Number(event.target.value),
+                  )
+                }
+              >
+                {[1, 2, 3, 4, 5].map((value) => <option value={value} key={value}>{value}</option>)}
+                <option value="unlimited">Unlimited</option>
+              </select>
+            </label>
+          )
+        })}
+      </div>
+      <p className="arsenal-note">At least one weapon remains unlimited so the match cannot run out of actions.</p>
+    </details>
+  )
 }
 
 function Help() {
@@ -695,10 +778,20 @@ function CustomizePlayer({
 
 export function App() {
   const [preferences, setPreferences] = useState<Preferences>(() => loadPreferences())
+  const auth = useOptionalAuth()
+  const accountSync = useAccountSync(auth, preferences, setPreferences)
+  const gameTicketProvider = auth.signedIn ? () => createGameTicket(auth.getToken) : undefined
   const [screen, setScreen] = useState<Screen>('menu')
+  const [confirmAccountDeletion, setConfirmAccountDeletion] = useState(false)
+  const [accountDeletionText, setAccountDeletionText] = useState('')
+  const [accountActionBusy, setAccountActionBusy] = useState(false)
+  const [accountActionError, setAccountActionError] = useState<string | null>(null)
+  const [cloudAccountAvailable, setCloudAccountAvailable] = useState<boolean | null>(null)
+  const [progression, setProgression] = useState<ProgressionOverview | null>(null)
+  const [progressionLoading, setProgressionLoading] = useState(false)
   const [customizeSlot, setCustomizeSlot] = useState(0)
   const [customizeReturnScreen, setCustomizeReturnScreen] = useState<
-    'menu' | 'setup' | 'online-create' | 'online-join'
+    'menu' | 'setup' | 'online-create' | 'online-join' | 'profile'
   >('menu')
   const [config, setConfig] = useState<LocalMatchConfig>(() =>
     validateMatchConfig(loadPreferences()),
@@ -786,6 +879,24 @@ export function App() {
   useEffect(() => {
     savePreferences(preferences)
   }, [preferences])
+  useEffect(() => {
+    if (!auth.configured) return
+    let active = true
+    void getAccountCapabilities()
+      .then(({ enabled }) => { if (active) setCloudAccountAvailable(enabled) })
+      .catch(() => { if (active) setCloudAccountAvailable(false) })
+    return () => { active = false }
+  }, [auth.configured])
+  useEffect(() => {
+    if (screen !== 'profile' || !auth.signedIn || cloudAccountAvailable === false) return
+    let active = true
+    setProgressionLoading(true)
+    void getProgression(auth.getToken)
+      .then((value) => { if (active) setProgression(value) })
+      .catch(() => { if (active) setProgression(null) })
+      .finally(() => { if (active) setProgressionLoading(false) })
+    return () => { active = false }
+  }, [screen, auth.signedIn, cloudAccountAvailable])
   useEffect(() => {
     screenRef.current = screen
   }, [screen])
@@ -991,6 +1102,7 @@ export function App() {
         mapId: preferences.lastMapId,
         turnDurationSeconds: preferences.turnDurationSeconds,
         projectileBoundaryMode: preferences.projectileBoundaryMode,
+        arsenal: preferences.arsenal,
       }),
     )
     setScreen('setup')
@@ -1010,6 +1122,7 @@ export function App() {
       lastMapId: next.mapId,
       turnDurationSeconds: next.turnDurationSeconds,
       projectileBoundaryMode: next.projectileBoundaryMode,
+      arsenal: next.arsenal,
     })
     setResult(null)
     setError(null)
@@ -1028,6 +1141,7 @@ export function App() {
         mapId: 'custom-draft',
         turnDurationSeconds: preferences.turnDurationSeconds,
         projectileBoundaryMode: getMap('custom-draft').projectileBoundary.defaultMode,
+        arsenal: preferences.arsenal,
       }),
     )
     setPaused(false)
@@ -1064,6 +1178,7 @@ export function App() {
         next.playerNames[0],
         next,
         operation.controller.signal,
+        gameTicketProvider,
       )
       if (!activateSession(session, operation.generation, operation.controller)) return
       setPreferences({
@@ -1078,6 +1193,7 @@ export function App() {
         lastMapId: next.mapId,
         turnDurationSeconds: next.turnDurationSeconds,
         projectileBoundaryMode: next.projectileBoundaryMode,
+        arsenal: next.arsenal,
       })
       setConfig(next)
       setScreen('online-lobby')
@@ -1120,6 +1236,7 @@ export function App() {
         config.playerNames[0],
         operation.controller.signal,
         config.playerAppearances[0],
+        gameTicketProvider,
       )
       if (!activateSession(session, operation.generation, operation.controller)) return
       setPreferences({
@@ -1215,7 +1332,7 @@ export function App() {
     }))
   }
   const openCustomize = (
-    returnScreen: 'menu' | 'setup' | 'online-create' | 'online-join',
+    returnScreen: 'menu' | 'setup' | 'online-create' | 'online-join' | 'profile',
     slot = 0,
   ) => {
     setCustomizeReturnScreen(returnScreen)
@@ -1331,6 +1448,7 @@ export function App() {
                         : defaultMapForMode(preferences.lastMode).id,
                     turnDurationSeconds: preferences.turnDurationSeconds,
                     projectileBoundaryMode: preferences.projectileBoundaryMode,
+                    arsenal: preferences.arsenal,
                   }),
                 )
                 setScreen('online-create')
@@ -1355,6 +1473,7 @@ export function App() {
                       : defaultMapForMode('1v1').id,
                   turnDurationSeconds: preferences.turnDurationSeconds,
                   projectileBoundaryMode: preferences.projectileBoundaryMode,
+                  arsenal: preferences.arsenal,
                 }))
                 setScreen('online-join')
               }}
@@ -1451,6 +1570,10 @@ export function App() {
               onChange={chooseProjectileBoundaryMode}
             />
           </div>
+          <ArsenalRulesPanel
+            rules={config.arsenal}
+            onChange={(arsenal) => setConfig({ ...config, arsenal })}
+          />
           {onlineError && <ConnectionTroubleshooting message={onlineError} />}
           {onlineSlow && (
             <p className="online-wake-message">
@@ -1782,6 +1905,10 @@ export function App() {
               onChange={chooseProjectileBoundaryMode}
             />
           </div>
+          <ArsenalRulesPanel
+            rules={config.arsenal}
+            onChange={(arsenal) => setConfig({ ...config, arsenal })}
+          />
           <div className="actions setup-actions">
             <button className="button-primary button-play" onClick={start}>
               Start Skirmish <span>›</span>
@@ -1812,6 +1939,92 @@ export function App() {
           <button className="button-quiet" onClick={() => setScreen('menu')}>
             Back
           </button>
+        </section>
+      )
+    if (screen === 'profile')
+      return (
+        <section className="panel profile-panel">
+          <p className="eyebrow">YOUR TOYBOX</p>
+          <h2>Profile</h2>
+          <div className="profile-identity">
+            <AccountAvatar />
+            <div>
+              <span className="profile-field-label">Signed-in account</span>
+              <strong>{auth.user?.displayName ?? 'Player'}</strong>
+              {auth.user?.email && <p>{auth.user.email}</p>}
+            </div>
+          </div>
+          {cloudAccountAvailable === false && (
+            <p className="account-service-notice" role="status">
+              Online saves are temporarily unavailable. You can keep playing; changes will stay on this device until they reconnect.
+            </p>
+          )}
+          {progressionLoading && <p className="account-sync-state">Loading progression...</p>}
+          {progression && (
+            <section className="profile-progression">
+              <header><div><span className="profile-field-label">Online progression</span><strong>Level {progression.summary.level}</strong></div><b>{progression.summary.currencyBalance} Scrap</b></header>
+              <div className="progression-meter" aria-label={`${progression.summary.levelExperience} of ${progression.summary.nextLevelExperience} experience`}><span style={{ width: `${(progression.summary.levelExperience / progression.summary.nextLevelExperience) * 100}%` }} /></div>
+              <small>{progression.summary.levelExperience} / {progression.summary.nextLevelExperience} XP</small>
+              <div className="progression-stats"><span><b>{progression.summary.matchesPlayed}</b> Matches</span><span><b>{progression.summary.wins}</b> Wins</span><span><b>{progression.summary.losses}</b> Losses</span><span><b>{progression.summary.draws}</b> Draws</span></div>
+              <h3>Recent skirmishes</h3>
+              {progression.recentMatches.length ? <div className="recent-match-list">{progression.recentMatches.map((match) => <div className={`recent-match-row ${match.outcome}`} key={match.id}><strong>{match.outcome}</strong><span>{getMap(match.mapId).displayName} · {match.mode}</span><small>+{match.experienceEarned} XP · +{match.currencyEarned} Scrap</small></div>)}</div> : <p>No signed-in online matches yet.</p>}
+            </section>
+          )}
+          <div className="profile-game-fields">
+            <label>
+              <span>Primary player name</span>
+               <small>Shown to other players during matches.</small>
+              <input maxLength={18} value={preferences.playerNames[0]} onChange={(event) => setPreferences((current) => ({ ...current, playerNames: current.playerNames.map((name, index) => index === 0 ? event.target.value : name) }))} />
+            </label>
+            <div className="profile-appearance">
+              <PlayerAvatar appearance={preferences.playerAppearances[0]} label="Preferred player appearance" />
+              <div><span className="profile-field-label">Preferred appearance</span><small>Used for your primary player.</small></div>
+              <button type="button" onClick={() => openCustomize('profile')}>Customize</button>
+            </div>
+          </div>
+          <p className={`account-sync-state ${accountSync.error ? 'has-error' : ''}`}>
+            {accountSync.state === 'loading' ? 'Loading cloud data...'
+              : accountSync.state === 'syncing' ? 'Saving to cloud...'
+                : accountSync.pending ? 'Changes pending. Saving to cloud shortly...'
+                  : accountSync.state === 'synced' ? 'Cloud is up to date.'
+                  : accountSync.state === 'decision' ? 'Choose how to set up this profile.'
+                    : accountSync.state === 'offline' ? 'Offline. Changes remain on this device until sync can retry.'
+                      : 'Playing with local data.'}
+            {accountSync.lastSyncedAt && <small>Last synced {new Date(accountSync.lastSyncedAt).toLocaleString()}</small>}
+          </p>
+          {accountSync.error && <p className="form-error">{accountSync.error}</p>}
+          {accountSync.state === 'offline' && <button className="button-quiet account-retry" onClick={accountSync.retry}>Retry cloud sync</button>}
+          {accountSync.state === 'decision' && (
+            <div className="profile-import-choice">
+              <strong>Choose which toybox wins</strong>
+              <p>This choice replaces the other version of your primary player, preferences, and outfit presets.</p>
+              <button onClick={() => accountSync.chooseInitial(true)}>Upload this device to cloud</button>
+              <button className="secondary" onClick={() => accountSync.chooseInitial(false)}>Replace this device with cloud</button>
+            </div>
+          )}
+          {accountActionError && <p className="form-error">{accountActionError}</p>}
+          <div className="profile-actions">
+            <button className="button-quiet" disabled={accountActionBusy} onClick={() => {
+              setAccountActionBusy(true); setAccountActionError(null)
+              void accountSync.signOut().catch((caught) => setAccountActionError(caught instanceof Error ? caught.message : 'Could not sign out. Please try again.')).finally(() => setAccountActionBusy(false))
+            }}>{accountActionBusy && !confirmAccountDeletion ? 'Signing out...' : 'Sign out'}</button>
+            {!confirmAccountDeletion ? (
+              <button className="button-quiet danger" disabled={accountActionBusy} onClick={() => { setAccountDeletionText(''); setAccountActionError(null); setConfirmAccountDeletion(true) }}>Delete account</button>
+            ) : (
+              <div className="account-delete-confirm">
+                <strong>Delete account permanently?</strong>
+                 <p>This permanently deletes your account and all saved online data, including progression, preferences, and presets. Local guest data on this device remains.</p>
+                <label><span>Type DELETE to confirm</span><input autoFocus value={accountDeletionText} onChange={(event) => setAccountDeletionText(event.target.value)} autoComplete="off" /></label>
+                <button className="danger" disabled={accountActionBusy || accountDeletionText !== 'DELETE'} onClick={() => {
+                  setAccountActionBusy(true)
+                  setAccountActionError(null)
+                  void accountSync.deleteData().catch((caught) => setAccountActionError(caught instanceof Error ? caught.message : 'Account could not be deleted.')).finally(() => setAccountActionBusy(false))
+                }}>{accountActionBusy ? 'Deleting account...' : 'Delete account permanently'}</button>
+                <button className="secondary" disabled={accountActionBusy} onClick={() => setConfirmAccountDeletion(false)}>Cancel</button>
+              </div>
+            )}
+          </div>
+          <button className="button-quiet" onClick={() => setScreen('menu')}>Back</button>
         </section>
       )
     if (screen === 'credits')
@@ -1850,7 +2063,17 @@ export function App() {
       <header className="brand">
         <p className="eyebrow">TURN-BASED ARTILLERY</p>
         <h1>{BRAND.title}</h1>
-        <p>{BRAND.subtitle}</p>
+        <div className="brand-meta">
+          <p>{BRAND.subtitle}</p>
+          {auth.configured && !auth.loaded && <span className="account-loading" role="status">Loading account...</span>}
+          {auth.configured && auth.loaded && (
+            <div className="account-controls">
+              {auth.signedIn ? <><AccountAvatar /><button className="account-button" onClick={() => setScreen('profile')}>Profile</button></>
+                : <><button className="account-button" onClick={auth.openSignIn}>Sign in</button><button className="account-button account-button-primary" onClick={auth.openSignUp}>Create account</button></>}
+            </div>
+          )}
+          {auth.configured && auth.loaded && cloudAccountAvailable === false && <p className="account-header-notice">Cloud saves unavailable; sign-in still works.</p>}
+        </div>
       </header>
       {screen === 'match' ? (
         <div className="online-game-stage">
@@ -2019,6 +2242,15 @@ export function App() {
               {getMap(result.config.mapId).displayName} · {projectileBoundaryLabel(result.config.projectileBoundaryMode)} boundaries · {result.remainingHealth} health remaining
               · {result.turnsTaken} turns · {result.durationSeconds}s
             </p>
+            {matchMode === 'online' && auth.signedIn && typeof onlineSession?.source.localSeat === 'number' && (() => {
+              const reward = progressionReward({
+                winnerTeamId: result.winnerTeamId,
+                teamId: ((onlineSession?.source.localSeat ?? 0) % 2) as 0 | 1,
+                isDraw: result.winnerTeamId === null,
+                reason: roomView?.result.reason === 'forfeit' ? 'forfeit' : 'normal',
+              })
+              return <p className="post-match-reward"><strong>Match rewards</strong><span>+{reward.experience} XP · +{reward.currency} Scrap</span><small>Saved to your profile.</small></p>
+            })()}
             {matchMode === 'local' ? (
               <div className="actions">
                 <button
