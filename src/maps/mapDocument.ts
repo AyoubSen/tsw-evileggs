@@ -5,7 +5,7 @@ import {
 } from '../terrain/materials'
 import type { Vector } from '../shared/types'
 
-export const MAP_FORMAT_VERSION = 2
+export const MAP_FORMAT_VERSION = 3
 export const MAX_MAP_OBJECTS = 32
 export const MIN_REFLECTOR_LENGTH = 16
 export const MAX_REFLECTOR_LENGTH = 1024
@@ -48,7 +48,21 @@ export type ReflectorWallDefinition = {
   velocityRetention: number
 }
 
-export type MapObjectDefinition = ReflectorWallDefinition
+export type ProjectilePortalApertureDefinition = {
+  start: Vector
+  end: Vector
+  thickness: number
+}
+
+export type ProjectilePortalDefinition = {
+  id: string
+  type: 'projectile-portal'
+  entrance: ProjectilePortalApertureDefinition
+  exit: ProjectilePortalApertureDefinition
+  velocityRetention: number
+}
+
+export type MapObjectDefinition = ReflectorWallDefinition | ProjectilePortalDefinition
 
 type MapDocumentBase = {
   format: 'mossfire-map'
@@ -70,6 +84,10 @@ type MapDocumentBase = {
 }
 
 export type MapDocumentV1 = MapDocumentBase & { formatVersion: 1 }
+export type MapDocumentV2 = MapDocumentBase & {
+  formatVersion: 2
+  objects: ReflectorWallDefinition[]
+}
 export type MapDocument = MapDocumentBase & {
   formatVersion: typeof MAP_FORMAT_VERSION
   objects: MapObjectDefinition[]
@@ -139,6 +157,7 @@ const DOCUMENT_KEYS_V1 = [
   'terrain',
 ] as const
 const DOCUMENT_KEYS_V2 = [...DOCUMENT_KEYS_V1, 'objects'] as const
+const DOCUMENT_KEYS_V3 = DOCUMENT_KEYS_V2
 const THEME_KEYS = [
   'sky',
   'sun',
@@ -160,6 +179,8 @@ const REFLECTOR_KEYS = [
   'thickness',
   'velocityRetention',
 ] as const
+const PROJECTILE_PORTAL_KEYS = ['id', 'type', 'entrance', 'exit', 'velocityRetention'] as const
+const PORTAL_APERTURE_KEYS = ['start', 'end', 'thickness'] as const
 const VECTOR_KEYS = ['x', 'y'] as const
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -182,8 +203,28 @@ function cloneVector(value: unknown, label: string): Vector {
   return { x: source.x as number, y: source.y as number }
 }
 
-function cloneObject(value: unknown): MapObjectDefinition {
+function clonePortalAperture(value: unknown, label: string): ProjectilePortalApertureDefinition {
+  const source = record(value, label)
+  exactKeys(source, PORTAL_APERTURE_KEYS, label)
+  return {
+    start: cloneVector(source.start, `${label} start`),
+    end: cloneVector(source.end, `${label} end`),
+    thickness: source.thickness as number,
+  }
+}
+
+function cloneObject(value: unknown, allowProjectilePortal = true): MapObjectDefinition {
   const source = record(value, 'Map object')
+  if (source.type === 'projectile-portal' && allowProjectilePortal) {
+    exactKeys(source, PROJECTILE_PORTAL_KEYS, 'Projectile portal')
+    return {
+      id: source.id as string,
+      type: 'projectile-portal',
+      entrance: clonePortalAperture(source.entrance, 'Projectile portal entrance'),
+      exit: clonePortalAperture(source.exit, 'Projectile portal exit'),
+      velocityRetention: source.velocityRetention as number,
+    }
+  }
   if (source.type !== 'reflector-wall')
     throw new Error(`Unsupported map object type: ${String(source.type)}.`)
   exactKeys(source, REFLECTOR_KEYS, 'Reflector wall')
@@ -204,9 +245,13 @@ function compareObjectIds(left: MapObjectDefinition, right: MapObjectDefinition)
 export function migrateMapDocument(value: unknown): MapDocument {
   const source = record(value, 'Map document')
   const version = source.formatVersion
-  if (source.format !== 'mossfire-map' || (version !== 1 && version !== MAP_FORMAT_VERSION))
+  if (source.format !== 'mossfire-map' || (version !== 1 && version !== 2 && version !== MAP_FORMAT_VERSION))
     throw new Error('Unsupported map document format.')
-  exactKeys(source, version === 1 ? DOCUMENT_KEYS_V1 : DOCUMENT_KEYS_V2, 'Map document')
+  exactKeys(
+    source,
+    version === 1 ? DOCUMENT_KEYS_V1 : version === 2 ? DOCUMENT_KEYS_V2 : DOCUMENT_KEYS_V3,
+    'Map document',
+  )
 
   const theme = record(source.theme, 'Map theme')
   exactKeys(theme, THEME_KEYS, 'Map theme')
@@ -241,7 +286,7 @@ export function migrateMapDocument(value: unknown): MapDocument {
       cellSize: terrain.cellSize as number,
       rows: terrain.rows.map((row) => (Array.isArray(row) ? [...row] : row)) as number[][],
     },
-    objects: objects.map(cloneObject).sort(compareObjectIds),
+    objects: objects.map((object) => cloneObject(object, version === MAP_FORMAT_VERSION)).sort(compareObjectIds),
   }
 }
 
@@ -254,6 +299,37 @@ function pointSegmentDistance(point: Vector, start: Vector, end: Vector): number
     Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared),
   )
   return Math.hypot(point.x - (start.x + dx * t), point.y - (start.y + dy * t))
+}
+
+function segmentSegmentDistance(
+  firstStart: Vector,
+  firstEnd: Vector,
+  secondStart: Vector,
+  secondEnd: Vector,
+): number {
+  const orientation = (a: Vector, b: Vector, c: Vector) =>
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+  const firstSideA = orientation(firstStart, firstEnd, secondStart)
+  const firstSideB = orientation(firstStart, firstEnd, secondEnd)
+  const secondSideA = orientation(secondStart, secondEnd, firstStart)
+  const secondSideB = orientation(secondStart, secondEnd, firstEnd)
+  const boundsOverlap =
+    Math.max(firstStart.x, firstEnd.x) >= Math.min(secondStart.x, secondEnd.x) &&
+    Math.max(secondStart.x, secondEnd.x) >= Math.min(firstStart.x, firstEnd.x) &&
+    Math.max(firstStart.y, firstEnd.y) >= Math.min(secondStart.y, secondEnd.y) &&
+    Math.max(secondStart.y, secondEnd.y) >= Math.min(firstStart.y, firstEnd.y)
+  if (
+    firstSideA * firstSideB <= 0 &&
+    secondSideA * secondSideB <= 0 &&
+    (firstSideA !== 0 || firstSideB !== 0 || secondSideA !== 0 || secondSideB !== 0 || boundsOverlap)
+  )
+    return 0
+  return Math.min(
+    pointSegmentDistance(firstStart, secondStart, secondEnd),
+    pointSegmentDistance(firstEnd, secondStart, secondEnd),
+    pointSegmentDistance(secondStart, firstStart, firstEnd),
+    pointSegmentDistance(secondEnd, firstStart, firstEnd),
+  )
 }
 
 function canonical(value: unknown): string {
@@ -400,7 +476,7 @@ export function resolveMapDocument(value: unknown): ResolvedMap {
   if (document.objects.length > MAX_MAP_OBJECTS)
     throw new Error(`Maps support at most ${MAX_MAP_OBJECTS} objects.`)
   const objectIds = new Set<string>()
-  let totalReflectorLength = 0
+  let totalSegmentLength = 0
   for (const object of document.objects) {
     if (
       typeof object.id !== 'string' ||
@@ -410,43 +486,63 @@ export function resolveMapDocument(value: unknown): ResolvedMap {
       throw new Error('Map object ID must be a bounded lowercase slug.')
     if (objectIds.has(object.id)) throw new Error(`Duplicate map object ID: ${object.id}.`)
     objectIds.add(object.id)
-    const length = Math.hypot(object.end.x - object.start.x, object.end.y - object.start.y)
-    if (!Number.isFinite(length) || length < MIN_REFLECTOR_LENGTH || length > MAX_REFLECTOR_LENGTH)
-      throw new Error(`Reflector ${object.id} has an invalid length.`)
-    if (
-      !Number.isFinite(object.thickness) ||
-      object.thickness < MIN_REFLECTOR_THICKNESS ||
-      object.thickness > MAX_REFLECTOR_THICKNESS
-    )
-      throw new Error(`Reflector ${object.id} has an invalid thickness.`)
     if (
       !Number.isFinite(object.velocityRetention) ||
       object.velocityRetention < MIN_REFLECTOR_VELOCITY_RETENTION ||
       object.velocityRetention > MAX_REFLECTOR_VELOCITY_RETENTION
     )
-      throw new Error(`Reflector ${object.id} has invalid velocity retention.`)
-    const margin = object.thickness / 2
-    if (
-      [object.start, object.end].some(
-        (point) =>
-          point.x < margin ||
-          point.x > document.width - margin ||
-          point.y < margin ||
-          point.y > document.height - margin,
+      throw new Error(`Map object ${object.id} has invalid velocity retention.`)
+    const segments =
+      object.type === 'reflector-wall'
+        ? [{ ...object, label: `Reflector ${object.id}` }]
+        : [
+            { ...object.entrance, label: `Projectile portal ${object.id} entrance` },
+            { ...object.exit, label: `Projectile portal ${object.id} exit` },
+          ]
+    for (const segment of segments) {
+      const length = Math.hypot(segment.end.x - segment.start.x, segment.end.y - segment.start.y)
+      if (!Number.isFinite(length) || length < MIN_REFLECTOR_LENGTH || length > MAX_REFLECTOR_LENGTH)
+        throw new Error(`${segment.label} has an invalid length.`)
+      if (
+        !Number.isFinite(segment.thickness) ||
+        segment.thickness < MIN_REFLECTOR_THICKNESS ||
+        segment.thickness > MAX_REFLECTOR_THICKNESS
       )
-    )
-      throw new Error(`Reflector ${object.id} is outside the map bounds.`)
-    if (
-      document.spawns.some(
-        (spawn) =>
-          pointSegmentDistance({ x: spawn.x, y: spawn.y - 15 }, object.start, object.end) <=
-          SPAWN_OBJECT_CLEARANCE + margin,
+        throw new Error(`${segment.label} has an invalid thickness.`)
+      const margin = segment.thickness / 2
+      if (
+        [segment.start, segment.end].some(
+          (point) =>
+            point.x < margin ||
+            point.x > document.width - margin ||
+            point.y < margin ||
+            point.y > document.height - margin,
+        )
       )
+        throw new Error(`${segment.label} is outside the map bounds.`)
+      if (
+        document.spawns.some(
+          (spawn) =>
+            pointSegmentDistance({ x: spawn.x, y: spawn.y - 15 }, segment.start, segment.end) <=
+            SPAWN_OBJECT_CLEARANCE + margin,
+        )
+      )
+        throw new Error(`${segment.label} overlaps a spawn safety volume.`)
+      totalSegmentLength += length
+    }
+    if (
+      object.type === 'projectile-portal' &&
+      segmentSegmentDistance(
+        object.entrance.start,
+        object.entrance.end,
+        object.exit.start,
+        object.exit.end,
+      ) <=
+        (object.entrance.thickness + object.exit.thickness) / 2
     )
-      throw new Error(`Reflector ${object.id} overlaps a spawn safety volume.`)
-    totalReflectorLength += length
+      throw new Error(`Projectile portal ${object.id} apertures overlap.`)
   }
-  if (totalReflectorLength > MAX_REFLECTOR_TOTAL_LENGTH)
+  if (totalSegmentLength > MAX_REFLECTOR_TOTAL_LENGTH)
     throw new Error('Map objects exceed the supported total complexity.')
   return {
     ...document,

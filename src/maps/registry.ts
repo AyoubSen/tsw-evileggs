@@ -32,7 +32,7 @@ export type MapId =
   | 'fossil-wake'
   | 'custom-draft'
 
-export const MAP_REGISTRY_VERSION = 'maps-7'
+export const MAP_REGISTRY_VERSION = 'maps-8'
 export type MapDefinition = Omit<ResolvedMap, 'id'> & { id: MapId }
 export type { MapDocument, MapTheme, MatchMode, SpawnDefinition, TeamId } from './mapDocument'
 
@@ -199,6 +199,7 @@ const heightMap = (source: {
   spawnXs: readonly number[]
   theme?: MapTheme
   surfaceAt: (x: number) => number
+  objects?: readonly MapObjectDefinition[]
 }) =>
   registeredMap(resolveMapDocument(
     createHeightFieldDocument({
@@ -224,7 +225,7 @@ const maps: Record<MapId, MapDefinition> = {
   }),
   'twin-peaks': createRasterMap({
     id: 'twin-peaks',
-    revision: 2,
+    revision: 3,
     mode: '1v1',
     displayName: 'Twin Peaks',
     description: 'Reinforced mesas meet at a destructible central saddle.',
@@ -233,6 +234,23 @@ const maps: Record<MapId, MapDefinition> = {
     height: 720,
     theme: theme({ terrain: 0x8b6948, surface: 0x667c50, dust: 0xb99a6e }),
     spawns: canonicalSpawns([[230, 280], [1050, 280]]),
+    objects: [
+      {
+        id: 'central-transit-pair',
+        type: 'projectile-portal',
+        entrance: {
+          start: { x: 500, y: 380 },
+          end: { x: 610, y: 380 },
+          thickness: 12,
+        },
+        exit: {
+          start: { x: 780, y: 270 },
+          end: { x: 780, y: 380 },
+          thickness: 12,
+        },
+        velocityRetention: 0.9,
+      },
+    ],
     paint: ({ surface, rect, ramp, ellipse }) => {
       surface((x) => 570 - 54 * Math.cos((x - 640) / 205), TERRAIN_MATERIAL.soil)
       ellipse(230, 500, 230, 220, TERRAIN_MATERIAL.soil)

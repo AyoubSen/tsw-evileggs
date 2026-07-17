@@ -46,21 +46,52 @@ const reflector = (id: string) => ({
   velocityRetention: 0.8,
 })
 
-describe('map document v2', () => {
+const portal = (id: string) => ({
+  id,
+  type: 'projectile-portal' as const,
+  entrance: { start: { x: 300, y: 100 }, end: { x: 300, y: 180 }, thickness: 12 },
+  exit: { start: { x: 600, y: 100 }, end: { x: 600, y: 180 }, thickness: 12 },
+  velocityRetention: 0.8,
+})
+
+describe('map document v3', () => {
   it('migrates strict v1 documents with an empty object list', () => {
     const current = document()
     const { objects: _objects, ...v1 } = current
     const migrated = migrateMapDocument({ ...v1, formatVersion: 1 })
-    expect(migrated.formatVersion).toBe(2)
+    expect(migrated.formatVersion).toBe(3)
     expect(migrated.objects).toEqual([])
   })
 
+  it('migrates v2 documents without changing reflector objects', () => {
+    const current = document()
+    const wall = reflector('wall')
+    const migrated = migrateMapDocument({ ...current, formatVersion: 2, objects: [wall] })
+    expect(migrated.formatVersion).toBe(3)
+    expect(migrated.objects).toEqual([wall])
+  })
+
   it('sorts objects canonically and hashes equivalent content identically', () => {
-    const left = resolveMapDocument({ ...document(), objects: [reflector('z-wall'), reflector('a-wall')] })
-    const right = resolveMapDocument({ ...document(), objects: [reflector('a-wall'), reflector('z-wall')] })
-    expect(left.objects.map((object) => object.id)).toEqual(['a-wall', 'z-wall'])
+    const left = resolveMapDocument({ ...document(), objects: [reflector('z-wall'), portal('a-portal')] })
+    const right = resolveMapDocument({ ...document(), objects: [portal('a-portal'), reflector('z-wall')] })
+    expect(left.objects.map((object) => object.id)).toEqual(['a-portal', 'z-wall'])
     expect(left.contentHash).toBe(right.contentHash)
     expect(left.contentHash).toMatch(/^[0-9a-f]{16}$/)
+  })
+
+  it('strictly validates both portal apertures and rejects pair overlap', () => {
+    expect(() =>
+      resolveMapDocument({
+        ...document(),
+        objects: [{ ...portal('pair'), entrance: { ...portal('pair').entrance, extra: true } }],
+      }),
+    ).toThrow(/unsupported/i)
+    expect(() =>
+      resolveMapDocument({
+        ...document(),
+        objects: [{ ...portal('pair'), exit: { ...portal('pair').entrance } }],
+      }),
+    ).toThrow(/apertures overlap/)
   })
 
   it('rejects unsupported fields, unknown kinds, and duplicate IDs', () => {

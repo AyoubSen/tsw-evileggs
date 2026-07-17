@@ -8,6 +8,7 @@ export type SoundCue =
   | 'grenade-fire'
   | 'grenade-bounce'
   | 'reflector-hit'
+  | 'portal-transit'
   | 'grenade-fuse'
   | 'scatter-fire'
   | 'cluster-fire'
@@ -67,6 +68,7 @@ const frequencies: Record<SoundCue, readonly [number, number, number]> = {
   'grenade-fire': [180, 105, 0.14],
   'grenade-bounce': [310, 220, 0.07],
   'reflector-hit': [1800, 420, 0.1],
+  'portal-transit': [420, 1320, 0.16],
   'grenade-fuse': [780, 680, 0.045],
   'scatter-fire': [190, 85, 0.11],
   'cluster-fire': [145, 75, 0.17],

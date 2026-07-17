@@ -578,6 +578,16 @@ export class OnlineMatchSource implements MatchSource {
           this.projectileSamples.set(projectile.id, [])
         }
       }
+      if (event.type === 'projectile-portaled' && this.snapshotState) {
+        const projectile = this.snapshotState.projectiles.find(
+          (candidate) => candidate.id === event.projectileId,
+        )
+        if (projectile) {
+          projectile.position = { ...event.to }
+          projectile.velocity = { ...event.outgoingVelocity }
+          this.projectileSamples.set(projectile.id, [])
+        }
+      }
       if (event.type === 'mine-deployed' && this.snapshotState)
         this.snapshotState.mines.push(structuredClone(event.mine))
       if (event.type === 'mine-triggered' && this.snapshotState)

@@ -26,6 +26,7 @@ import {
   type MapObjectDefinition,
   type MapTheme,
   type MatchMode,
+  type ProjectilePortalDefinition,
   type ReflectorWallDefinition,
   type SpawnDefinition,
 } from '../maps/mapDocument'
@@ -33,7 +34,7 @@ import { TERRAIN_MATERIAL, type TerrainMaterialId } from '../terrain/materials'
 import { loadEditorDraft, saveEditorDraft } from './editorStorage'
 
 type SupportedMode = MatchMode
-type EditorTool = 'brush' | 'line' | 'rectangle' | 'fill' | 'spawn' | 'reflector-wall'
+type EditorTool = 'brush' | 'line' | 'rectangle' | 'fill' | 'spawn' | 'reflector-wall' | 'projectile-portal'
 type EditorDraft = {
   version: 2
   id: string
@@ -65,7 +66,8 @@ type EditorGesture = {
   lastY: number
   kind: 'terrain' | 'place-object' | 'move-object' | 'start-handle' | 'end-handle'
   objectIndex?: number
-  originalObject?: ReflectorWallDefinition
+  aperture?: 'entrance' | 'exit'
+  originalObject?: MapObjectDefinition
   changed: boolean
 }
 
@@ -114,29 +116,23 @@ const SPAWN_POSITIONS: Record<SupportedMode, readonly number[]> = {
   '3v3': [0.1, 0.9, 0.25, 0.75, 0.4, 0.6],
 }
 
-const cloneDraft = (draft: EditorDraft): EditorDraft => ({
-  ...draft,
-  theme: { ...draft.theme },
-  cells: new Uint8Array(draft.cells),
-  spawns: draft.spawns.map((spawn) => ({ ...spawn })),
-  objects: draft.objects.map((object) => ({
-    ...object,
-    start: { ...object.start },
-    end: { ...object.end },
-  })),
-})
-
 const compareObjectIds = (left: MapObjectDefinition, right: MapObjectDefinition) =>
   left.id < right.id ? -1 : left.id > right.id ? 1 : 0
 
 const cloneObjectsCanonical = (objects: readonly MapObjectDefinition[]): MapObjectDefinition[] =>
   objects
-    .map((object) => ({
-      ...object,
-      start: { ...object.start },
-      end: { ...object.end },
-    }))
+    .map((object) => object.type === 'projectile-portal'
+      ? { ...object, entrance: { ...object.entrance, start: { ...object.entrance.start }, end: { ...object.entrance.end } }, exit: { ...object.exit, start: { ...object.exit.start }, end: { ...object.exit.end } } }
+      : { ...object, start: { ...object.start }, end: { ...object.end } })
     .sort(compareObjectIds)
+
+const cloneDraft = (draft: EditorDraft): EditorDraft => ({
+  ...draft,
+  theme: { ...draft.theme },
+  cells: new Uint8Array(draft.cells),
+  spawns: draft.spawns.map((spawn) => ({ ...spawn })),
+  objects: cloneObjectsCanonical(draft.objects),
+})
 
 const colorToCss = (color: number) => `#${color.toString(16).padStart(6, '0')}`
 
@@ -290,42 +286,29 @@ function objectValidationError(draft: EditorDraft, index: number): string | null
     return 'Object ID must be a bounded lowercase slug.'
   if (draft.objects.some((candidate, candidateIndex) => candidateIndex !== index && candidate.id === object.id))
     return `Duplicate object ID: ${object.id}.`
-  const length = Math.hypot(object.end.x - object.start.x, object.end.y - object.start.y)
-  if (!Number.isFinite(length) || length < MIN_REFLECTOR_LENGTH || length > MAX_REFLECTOR_LENGTH)
-    return `Length must be between ${MIN_REFLECTOR_LENGTH} and ${MAX_REFLECTOR_LENGTH}.`
-  if (
-    !Number.isFinite(object.thickness) ||
-    object.thickness < MIN_REFLECTOR_THICKNESS ||
-    object.thickness > MAX_REFLECTOR_THICKNESS
-  )
-    return `Thickness must be between ${MIN_REFLECTOR_THICKNESS} and ${MAX_REFLECTOR_THICKNESS}.`
+  const apertures = object.type === 'projectile-portal' ? [object.entrance, object.exit] : [object]
+  for (const aperture of apertures) {
+    const length = Math.hypot(aperture.end.x - aperture.start.x, aperture.end.y - aperture.start.y)
+    if (!Number.isFinite(length) || length < MIN_REFLECTOR_LENGTH || length > MAX_REFLECTOR_LENGTH)
+      return `Each aperture length must be between ${MIN_REFLECTOR_LENGTH} and ${MAX_REFLECTOR_LENGTH}.`
+    if (!Number.isFinite(aperture.thickness) || aperture.thickness < MIN_REFLECTOR_THICKNESS || aperture.thickness > MAX_REFLECTOR_THICKNESS)
+      return `Thickness must be between ${MIN_REFLECTOR_THICKNESS} and ${MAX_REFLECTOR_THICKNESS}.`
+    const margin = aperture.thickness / 2
+    if ([aperture.start, aperture.end].some((point) => point.x < margin || point.x > draft.width - margin || point.y < margin || point.y > draft.height - margin))
+      return `${object.type === 'projectile-portal' ? 'Portal aperture' : 'Reflector'} is outside the map bounds.`
+    if (draft.spawns.some((spawn) => pointSegmentDistance({ x: spawn.x, y: spawn.y - 15 }, aperture.start, aperture.end) <= SPAWN_OBJECT_CLEARANCE + margin))
+      return `${object.type === 'projectile-portal' ? 'Portal aperture' : 'Reflector'} overlaps a spawn safety volume.`
+  }
   if (
     !Number.isFinite(object.velocityRetention) ||
     object.velocityRetention < MIN_REFLECTOR_VELOCITY_RETENTION ||
     object.velocityRetention > MAX_REFLECTOR_VELOCITY_RETENTION
   )
     return `Velocity retention must be between ${MIN_REFLECTOR_VELOCITY_RETENTION} and ${MAX_REFLECTOR_VELOCITY_RETENTION}.`
-  const margin = object.thickness / 2
-  if (
-    [object.start, object.end].some(
-      (point) =>
-        point.x < margin ||
-        point.x > draft.width - margin ||
-        point.y < margin ||
-        point.y > draft.height - margin,
-    )
-  )
-    return 'Reflector is outside the map bounds.'
-  if (
-    draft.spawns.some(
-      (spawn) =>
-        pointSegmentDistance({ x: spawn.x, y: spawn.y - 15 }, object.start, object.end) <=
-        SPAWN_OBJECT_CLEARANCE + margin,
-    )
-  )
-    return 'Reflector overlaps a spawn safety volume.'
   const totalLength = draft.objects.reduce(
-    (total, candidate) => total + Math.hypot(candidate.end.x - candidate.start.x, candidate.end.y - candidate.start.y),
+    (total, candidate) => total + (candidate.type === 'projectile-portal'
+      ? [candidate.entrance, candidate.exit].reduce((sum, aperture) => sum + Math.hypot(aperture.end.x - aperture.start.x, aperture.end.y - aperture.start.y), 0)
+      : Math.hypot(candidate.end.x - candidate.start.x, candidate.end.y - candidate.start.y)),
     0,
   )
   if (totalLength > MAX_REFLECTOR_TOTAL_LENGTH)
@@ -378,6 +361,7 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
     start: { x: number; y: number }
     end: { x: number; y: number }
   } | null>(null)
+  const [pendingPortalEntrance, setPendingPortalEntrance] = useState<ProjectilePortalDefinition['entrance'] | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const draftRef = useRef(draft)
   const undoRef = useRef<EditorDraft[]>([])
@@ -438,9 +422,34 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
       context.stroke()
       context.setLineDash([])
     }
+    const drawPortalAperture = (
+      aperture: ProjectilePortalDefinition['entrance'],
+      label: 'A' | 'B',
+      invalid: boolean,
+    ) => {
+      drawReflector(aperture, invalid ? '#d63f35' : label === 'A' ? '#276b8f' : '#9b4b74')
+      const midpoint = { x: (aperture.start.x + aperture.end.x) / 2 / draft.cellSize, y: (aperture.start.y + aperture.end.y) / 2 / draft.cellSize }
+      context.setLineDash([])
+      context.fillStyle = '#fff9e9'
+      context.strokeStyle = '#18282d'
+      context.lineWidth = 1
+      context.beginPath()
+      label === 'A' ? context.arc(midpoint.x, midpoint.y, 5, 0, Math.PI * 2) : context.rect(midpoint.x - 4.5, midpoint.y - 4.5, 9, 9)
+      context.fill()
+      context.stroke()
+      context.fillStyle = '#18282d'
+      context.font = 'bold 7px sans-serif'
+      context.textAlign = 'center'
+      context.fillText(label, midpoint.x, midpoint.y + 2.5)
+    }
     draft.objects.forEach((object, index) => {
-      drawReflector(object, objectValidationError(draft, index) ? '#d63f35' : '#18282d')
+      if (object.type === 'projectile-portal') {
+        const invalid = Boolean(objectValidationError(draft, index))
+        drawPortalAperture(object.entrance, 'A', invalid)
+        drawPortalAperture(object.exit, 'B', invalid)
+      } else drawReflector(object, objectValidationError(draft, index) ? '#d63f35' : '#18282d')
     })
+    if (pendingPortalEntrance) drawPortalAperture(pendingPortalEntrance, 'A', false)
     if (objectPreview)
       drawReflector(
         { ...objectPreview, thickness: 12 },
@@ -467,14 +476,17 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
       context.fillStyle = objectValidationError(draft, selectedObjectIndex!) ? '#d63f35' : '#f7bd3f'
       context.strokeStyle = '#fff4d8'
       context.lineWidth = Math.max(1, 2 / (draft.cellSize * zoom))
-      for (const point of [selectedObject.start, selectedObject.end]) {
+      const selectedPoints = selectedObject.type === 'projectile-portal'
+        ? [selectedObject.entrance.start, selectedObject.entrance.end, selectedObject.exit.start, selectedObject.exit.end]
+        : [selectedObject.start, selectedObject.end]
+      for (const point of selectedPoints) {
         context.beginPath()
         context.arc(point.x / draft.cellSize, point.y / draft.cellSize, handleRadius, 0, Math.PI * 2)
         context.fill()
         context.stroke()
       }
     }
-  }, [draft, objectPreview, selectedObjectIndex, selectedSpawn, zoom])
+  }, [draft, objectPreview, pendingPortalEntrance, selectedObjectIndex, selectedSpawn, zoom])
 
   const setCurrentDraft = (next: EditorDraft) => {
     draftRef.current = next
@@ -512,8 +524,9 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
     let hit: number | null = null
     let distance = Number.POSITIVE_INFINITY
     draftRef.current.objects.forEach((object, index) => {
-      const candidateDistance = pointSegmentDistance(point, object.start, object.end)
-      const threshold = object.thickness / 2 + 7 / zoom
+      const apertures = object.type === 'projectile-portal' ? [object.entrance, object.exit] : [object]
+      const candidateDistance = Math.min(...apertures.map((aperture) => pointSegmentDistance(point, aperture.start, aperture.end)))
+      const threshold = Math.max(...apertures.map((aperture) => aperture.thickness)) / 2 + 7 / zoom
       if (candidateDistance <= threshold && candidateDistance < distance) {
         hit = index
         distance = candidateDistance
@@ -527,6 +540,13 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
     let suffix = 1
     while (ids.has(`reflector-wall-${suffix}`)) suffix += 1
     return `reflector-wall-${suffix}`
+  }
+
+  const nextPortalId = () => {
+    const ids = new Set(draftRef.current.objects.map((object) => object.id))
+    let suffix = 1
+    while (ids.has(`projectile-portal-${suffix}`)) suffix += 1
+    return `projectile-portal-${suffix}`
   }
 
   const paintCircle = (next: EditorDraft, x: number, y: number) => {
@@ -586,6 +606,9 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
     )
       return
     const original = gesture.originalObject
+    const originalAperture = original.type === 'projectile-portal'
+      ? original[gesture.aperture ?? 'entrance']
+      : original
     const point = worldPoint(cellX, cellY)
     const delta = {
       x: (cellX - gesture.startX) * draftRef.current.cellSize,
@@ -595,19 +618,19 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
       gesture.kind === 'start-handle'
         ? point
         : gesture.kind === 'move-object'
-          ? { x: original.start.x + delta.x, y: original.start.y + delta.y }
-          : original.start
+        ? { x: originalAperture.start.x + delta.x, y: originalAperture.start.y + delta.y }
+          : originalAperture.start
     const end =
       gesture.kind === 'end-handle'
         ? point
         : gesture.kind === 'move-object'
-          ? { x: original.end.x + delta.x, y: original.end.y + delta.y }
-          : original.end
+          ? { x: originalAperture.end.x + delta.x, y: originalAperture.end.y + delta.y }
+          : originalAperture.end
     if (
-      start.x === original.start.x &&
-      start.y === original.start.y &&
-      end.x === original.end.x &&
-      end.y === original.end.y
+      start.x === originalAperture.start.x &&
+      start.y === originalAperture.start.y &&
+      end.x === originalAperture.end.x &&
+      end.y === originalAperture.end.y
     )
       return
     if (!gesture.changed) {
@@ -617,8 +640,22 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
     mutateDraft((next) => {
       const object = next.objects[gesture.objectIndex!]
       if (!object) return
-      object.start = start
-      object.end = end
+      if (object.type === 'projectile-portal') {
+        if (gesture.kind === 'move-object') {
+          if (original.type !== 'projectile-portal') return
+          for (const name of ['entrance', 'exit'] as const) {
+            object[name].start = { x: original[name].start.x + delta.x, y: original[name].start.y + delta.y }
+            object[name].end = { x: original[name].end.x + delta.x, y: original[name].end.y + delta.y }
+          }
+        } else {
+          const aperture = object[gesture.aperture ?? 'entrance']
+          aperture.start = start
+          aperture.end = end
+        }
+      } else {
+        object.start = start
+        object.end = end
+      }
     })
   }
 
@@ -626,17 +663,21 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
     const point = pointFromEvent(event)
     event.currentTarget.focus()
     event.currentTarget.setPointerCapture(event.pointerId)
-    if (tool === 'reflector-wall') {
+    if (tool === 'reflector-wall' || tool === 'projectile-portal') {
       const world = worldPoint(point.x, point.y)
       const selected = selectedObjectIndex === null ? null : draftRef.current.objects[selectedObjectIndex]
       const handleThreshold = 10 / zoom
       let kind: EditorGesture['kind'] | null = null
       let objectIndex = selectedObjectIndex ?? undefined
-      if (selected && Math.hypot(world.x - selected.start.x, world.y - selected.start.y) <= handleThreshold)
-        kind = 'start-handle'
-      else if (selected && Math.hypot(world.x - selected.end.x, world.y - selected.end.y) <= handleThreshold)
-        kind = 'end-handle'
-      else {
+      let aperture: EditorGesture['aperture']
+      const selectedApertures: ReadonlyArray<readonly ['entrance' | 'exit', ProjectilePortalDefinition['entrance'] | ReflectorWallDefinition]> = selected?.type === 'projectile-portal'
+        ? ([['entrance', selected.entrance], ['exit', selected.exit]] as const)
+        : selected ? ([['entrance', selected]] as const) : []
+      for (const [candidateName, candidate] of selectedApertures) {
+        if (Math.hypot(world.x - candidate.start.x, world.y - candidate.start.y) <= handleThreshold) { kind = 'start-handle'; aperture = candidateName; break }
+        if (Math.hypot(world.x - candidate.end.x, world.y - candidate.end.y) <= handleThreshold) { kind = 'end-handle'; aperture = candidateName; break }
+      }
+      if (!kind) {
         const hit = hitObject(world)
         if (hit !== null) {
           objectIndex = hit
@@ -655,11 +696,8 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
           lastY: point.y,
           kind,
           objectIndex,
-          originalObject: {
-            ...object,
-            start: { ...object.start },
-            end: { ...object.end },
-          },
+          aperture,
+          originalObject: cloneObjectsCanonical([object])[0],
           changed: false,
         }
         return
@@ -730,19 +768,21 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
         if (draftRef.current.objects.length >= MAX_MAP_OBJECTS)
           setNotice(`Maps support at most ${MAX_MAP_OBJECTS} objects.`)
         else {
-          const objectIndex = draftRef.current.objects.length
-          pushHistory()
-          mutateDraft((next) => {
-            next.objects.push({
-              id: nextReflectorId(),
-              type: 'reflector-wall',
-              start,
-              end,
-              thickness: 12,
-              velocityRetention: 0.85,
+          if (tool === 'projectile-portal' && !pendingPortalEntrance) {
+            setPendingPortalEntrance({ start, end, thickness: 12 })
+            setNotice('Entrance A placed. Drag Exit B to complete the portal pair.')
+          } else {
+            const objectIndex = draftRef.current.objects.length
+            pushHistory()
+            mutateDraft((next) => {
+              next.objects.push(tool === 'projectile-portal'
+                ? { id: nextPortalId(), type: 'projectile-portal', entrance: pendingPortalEntrance!, exit: { start, end, thickness: 12 }, velocityRetention: 0.85 }
+                : { id: nextReflectorId(), type: 'reflector-wall', start, end, thickness: 12, velocityRetention: 0.85 })
             })
-          })
-          setSelectedObjectIndex(objectIndex)
+            setPendingPortalEntrance(null)
+            setSelectedObjectIndex(objectIndex)
+            if (tool === 'projectile-portal') setNotice('Portal pair complete. Drag either aperture or its endpoint handles to adjust it.')
+          }
         }
       }
     } else if (gesture.kind !== 'terrain')
@@ -792,34 +832,53 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
 
   const deleteSelectedObject = () => {
     if (selectedObjectIndex === null || !draftRef.current.objects[selectedObjectIndex]) return
+    const deletedType = draftRef.current.objects[selectedObjectIndex].type
     pushHistory()
     mutateDraft((next) => {
       next.objects.splice(selectedObjectIndex, 1)
     })
     setSelectedObjectIndex(null)
-    setNotice('Reflector Wall deleted.')
+    setNotice(`${deletedType === 'projectile-portal' ? 'Projectile Portal' : 'Reflector Wall'} deleted.`)
   }
 
   const commitObjectProperty = (
-    property: 'id' | 'thickness' | 'velocityRetention',
+    property: 'id' | 'thickness' | 'entranceThickness' | 'exitThickness' | 'velocityRetention',
     input: string,
   ) => {
     if (selectedObjectIndex === null) return
     const object = draftRef.current.objects[selectedObjectIndex]
     if (!object) return
     const value = property === 'id' ? input : Number(input)
-    if (Object.is(object[property], value)) return
+    const currentValue = property === 'entranceThickness'
+      ? object.type === 'projectile-portal' ? object.entrance.thickness : undefined
+      : property === 'exitThickness'
+        ? object.type === 'projectile-portal' ? object.exit.thickness : undefined
+        : property === 'thickness'
+          ? object.type === 'reflector-wall' ? object.thickness : undefined
+          : object[property]
+    if (Object.is(currentValue, value)) return
     pushHistory()
     mutateDraft((next) => {
       const selected = next.objects[selectedObjectIndex]
       if (!selected) return
       if (property === 'id') selected.id = input
-      else if (property === 'thickness') selected.thickness = Number(input)
-      else selected.velocityRetention = Number(input)
+      else if (property === 'thickness' && selected.type === 'reflector-wall')
+        selected.thickness = Number(input)
+      else if (property === 'entranceThickness' && selected.type === 'projectile-portal')
+        selected.entrance.thickness = Number(input)
+      else if (property === 'exitThickness' && selected.type === 'projectile-portal')
+        selected.exit.thickness = Number(input)
+      else if (property === 'velocityRetention') selected.velocityRetention = Number(input)
     })
   }
 
   const onCanvasKeyDown = (event: ReactKeyboardEvent<HTMLCanvasElement>) => {
+    if (event.key === 'Escape' && pendingPortalEntrance) {
+      event.preventDefault()
+      setPendingPortalEntrance(null)
+      setNotice('Portal placement cancelled.')
+      return
+    }
     if (event.key !== 'Delete' && event.key !== 'Backspace') return
     if (selectedObjectIndex === null) return
     event.preventDefault()
@@ -833,6 +892,7 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
     setSelectedSpawn(0)
     setSelectedObjectIndex(null)
     setObjectPreview(null)
+    setPendingPortalEntrance(null)
     setCurrentDraft(next)
     setNotice(message)
   }
@@ -926,10 +986,10 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
   const selectedObjectError =
     selectedObjectIndex === null ? null : objectValidationError(draft, selectedObjectIndex)
   const selectedObjectLength = selectedObject
-    ? Math.hypot(
-        selectedObject.end.x - selectedObject.start.x,
-        selectedObject.end.y - selectedObject.start.y,
-      )
+    ? selectedObject.type === 'projectile-portal'
+      ? Math.hypot(selectedObject.entrance.end.x - selectedObject.entrance.start.x, selectedObject.entrance.end.y - selectedObject.entrance.start.y) +
+        Math.hypot(selectedObject.exit.end.x - selectedObject.exit.start.x, selectedObject.exit.end.y - selectedObject.exit.start.y)
+      : Math.hypot(selectedObject.end.x - selectedObject.start.x, selectedObject.end.y - selectedObject.start.y)
     : 0
 
   return (
@@ -1057,10 +1117,21 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
               >
                 Reflector Wall
               </button>
+              <button
+                className={tool === 'projectile-portal' ? 'selected portal-tool' : 'portal-tool'}
+                onClick={() => {
+                  setTool('projectile-portal')
+                  setPendingPortalEntrance(null)
+                  setNotice('Portal step 1 of 2: drag Entrance A. Then drag Exit B.')
+                }}
+                title="Drag Entrance A, then drag Exit B"
+              >
+                Projectile Portal
+              </button>
             </div>
           </div>
 
-          {tool !== 'spawn' && tool !== 'reflector-wall' && (
+          {tool !== 'spawn' && tool !== 'reflector-wall' && tool !== 'projectile-portal' && (
             <div className="editor-section">
               <span className="editor-label">Material</span>
               <div className="material-palette">
@@ -1100,9 +1171,10 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
             <section
               className="editor-section editor-object-inspector"
               data-selected-object-id={selectedObject.id}
-              key={`${selectedObjectIndex}-${selectedObject.id}-${selectedObject.thickness}-${selectedObject.velocityRetention}`}
+              key={`${selectedObjectIndex}-${selectedObject.id}-${selectedObject.type === 'projectile-portal' ? `${selectedObject.entrance.thickness}-${selectedObject.exit.thickness}` : selectedObject.thickness}-${selectedObject.velocityRetention}`}
             >
-              <span className="editor-label">Reflector Wall inspector</span>
+              <span className="editor-label">{selectedObject.type === 'projectile-portal' ? 'Projectile Portal inspector' : 'Reflector Wall inspector'}</span>
+              {selectedObject.type === 'projectile-portal' && <p className="portal-pair-key"><b>A</b> round entrance <span>paired with</span> <b>B</b> square exit</p>}
               <div className="editor-field-grid editor-object-fields">
                 <label>
                   Stable ID
@@ -1117,18 +1189,47 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
                   Length
                   <input value={selectedObjectLength.toFixed(1)} readOnly />
                 </label>
-                <label>
-                  Thickness
-                  <input
-                    type="number"
-                    min={MIN_REFLECTOR_THICKNESS}
-                    max={MAX_REFLECTOR_THICKNESS}
-                    step={1}
-                    defaultValue={selectedObject.thickness}
-                    onBlur={(event) => commitObjectProperty('thickness', event.target.value)}
-                    onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
-                  />
-                </label>
+                {selectedObject.type === 'projectile-portal' ? (
+                  <>
+                    <label>
+                      Entrance A thickness
+                      <input
+                        type="number"
+                        min={MIN_REFLECTOR_THICKNESS}
+                        max={MAX_REFLECTOR_THICKNESS}
+                        step={1}
+                        defaultValue={selectedObject.entrance.thickness}
+                        onBlur={(event) => commitObjectProperty('entranceThickness', event.target.value)}
+                        onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+                      />
+                    </label>
+                    <label>
+                      Exit B thickness
+                      <input
+                        type="number"
+                        min={MIN_REFLECTOR_THICKNESS}
+                        max={MAX_REFLECTOR_THICKNESS}
+                        step={1}
+                        defaultValue={selectedObject.exit.thickness}
+                        onBlur={(event) => commitObjectProperty('exitThickness', event.target.value)}
+                        onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <label>
+                    Thickness
+                    <input
+                      type="number"
+                      min={MIN_REFLECTOR_THICKNESS}
+                      max={MAX_REFLECTOR_THICKNESS}
+                      step={1}
+                      defaultValue={selectedObject.thickness}
+                      onBlur={(event) => commitObjectProperty('thickness', event.target.value)}
+                      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+                    />
+                  </label>
+                )}
                 <label>
                   Velocity retention
                   <input
@@ -1144,9 +1245,9 @@ export function MapEditor({ onBack, onTestPlay, initialDocument }: MapEditorProp
               </div>
               <div className={`editor-validation editor-object-validation ${selectedObjectError ? 'invalid' : 'valid'}`}>
                 <strong>{selectedObjectError ? 'Object invalid' : 'Object valid'}</strong>
-                <span>{selectedObjectError ?? 'This reflector passes all object checks.'}</span>
+                <span>{selectedObjectError ?? `This ${selectedObject.type === 'projectile-portal' ? 'portal pair' : 'reflector'} passes all object checks.`}</span>
               </div>
-              <button className="editor-object-delete" onClick={deleteSelectedObject}>Delete Reflector Wall</button>
+              <button className="editor-object-delete" onClick={deleteSelectedObject}>Delete {selectedObject.type === 'projectile-portal' ? 'Portal Pair' : 'Reflector Wall'}</button>
             </section>
           )}
 

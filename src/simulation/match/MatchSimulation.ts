@@ -59,6 +59,14 @@ const SETTLE_TICKS = Math.ceil(0.45 * SIMULATION_HZ)
 const EXPIRED_TICKS = Math.ceil(0.7 * SIMULATION_HZ)
 const MAX_ACCUMULATED_SECONDS = 0.25
 const MAX_BUFFERED_EVENTS = 2048
+const MAX_PROJECTILE_PORTALS_PER_TICK = 8
+const PORTAL_EXIT_EPSILON = 0.05
+
+type SegmentBasis = {
+  tangent: Vector
+  normal: Vector
+  length: number
+}
 
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.max(minimum, Math.min(maximum, value))
@@ -502,13 +510,93 @@ export class MatchSimulation {
         FIXED_TICK_SECONDS,
         this.state.wind * weapon.windSensitivity,
       )
-      const impact = this.projectileCollision(projectile, next)
+      let movementStart = { ...projectile.position }
+      let movementEnd = { ...next.position }
+      let velocity = { ...next.velocity }
+      const traversedPortals = new Set<string>()
+      let impact: ProjectileContact | null = null
+      for (let traversal = 0; traversal < MAX_PROJECTILE_PORTALS_PER_TICK; traversal += 1) {
+        impact = this.projectileCollision(
+          { position: movementStart, radius: projectile.radius },
+          { position: movementEnd, radius: projectile.radius },
+          traversedPortals,
+        )
+        if (!impact || impact.kind !== 'portal') break
+        const source = impact.object[impact.aperture]
+        const destinationName = impact.aperture === 'entrance' ? 'exit' : 'entrance'
+        const destination = impact.object[destinationName]
+        const sourceBasis = this.segmentBasis(source.start, source.end)
+        const destinationBasis = this.segmentBasis(destination.start, destination.end)
+        if (!sourceBasis || !destinationBasis) break
+        const incomingVelocity = { ...velocity }
+        velocity = this.transformPortalVector(
+          velocity,
+          sourceBasis,
+          destinationBasis,
+          impact.object.velocityRetention,
+        )
+        const remaining = {
+          x: (movementEnd.x - movementStart.x) * (1 - impact.toi),
+          y: (movementEnd.y - movementStart.y) * (1 - impact.toi),
+        }
+        const outgoingRemaining = this.transformPortalVector(
+          remaining,
+          sourceBasis,
+          destinationBasis,
+          impact.object.velocityRetention,
+        )
+        const sourceProjection = clamp(
+          ((impact.position.x - source.start.x) * sourceBasis.tangent.x +
+            (impact.position.y - source.start.y) * sourceBasis.tangent.y) /
+            sourceBasis.length,
+          0,
+          1,
+        )
+        const exitDirection =
+          Math.hypot(outgoingRemaining.x, outgoingRemaining.y) > Number.EPSILON
+            ? outgoingRemaining
+            : velocity
+        const side =
+          Math.sign(
+            exitDirection.x * destinationBasis.normal.x +
+              exitDirection.y * destinationBasis.normal.y,
+          ) || 1
+        const exitOffset = projectile.radius + destination.thickness / 2 + PORTAL_EXIT_EPSILON
+        const destinationCenter = {
+          x: destination.start.x +
+            (destination.end.x - destination.start.x) * sourceProjection,
+          y: destination.start.y +
+            (destination.end.y - destination.start.y) * sourceProjection,
+        }
+        const from = { ...impact.position }
+        const to = {
+          x: destinationCenter.x + destinationBasis.normal.x * side * exitOffset,
+          y: destinationCenter.y + destinationBasis.normal.y * side * exitOffset,
+        }
+        this.emit({
+          type: 'projectile-portaled',
+          objectId: impact.object.id,
+          projectileId: projectile.id,
+          from,
+          to: { ...to },
+          incomingVelocity,
+          outgoingVelocity: { ...velocity },
+        })
+        traversedPortals.add(impact.object.id)
+        movementStart = to
+        movementEnd = {
+          x: to.x + outgoingRemaining.x,
+          y: to.y + outgoingRemaining.y,
+        }
+        impact = null
+      }
       if (!impact) {
-        if (!this.outOfBounds(next.position)) nextProjectiles.push({ ...projectile, ...next })
+        if (!this.outOfBounds(movementEnd))
+          nextProjectiles.push({ ...projectile, position: movementEnd, velocity })
         continue
       }
       if (impact.kind === 'reflector') {
-        const incomingVelocity = { ...next.velocity }
+        const incomingVelocity = { ...velocity }
         const normalVelocity =
           incomingVelocity.x * impact.normal.x + incomingVelocity.y * impact.normal.y
         const outgoingVelocity = {
@@ -537,10 +625,10 @@ export class MatchSimulation {
         })
       } else if (weapon.mechanic === 'timed-bounce') {
         const normalVelocity =
-          next.velocity.x * impact.normal.x + next.velocity.y * impact.normal.y
+          velocity.x * impact.normal.x + velocity.y * impact.normal.y
         const tangentVelocity = {
-          x: next.velocity.x - impact.normal.x * normalVelocity,
-          y: next.velocity.y - impact.normal.y * normalVelocity,
+          x: velocity.x - impact.normal.x * normalVelocity,
+          y: velocity.y - impact.normal.y * normalVelocity,
         }
         nextProjectiles.push({
           ...projectile,
@@ -580,7 +668,7 @@ export class MatchSimulation {
           actionId: projectile.actionId,
           position: { ...impact.position },
         })
-        const facing = Math.sign(projectile.velocity.x) || 1
+        const facing = Math.sign(velocity.x) || 1
         for (let child = 0; child < weapon.clusterChildCount; child += 1) {
           const angle =
             weapon.clusterChildCount === 1
@@ -605,7 +693,7 @@ export class MatchSimulation {
         weapon.mechanic === 'drill' &&
         this.terrain.isSolid(impact.position.x, impact.position.y)
       )
-        this.boreDrill(projectile, impact.position, weapon)
+        this.boreDrill({ ...projectile, velocity }, impact.position, weapon)
       else this.explode(impact.position, weapon, projectile.actionId, projectile.ownerId)
     }
     this.state.projectiles = nextProjectiles
@@ -664,6 +752,7 @@ export class MatchSimulation {
   private projectileCollision(
     previous: Pick<SimProjectile, 'position' | 'radius'>,
     next: Pick<SimProjectile, 'position' | 'radius'>,
+    ignoredPortalIds: ReadonlySet<string> = new Set(),
   ): ProjectileContact | null {
     const distance = Math.hypot(
       next.position.x - previous.position.x,
@@ -725,10 +814,34 @@ export class MatchSimulation {
       if (terminalContact) break
       lastPoint = point
     }
-    const reflectorContacts = this.map.objects.map((object) =>
-      sweepCircleAgainstMapObject(previous.position, next.position, next.radius, object),
-    )
+    const reflectorContacts = this.map.objects.map((object) => {
+      if (object.type === 'projectile-portal' && ignoredPortalIds.has(object.id)) return null
+      return sweepCircleAgainstMapObject(previous.position, next.position, next.radius, object)
+    })
     return firstProjectileContact([terminalContact, ...reflectorContacts])
+  }
+
+  private segmentBasis(start: Vector, end: Vector): SegmentBasis | null {
+    const x = end.x - start.x
+    const y = end.y - start.y
+    const length = Math.hypot(x, y)
+    if (length <= Number.EPSILON) return null
+    const tangent = { x: x / length, y: y / length }
+    return { tangent, normal: { x: -tangent.y, y: tangent.x }, length }
+  }
+
+  private transformPortalVector(
+    vector: Vector,
+    source: SegmentBasis,
+    destination: SegmentBasis,
+    retention: number,
+  ): Vector {
+    const tangent = vector.x * source.tangent.x + vector.y * source.tangent.y
+    const normal = vector.x * source.normal.x + vector.y * source.normal.y
+    return {
+      x: (destination.tangent.x * tangent + destination.normal.x * normal) * retention,
+      y: (destination.tangent.y * tangent + destination.normal.y * normal) * retention,
+    }
   }
 
   private boundaryNormal(point: Vector, movement: Vector): Vector {

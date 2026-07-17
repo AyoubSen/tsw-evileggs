@@ -687,6 +687,21 @@ select {
   stroke: #fff9e9;
   stroke-width: 1;
 }
+.map-preview-portal.portal-a .map-preview-reflector-inner {
+  stroke: #2e83a6;
+}
+.map-preview-portal.portal-b .map-preview-reflector-inner {
+  stroke: #a8547d;
+  stroke-dasharray: 3 2;
+}
+.map-preview-portal-label {
+  fill: #17252b;
+  stroke: #fff9e9;
+  stroke-width: 2px;
+  paint-order: stroke fill;
+  font: 900 7px sans-serif;
+  text-anchor: middle;
+}
 .map-card .map-mechanic-legend {
   display: flex;
   align-items: center;
@@ -700,6 +715,20 @@ select {
   font-size: 0.68rem;
   font-weight: 900;
   text-transform: uppercase;
+  flex-wrap: wrap;
+}
+.map-mechanic-legend .portal-legend-mark {
+  width: auto;
+  min-width: 30px;
+  height: 18px;
+  padding: 0 4px;
+  border: 2px solid #17252b;
+  border-radius: 9px 2px 2px 9px;
+  background: linear-gradient(90deg, #69b9d4 0 48%, #c86c96 52%);
+  color: #17252b;
+  font-style: normal;
+  line-height: 14px;
+  text-align: center;
 }
 .map-mechanic-legend i {
   width: 23px;
@@ -1427,6 +1456,48 @@ select {
   display: inline-block;
   vertical-align: middle;
   transform: skewX(-18deg);
+}
+.editor-object-palette .portal-tool::before {
+  content: 'A  B';
+  height: 18px;
+  border-radius: 10px 2px 2px 10px;
+  background: linear-gradient(90deg, #69b9d4 0 48%, #c86c96 52%);
+  color: #17252b;
+  font-size: 0.65rem;
+  font-weight: 950;
+  line-height: 14px;
+  text-align: center;
+  transform: none;
+}
+.portal-pair-key {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0 10px;
+  color: #4d5b5d;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.portal-pair-key b {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 2px solid #17252b;
+  background: #69b9d4;
+  color: #17252b;
+  border-radius: 50%;
+}
+.portal-pair-key b:last-child {
+  border-radius: 3px;
+  background: #c86c96;
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-preview-portal *,
+  .portal-tool::before {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 .editor-object-inspector {
   padding: 13px;

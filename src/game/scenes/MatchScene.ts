@@ -114,6 +114,12 @@ type ReflectionEffect = {
   lifetime: number
   seed: number
 }
+type PortalTransitEffect = {
+  entrance: Vector
+  exit: Vector
+  age: number
+  lifetime: number
+}
 const ACTOR_VISUAL_SCALE = 0.9
 const ACTOR_COLORS = [0x2863b7, 0xed7090, 0x57b89e, 0xf39a55, 0x8267c7, 0xe2ad2f]
 const TEAM_COLORS = [0x17447f, 0xaa392b]
@@ -176,6 +182,7 @@ export class MatchScene extends Phaser.Scene {
   private projectileTrails = new Map<string, ProjectileTrail>()
   private weaponEffects: WeaponEffect[] = []
   private reflectionEffects: ReflectionEffect[] = []
+  private portalTransitEffects: PortalTransitEffect[] = []
   private reactions = new Map<string, Reaction>()
   private displayedHealth: number[] = []
   private pendingResult: SimulationMatchResult | null = null
@@ -360,6 +367,7 @@ export class MatchScene extends Phaser.Scene {
     this.traceEffects.forEach((effect) => (effect.age += presentationDelta))
     this.weaponEffects.forEach((effect) => (effect.age += presentationDelta))
     this.reflectionEffects.forEach((effect) => (effect.age += presentationDelta))
+    this.portalTransitEffects.forEach((effect) => (effect.age += presentationDelta))
     this.burstEffects = this.burstEffects.filter((effect) => effect.age < effect.lifetime)
     this.damageEffects = this.damageEffects.filter((effect) => {
       if (effect.age < 1) return true
@@ -371,6 +379,7 @@ export class MatchScene extends Phaser.Scene {
     this.reflectionEffects = this.reflectionEffects.filter(
       (effect) => effect.age < effect.lifetime,
     )
+    this.portalTransitEffects = this.portalTransitEffects.filter((effect) => effect.age < effect.lifetime)
     for (const event of this.source.drainEvents()) this.consumeMatchEvent(event)
     this.updateHealthPresentation(presentationDelta)
     this.updateTimerAudio()
@@ -477,6 +486,7 @@ export class MatchScene extends Phaser.Scene {
     this.projectileTrails.clear()
     this.weaponEffects = []
     this.reflectionEffects = []
+    this.portalTransitEffects = []
     this.reactions.clear()
     this.pendingResult = null
     this.resultDelay = 0
@@ -510,6 +520,7 @@ export class MatchScene extends Phaser.Scene {
     this.projectileTrails.clear()
     this.weaponEffects = []
     this.reflectionEffects = []
+    this.portalTransitEffects = []
     this.burstEffects = []
     this.traceEffects = []
     for (const effect of this.damageEffects) effect.label.destroy()
@@ -1037,6 +1048,29 @@ export class MatchScene extends Phaser.Scene {
 
     const map = getMap(state.mapId)
     for (const object of map.objects) {
+      if (object.type === 'projectile-portal') {
+        for (const [index, aperture] of [object.entrance, object.exit].entries()) {
+          const dx = aperture.end.x - aperture.start.x
+          const dy = aperture.end.y - aperture.start.y
+          const length = Math.hypot(dx, dy)
+          if (!length) continue
+          const along = { x: dx / length, y: dy / length }
+          const across = { x: -along.y, y: along.x }
+          const color = index === 0 ? 0x27789a : 0xa14f78
+          this.mapObjectGraphics
+            .lineStyle(aperture.thickness + 8, INK_COLOR)
+            .lineBetween(aperture.start.x, aperture.start.y, aperture.end.x, aperture.end.y)
+            .lineStyle(aperture.thickness + 3, color)
+            .lineBetween(aperture.start.x, aperture.start.y, aperture.end.x, aperture.end.y)
+            .lineStyle(2, 0xfff4d8, 0.9)
+          for (let distance = 8; distance < length; distance += index === 0 ? 13 : 18) {
+            const center = { x: aperture.start.x + along.x * distance, y: aperture.start.y + along.y * distance }
+            if (index === 0) this.mapObjectGraphics.strokeCircle(center.x, center.y, 2.5)
+            else this.mapObjectGraphics.strokeRect(center.x - across.x * 3 - along.x * 3, center.y - across.y * 3 - along.y * 3, 6, 6)
+          }
+        }
+        continue
+      }
       if (object.type !== 'reflector-wall') continue
       const dx = object.end.x - object.start.x
       const dy = object.end.y - object.start.y
@@ -2073,6 +2107,19 @@ export class MatchScene extends Phaser.Scene {
         }
         return
       }
+      case 'projectile-portaled': {
+        const trail = this.projectileTrails.get(event.projectileId)
+        if (trail) trail.points = [{ ...event.to }]
+        this.portalTransitEffects.push({
+          entrance: { ...event.from },
+          exit: { ...event.to },
+          age: 0,
+          lifetime: this.preferences.reducedMotion ? 0.18 : 0.38,
+        })
+        if (this.portalTransitEffects.length > 20) this.portalTransitEffects.shift()
+        this.audio.play('portal-transit')
+        return
+      }
       case 'cluster-split':
         this.addBurst('explosion', event.position, 25, event.sequence, 'cluster-charge')
         this.addWeaponEffect(
@@ -2349,6 +2396,22 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private renderEffects(): void {
+    for (const effect of this.portalTransitEffects) {
+      const progress = Phaser.Math.Clamp(effect.age / effect.lifetime, 0, 1)
+      const alpha = 1 - progress
+      for (const [index, position] of [effect.entrance, effect.exit].entries()) {
+        const radius = this.preferences.reducedMotion ? 8 : 7 + progress * 16
+        this.overlayGraphics
+          .lineStyle(index === 0 ? 3 : 4, index === 0 ? 0x63c8e8 : 0xef8bb5, alpha)
+          .strokeCircle(position.x, position.y, radius)
+          .fillStyle(0xfff8df, alpha * 0.7)
+          .fillCircle(position.x, position.y, 3)
+      }
+      if (!this.preferences.reducedMotion)
+        this.overlayGraphics
+          .lineStyle(1.5, 0xfff8df, alpha * 0.45)
+          .lineBetween(effect.entrance.x, effect.entrance.y, effect.exit.x, effect.exit.y)
+    }
     for (const effect of this.reflectionEffects) {
       const progress = Phaser.Math.Clamp(effect.age / effect.lifetime, 0, 1)
       const alpha = 1 - progress

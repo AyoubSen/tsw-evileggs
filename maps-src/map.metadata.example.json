@@ -14,7 +14,15 @@
     { "x": 700, "y": 680, "teamId": 0, "teamSlot": 2, "facing": 1 },
     { "x": 1028, "y": 680, "teamId": 1, "teamSlot": 2, "facing": -1 }
   ],
-  "objects": [],
+  "objects": [
+    {
+      "id": "example-portal",
+      "type": "projectile-portal",
+      "entrance": { "start": { "x": 600, "y": 240 }, "end": { "x": 600, "y": 320 }, "thickness": 12 },
+      "exit": { "start": { "x": 1128, "y": 240 }, "end": { "x": 1128, "y": 320 }, "thickness": 12 },
+      "velocityRetention": 0.8
+    }
+  ],
   "theme": {
     "sky": "#9EDCE5",
     "sun": "#FFEDB1",

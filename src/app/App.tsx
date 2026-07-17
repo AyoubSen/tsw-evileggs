@@ -209,18 +209,20 @@ function MapPreview({ mapId }: { mapId: MapId }) {
         ))}
       </g>
       <g className="map-preview-reflectors">
-        {map.objects.map((object) => {
-          const startX = (object.start.x / map.width) * MAP_PREVIEW_WIDTH
-          const startY = (object.start.y / map.height) * MAP_PREVIEW_HEIGHT
-          const endX = (object.end.x / map.width) * MAP_PREVIEW_WIDTH
-          const endY = (object.end.y / map.height) * MAP_PREVIEW_HEIGHT
+        {map.objects.flatMap((object) => object.type === 'projectile-portal'
+          ? ([['A', object.entrance], ['B', object.exit]] as const).map(([label, aperture]) => ({ object, aperture, label }))
+          : [{ object, aperture: object, label: null }]).map(({ object, aperture, label }) => {
+          const startX = (aperture.start.x / map.width) * MAP_PREVIEW_WIDTH
+          const startY = (aperture.start.y / map.height) * MAP_PREVIEW_HEIGHT
+          const endX = (aperture.end.x / map.width) * MAP_PREVIEW_WIDTH
+          const endY = (aperture.end.y / map.height) * MAP_PREVIEW_HEIGHT
           const dx = endX - startX
           const dy = endY - startY
           const length = Math.hypot(dx, dy) || 1
           const normalX = -dy / length
           const normalY = dx / length
           return (
-            <g key={object.id}>
+            <g key={`${object.id}-${label ?? 'wall'}`} className={label ? `map-preview-portal portal-${label.toLowerCase()}` : undefined}>
               <line className="map-preview-reflector-outer" x1={startX} y1={startY} x2={endX} y2={endY} />
               <line className="map-preview-reflector-inner" x1={startX} y1={startY} x2={endX} y2={endY} />
               {[0.25, 0.5, 0.75].map((position) => {
@@ -237,6 +239,7 @@ function MapPreview({ mapId }: { mapId: MapId }) {
                   />
                 )
               })}
+              {label && <text className="map-preview-portal-label" x={(startX + endX) / 2} y={(startY + endY) / 2 + 2.5}>{label}</text>}
             </g>
           )
         })}
@@ -266,10 +269,13 @@ function MapPreview({ mapId }: { mapId: MapId }) {
 }
 
 function MapMechanicLegend({ mapId }: { mapId: MapId }) {
-  if (!MAPS[mapId].objects.some((object) => object.type === 'reflector-wall')) return null
+  const hasReflector = MAPS[mapId].objects.some((object) => object.type === 'reflector-wall')
+  const hasPortal = MAPS[mapId].objects.some((object) => object.type === 'projectile-portal')
+  if (!hasReflector && !hasPortal) return null
   return (
     <span className="map-mechanic-legend">
-      <i aria-hidden="true" /> Reflects projectiles
+      {hasReflector && <><i aria-hidden="true" /> Reflects projectiles</>}
+      {hasPortal && <><i className="portal-legend-mark" aria-hidden="true">A↔B</i> Paired projectile portals</>}
     </span>
   )
 }

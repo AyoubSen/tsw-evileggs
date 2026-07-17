@@ -1,4 +1,8 @@
-import type { MapObjectDefinition, ReflectorWallDefinition } from '../../maps/mapDocument'
+import type {
+  MapObjectDefinition,
+  ProjectilePortalDefinition,
+  ReflectorWallDefinition,
+} from '../../maps/mapDocument'
 import type { Vector } from '../../shared/types'
 
 type ContactBase = {
@@ -16,12 +20,19 @@ export type ProjectileContact =
       object: ReflectorWallDefinition
       stableId: string
     })
+  | (ContactBase & {
+      kind: 'portal'
+      object: ProjectilePortalDefinition
+      aperture: 'entrance' | 'exit'
+      stableId: string
+    })
 
 const CONTACT_PRIORITY: Record<ProjectileContact['kind'], number> = {
   boundary: 0,
   player: 1,
   reflector: 2,
-  terrain: 3,
+  portal: 3,
+  terrain: 4,
 }
 const CONTACT_EPSILON = 1e-9
 
@@ -41,24 +52,28 @@ export function firstProjectileContact(
   return first
 }
 
-export function sweepCircleAgainstReflector(
+type CapsuleContact = ContactBase
+
+export function sweepCircleAgainstCapsule(
   start: Vector,
   end: Vector,
   projectileRadius: number,
-  object: ReflectorWallDefinition,
-): ProjectileContact | null {
-  const segment = { x: object.end.x - object.start.x, y: object.end.y - object.start.y }
+  segmentStart: Vector,
+  segmentEnd: Vector,
+  thickness: number,
+): CapsuleContact | null {
+  const segment = { x: segmentEnd.x - segmentStart.x, y: segmentEnd.y - segmentStart.y }
   const segmentLength = Math.hypot(segment.x, segment.y)
   if (segmentLength <= Number.EPSILON) return null
   const tangent = { x: segment.x / segmentLength, y: segment.y / segmentLength }
   const surfaceNormal = { x: -tangent.y, y: tangent.x }
   const movement = { x: end.x - start.x, y: end.y - start.y }
-  const radius = projectileRadius + object.thickness / 2
-  const candidates: ProjectileContact[] = []
+  const radius = projectileRadius + thickness / 2
+  const candidates: CapsuleContact[] = []
 
   const signedStart =
-    (start.x - object.start.x) * surfaceNormal.x +
-    (start.y - object.start.y) * surfaceNormal.y
+    (start.x - segmentStart.x) * surfaceNormal.x +
+    (start.y - segmentStart.y) * surfaceNormal.y
   const signedMovement = movement.x * surfaceNormal.x + movement.y * surfaceNormal.y
   if (Math.abs(signedMovement) > CONTACT_EPSILON) {
     for (const side of [-1, 1] as const) {
@@ -72,23 +87,20 @@ export function sweepCircleAgainstReflector(
         y: start.y + movement.y * clampedToi,
       }
       const projection =
-        (position.x - object.start.x) * tangent.x +
-        (position.y - object.start.y) * tangent.y
+        (position.x - segmentStart.x) * tangent.x +
+        (position.y - segmentStart.y) * tangent.y
       if (projection < -CONTACT_EPSILON || projection > segmentLength + CONTACT_EPSILON) continue
       candidates.push({
-        kind: 'reflector',
         toi: clampedToi,
         position,
         normal,
-        object,
-        stableId: object.id,
       })
     }
   }
 
   const movementLengthSquared = movement.x * movement.x + movement.y * movement.y
   if (movementLengthSquared > CONTACT_EPSILON) {
-    for (const endpoint of [object.start, object.end]) {
+    for (const endpoint of [segmentStart, segmentEnd]) {
       const relative = { x: start.x - endpoint.x, y: start.y - endpoint.y }
       const b = 2 * (relative.x * movement.x + relative.y * movement.y)
       const c = relative.x * relative.x + relative.y * relative.y - radius * radius
@@ -107,17 +119,34 @@ export function sweepCircleAgainstReflector(
       const normal = { x: normalOffset.x / normalLength, y: normalOffset.y / normalLength }
       if (movement.x * normal.x + movement.y * normal.y >= -CONTACT_EPSILON) continue
       candidates.push({
-        kind: 'reflector',
         toi: clampedToi,
         position,
         normal,
-        object,
-        stableId: object.id,
       })
     }
   }
 
-  return firstProjectileContact(candidates)
+  let first: CapsuleContact | null = null
+  for (const candidate of candidates)
+    if (!first || candidate.toi < first.toi - CONTACT_EPSILON) first = candidate
+  return first
+}
+
+export function sweepCircleAgainstReflector(
+  start: Vector,
+  end: Vector,
+  projectileRadius: number,
+  object: ReflectorWallDefinition,
+): ProjectileContact | null {
+  const contact = sweepCircleAgainstCapsule(
+    start,
+    end,
+    projectileRadius,
+    object.start,
+    object.end,
+    object.thickness,
+  )
+  return contact ? { ...contact, kind: 'reflector', object, stableId: object.id } : null
 }
 
 export function sweepCircleAgainstMapObject(
@@ -129,5 +158,28 @@ export function sweepCircleAgainstMapObject(
   switch (object.type) {
     case 'reflector-wall':
       return sweepCircleAgainstReflector(start, end, projectileRadius, object)
+    case 'projectile-portal': {
+      const contacts = (['entrance', 'exit'] as const).map((aperture) => {
+        const segment = object[aperture]
+        const contact = sweepCircleAgainstCapsule(
+          start,
+          end,
+          projectileRadius,
+          segment.start,
+          segment.end,
+          segment.thickness,
+        )
+        return contact
+          ? {
+              ...contact,
+              kind: 'portal' as const,
+              object,
+              aperture,
+              stableId: `${object.id}:${aperture}`,
+            }
+          : null
+      })
+      return firstProjectileContact(contacts)
+    }
   }
 }

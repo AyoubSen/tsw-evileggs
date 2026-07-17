@@ -50,6 +50,15 @@ export type MatchEvent =
       incomingVelocity: Vector
       outgoingVelocity: Vector
     })
+  | (EventEnvelope & {
+      type: 'projectile-portaled'
+      objectId: string
+      projectileId: string
+      from: Vector
+      to: Vector
+      incomingVelocity: Vector
+      outgoingVelocity: Vector
+    })
   | (EventEnvelope & { type: 'cluster-split'; actionId: string; position: Vector })
   | (EventEnvelope & {
       type: 'remote-split'
