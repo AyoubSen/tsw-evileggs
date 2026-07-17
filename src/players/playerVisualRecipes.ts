@@ -99,11 +99,18 @@ const PATTERNS: Record<PlayerPatternId, readonly PlayerVisualPrimitive[]> = {
   split: [path([M(64, 29), L(82, 36), L(84, 78), L(76, 87), L(64, 90), Z], 'accent')],
   zigzag: [path([M(43, 45), L(51, 52), L(59, 45), L(67, 52), L(75, 45), L(84, 52)], undefined, 'accent', 4), path([M(43, 71), L(51, 78), L(59, 71), L(67, 78), L(75, 71), L(84, 78)], undefined, 'accent', 4)],
   speckled: [circle(47, 42, 2, 'accent'), circle(73, 38, 1.5, 'accent'), circle(82, 54, 2, 'accent'), circle(45, 67, 1.5, 'accent'), circle(59, 82, 2, 'accent'), circle(79, 78, 1.5, 'accent')],
+  chevron: [path([M(40, 48), L(64, 62), L(88, 48)], undefined, 'accent', 5), path([M(40, 68), L(64, 82), L(88, 68)], undefined, 'accent', 5)],
+  rings: [circle(50, 48, 8, undefined, 'accent', 4), circle(76, 72, 10, undefined, 'accent', 4)],
+  cracked: [path([M(62, 30), L(56, 50), L(66, 59), L(57, 76), L(63, 91)], undefined, 'accent', 4), path([M(57, 76), L(45, 82)], undefined, 'accent', 3)],
+  confetti: [path([M(45, 44), L(51, 49), M(75, 39), L(80, 46), M(43, 70), L(50, 67), M(72, 75), L(80, 80)], undefined, 'accent', 4), circle(62, 41, 2, 'accent'), circle(60, 84, 2, 'accent')],
 }
 
 const EYES = (kind: PlayerFaceId): readonly PlayerVisualPrimitive[] => {
   if (kind === 'sleepy') return [path([M(45, 57), C(48, 59, 52, 59, 55, 57)], undefined, 'ink', 2.5), path([M(73, 57), C(76, 59, 80, 59, 83, 57)], undefined, 'ink', 2.5)]
   if (kind === 'determined') return [path([M(44, 52), L(55, 57)], undefined, 'ink', 2.5), path([M(73, 57), L(84, 52)], undefined, 'ink', 2.5), circle(51, 59, 2.3, 'ink'), circle(77, 59, 2.3, 'ink')]
+  if (kind === 'wink') return [path([M(44, 57), C(48, 53, 52, 53, 56, 57)], undefined, 'ink', 2.5), circle(78, 57, 3, 'ink')]
+  if (kind === 'starstruck') return [path([M(50, 51), L(52, 55), L(56, 56), L(53, 59), L(54, 63), L(50, 61), L(46, 63), L(47, 59), L(44, 56), L(48, 55), Z], 'ink'), path([M(78, 51), L(80, 55), L(84, 56), L(81, 59), L(82, 63), L(78, 61), L(74, 63), L(75, 59), L(72, 56), L(76, 55), Z], 'ink')]
+  if (kind === 'suspicious') return [path([M(44, 55), L(56, 57)], undefined, 'ink', 2.5), path([M(72, 57), L(84, 53)], undefined, 'ink', 2.5), circle(51, 59, 2.3, 'ink'), circle(77, 59, 2.3, 'ink')]
   return [circle(50, 57, kind === 'grin' ? 3.5 : 3, 'ink'), circle(78, 57, kind === 'grin' ? 3.5 : 3, 'ink')]
 }
 const MOUTHS: Record<PlayerFaceId, PlayerVisualPrimitive> = {
@@ -115,6 +122,10 @@ const MOUTHS: Record<PlayerFaceId, PlayerVisualPrimitive> = {
   mischief: path([M(53, 72), C(62, 79, 70, 74, 75, 69)], undefined, 'ink', 2.5),
   stoic: path([M(55, 75), L(73, 75)], undefined, 'ink', 2.5),
   cheery: path([M(51, 69), C(58, 84, 71, 84, 77, 69)], 'accent', 'ink', 2),
+  wink: path([M(53, 71), C(60, 79, 69, 79, 76, 70)], undefined, 'ink', 2.5),
+  starstruck: path([M(52, 70), C(58, 82, 70, 82, 76, 70), Z], 'face', 'ink', 2),
+  goofy: path([M(51, 70), C(57, 80, 70, 83, 77, 71), C(69, 76, 59, 75, 51, 70), Z], 'face', 'ink', 2),
+  suspicious: path([M(55, 74), L(73, 72)], undefined, 'ink', 2.5),
 }
 
 const STATE_FACES: Record<Exclude<PlayerExpressionState, 'normal' | 'victory'>, readonly PlayerVisualPrimitive[]> = {
@@ -139,6 +150,18 @@ const ACCESSORIES: Record<PlayerAccessoryId, readonly PlayerVisualPrimitive[]> =
   eyepatch: [path([M(34, 43), L(83, 61)], undefined, 'ink', 2.5), circle(77, 58, 9, 'accent', 'ink', 2)],
   bow: [path([M(37, 31), L(18, 20), L(20, 44), Z], 'accent', 'ink', 2.5), path([M(37, 31), L(57, 19), L(55, 44), Z], 'accent', 'ink', 2.5), circle(37, 31, 4, 'accent', 'ink', 2)],
   mohawk: [path([M(44, 25), L(52, 6), L(61, 21), L(69, 2), L(76, 22), L(86, 9), L(88, 33), Z], 'accent', 'ink', 3)],
+  beanie: [path([M(38, 34), C(42, 12, 84, 12, 90, 34), Z], 'accent', 'ink', 3), path([M(36, 33), L(92, 33), L(92, 41), L(36, 41), Z], 'accent', 'ink', 2.5), circle(64, 13, 5, 'accent', 'ink', 2)],
+  'cowboy-hat': [path([M(42, 31), L(48, 13), C(57, 18, 71, 18, 80, 13), L(86, 31), Z], 'accent', 'ink', 3), path([M(26, 34), C(45, 39, 84, 39, 103, 32), C(93, 44, 38, 45, 26, 34), Z], 'accent', 'ink', 2.5)],
+  'wizard-hat': [path([M(42, 34), L(68, 2), L(87, 35), Z], 'accent', 'ink', 3), path([M(34, 35), C(51, 30, 79, 30, 96, 36), C(79, 43, 50, 43, 34, 35), Z], 'accent', 'ink', 2.5)],
+  antenna: [path([M(54, 34), L(50, 12), M(74, 34), L(80, 12)], undefined, 'ink', 3), circle(49, 9, 5, 'accent', 'ink', 2), circle(81, 9, 5, 'accent', 'ink', 2)],
+  halo: [ellipse(64, 13, 25, 7, undefined, 'accent', 4)],
+  horns: [path([M(43, 31), C(28, 24, 31, 8, 40, 5), C(37, 17, 43, 20, 50, 24), Z], 'accent', 'ink', 2.5), path([M(85, 31), C(100, 24, 97, 8, 88, 5), C(91, 17, 85, 20, 78, 24), Z], 'accent', 'ink', 2.5)],
+  monocle: [circle(78, 58, 10, undefined, 'accent', 3), path([M(87, 65), C(92, 73, 91, 83, 88, 91)], undefined, 'ink', 2)],
+  'heart-glasses': [path([M(38, 55), C(41, 47, 49, 49, 51, 54), C(54, 49, 62, 48, 64, 55), C(60, 64, 53, 68, 51, 70), C(48, 67, 40, 63, 38, 55), Z], 'accent', 'ink', 2), path([M(64, 55), C(67, 47, 75, 49, 77, 54), C(80, 49, 88, 48, 90, 55), C(86, 64, 79, 68, 77, 70), C(74, 67, 66, 63, 64, 55), Z], 'accent', 'ink', 2)],
+  mustache: [path([M(64, 70), C(57, 63, 48, 67, 47, 75), C(53, 78, 60, 76, 64, 72), C(68, 76, 75, 78, 81, 75), C(80, 67, 71, 63, 64, 70), Z], 'accent', 'ink', 2)],
+  scarf: [path([M(35, 83), C(50, 91, 78, 91, 93, 82), L(91, 94), C(75, 103, 51, 102, 37, 94), Z], 'accent', 'ink', 2.5), path([M(82, 92), L(94, 106), L(83, 108), L(75, 96), Z], 'accent', 'ink', 2)],
+  flower: [circle(42, 26, 5, 'accent', 'ink', 2), circle(52, 26, 5, 'accent', 'ink', 2), circle(47, 18, 5, 'accent', 'ink', 2), circle(47, 34, 5, 'accent', 'ink', 2), circle(47, 26, 4, 'face', 'ink', 1.5)],
+  'cat-ears': [path([M(38, 32), L(40, 8), L(57, 27), Z], 'accent', 'ink', 3), path([M(71, 27), L(88, 8), L(90, 33), Z], 'accent', 'ink', 3)],
 }
 
 function transformPrimitive(item: PlayerVisualPrimitive, x: number, y: number, scale: number): PlayerVisualPrimitive {
@@ -215,6 +238,18 @@ const COMPACT_ACCESSORY_MARKS: Record<PlayerAccessoryId, readonly PlayerVisualPr
   eyepatch: [circle(75, 58, 6, 'accent', 'ink', 2)],
   bow: [path([M(43, 43), L(31, 36), L(32, 49), Z], 'accent'), path([M(43, 43), L(54, 36), L(53, 49), Z], 'accent')],
   mohawk: [path([M(48, 40), L(54, 29), L(61, 39), L(68, 27), L(76, 40)], undefined, 'accent', 4)],
+  beanie: [path([M(44, 41), C(49, 28, 79, 28, 85, 41)], undefined, 'accent', 5)],
+  'cowboy-hat': [path([M(38, 40), L(90, 40), M(49, 38), L(53, 29), L(77, 29), L(82, 38)], undefined, 'accent', 3)],
+  'wizard-hat': [path([M(43, 41), L(65, 24), L(86, 41)], undefined, 'accent', 4)],
+  antenna: [path([M(54, 39), L(50, 27), M(74, 39), L(79, 27)], undefined, 'accent', 3)],
+  halo: [ellipse(64, 31, 19, 5, undefined, 'accent', 3)],
+  horns: [path([M(49, 39), L(39, 27), M(79, 39), L(89, 27)], undefined, 'accent', 4)],
+  monocle: [circle(75, 58, 6, undefined, 'accent', 3)],
+  'heart-glasses': [circle(53, 58, 6, undefined, 'accent', 3), circle(75, 58, 6, undefined, 'accent', 3)],
+  mustache: [path([M(50, 70), C(57, 76, 61, 72, 64, 69), C(68, 72, 72, 76, 79, 70)], undefined, 'accent', 4)],
+  scarf: [path([M(43, 82), C(55, 88, 74, 88, 86, 82)], undefined, 'accent', 5)],
+  flower: [circle(48, 37, 6, 'accent')],
+  'cat-ears': [path([M(46, 40), L(42, 28), L(57, 38), M(72, 38), L(86, 28), L(82, 41)], undefined, 'accent', 4)],
 }
 
 export function getCompactPlayerRecipe(appearance: Readonly<PlayerAppearance>): CompactPlayerRecipe {

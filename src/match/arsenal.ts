@@ -4,7 +4,9 @@ export type ArsenalPresetId = 'standard' | 'classic' | 'chaos' | 'custom'
 export type ArsenalRules = { presetId: ArsenalPresetId; ammunition: WeaponInventory }
 
 const standardInventory = (): WeaponInventory =>
-  Object.fromEntries(WEAPON_ORDER.map((id) => [id, WEAPONS[id].ammunition])) as WeaponInventory
+  inventoryWith(WEAPON_ORDER.slice(0, 6))
+
+export const MAX_LOADOUT_WEAPONS = 6
 
 const inventoryWith = (
   enabled: readonly WeaponId[],
@@ -71,6 +73,11 @@ export function sanitizeArsenalRules(value: unknown): ArsenalRules {
       ]
     }),
   ) as WeaponInventory
+  const isChaos = WEAPON_ORDER.every((id) => ARSENAL_PRESETS.chaos.ammunition[id] === ammunition[id])
+  if (!isChaos) {
+    const enabled = WEAPON_ORDER.filter((id) => ammunition[id] === 'unlimited' || ammunition[id] > 0)
+    for (const id of enabled.slice(MAX_LOADOUT_WEAPONS)) ammunition[id] = 0
+  }
   if (!WEAPON_ORDER.some((id) => ammunition[id] === 'unlimited'))
     ammunition['basic-rocket'] = 'unlimited'
   return { presetId: detectArsenalPreset(ammunition), ammunition }

@@ -45,9 +45,11 @@ import type { PlayerPoseId } from '../players/playerVisualRecipes'
 import { WEAPONS, WEAPON_ORDER, type WeaponId, type WeaponInventory } from '../weapons/registry'
 import {
   ARSENAL_PRESETS,
+  MAX_LOADOUT_WEAPONS,
   arsenalSummary,
   cloneArsenalRules,
   sanitizeArsenalRules,
+  usableArsenalWeapons,
   type ArsenalRules,
 } from '../match/arsenal'
 import {
@@ -370,6 +372,7 @@ function ArsenalRulesPanel({
   rules: ArsenalRules
   onChange: (rules: ArsenalRules) => void
 }) {
+  const enabledCount = usableArsenalWeapons(rules).length
   const updateAmount = (weaponId: WeaponId, amount: WeaponInventory[WeaponId]) =>
     onChange(
       sanitizeArsenalRules({
@@ -401,10 +404,11 @@ function ArsenalRulesPanel({
           const enabled = amount === 'unlimited' || amount > 0
           return (
             <label className={`arsenal-weapon-control ${enabled ? '' : 'disabled'}`} key={weaponId}>
-              <input
+                 <input
                 className="arsenal-enabled-toggle"
                 type="checkbox"
-                checked={enabled}
+                   checked={enabled}
+                   disabled={!enabled && rules.presetId !== 'chaos' && enabledCount >= MAX_LOADOUT_WEAPONS}
                 onChange={(event) =>
                   updateAmount(weaponId, event.target.checked ? WEAPONS[weaponId].ammunition : 0)
                 }
@@ -429,7 +433,7 @@ function ArsenalRulesPanel({
           )
         })}
       </div>
-      <p className="arsenal-note">At least one weapon remains unlimited so the match cannot run out of actions.</p>
+      <p className="arsenal-note">Choose up to {MAX_LOADOUT_WEAPONS} weapons. Chaos mode unlocks the full arsenal. At least one weapon remains unlimited.</p>
     </details>
   )
 }
@@ -640,6 +644,7 @@ function CustomizePlayer({
   selectedSlot,
   onSelectSlot,
   cosmeticLoadout: initialCosmeticLoadout,
+  arsenal: initialArsenal,
   entitlements,
   onSave,
   onOpenWorkshop,
@@ -650,18 +655,21 @@ function CustomizePlayer({
   selectedSlot: number
   onSelectSlot: (slot: number) => void
   cosmeticLoadout: CosmeticLoadout
+  arsenal: ArsenalRules
   entitlements: readonly string[]
-  onSave: (changes: { appearances: PlayerAppearance[]; presets: OutfitPreset[]; cosmeticLoadout: CosmeticLoadout }) => void
+  onSave: (changes: { appearances: PlayerAppearance[]; presets: OutfitPreset[]; cosmeticLoadout: CosmeticLoadout; arsenal: ArsenalRules }) => void
   onOpenWorkshop: () => void
   onBack: () => void
 }) {
   const [previewContrast, setPreviewContrast] = useState<'normal' | 'high'>('normal')
+  const [activeTab, setActiveTab] = useState<'player' | 'loadout'>('player')
   const [previewState, setPreviewState] = useState<'idle' | 'aiming' | 'firing' | 'hurt' | 'frozen' | 'defeated' | 'victory'>('aiming')
   const [previewFacing, setPreviewFacing] = useState<-1 | 1>(1)
   const [previewWeapon, setPreviewWeapon] = useState<WeaponId>('basic-rocket')
   const [appearances, setAppearances] = useState(() => initialAppearances.map((appearance) => ({ ...appearance })))
   const [presets, setPresets] = useState(() => initialPresets.map((preset) => ({ ...preset, appearance: { ...preset.appearance } })))
   const [cosmeticLoadout, setCosmeticLoadout] = useState(initialCosmeticLoadout)
+  const [arsenal, setArsenal] = useState(initialArsenal)
   const [previewCosmeticLoadout, setPreviewCosmeticLoadout] = useState(initialCosmeticLoadout)
   const [presetName, setPresetName] = useState('')
   const onChange = (slot: number, nextAppearance: PlayerAppearance) => setAppearances((current) => current.map((appearance, index) => index === slot ? nextAppearance : appearance))
@@ -697,7 +705,11 @@ function CustomizePlayer({
         <h2>Customize players</h2>
         <p>Every local slot keeps its own look, ready for local or online play.</p>
       </header>
-      <div className="customize-layout">
+      <div className="customize-tabs" role="tablist" aria-label="Customization section">
+        <button type="button" role="tab" aria-selected={activeTab === 'player'} className={activeTab === 'player' ? 'selected' : ''} onClick={() => setActiveTab('player')}>Player</button>
+        <button type="button" role="tab" aria-selected={activeTab === 'loadout'} className={activeTab === 'loadout' ? 'selected' : ''} onClick={() => setActiveTab('loadout')}>Weapon loadout</button>
+      </div>
+      {activeTab === 'player' ? <div className="customize-layout">
         <aside className="customize-preview">
           <div className="slot-picker" role="tablist" aria-label="Local player slot">
             {appearances.map((item, index) => (
@@ -761,17 +773,10 @@ function CustomizePlayer({
           </section>
         </aside>
         <div className="appearance-galleries">
-          <fieldset className="appearance-group owned-finish-group">
-            <legend>Weapon finish</legend>
-            {previewWeapon === 'old-shoe' && <p>The shoe is the payload itself, so its held and thrown look uses the equipped weapon finish.</p>}
-            <div className="appearance-options owned-finish-options">{WEAPON_SKINS.filter((skin) => isCosmeticOwned('weapon', skin.id, entitlements)).map((skin) => {
-              const previewed = previewCosmeticLoadout.weaponSkin === skin.id
-              return <button type="button" key={skin.id} className={previewed ? 'selected' : ''} aria-pressed={previewed} onClick={() => { setPreviewState('aiming'); setPreviewCosmeticLoadout((current) => ({ ...current, weaponSkin: skin.id })); onCosmeticLoadoutChange({ ...cosmeticLoadout, weaponSkin: skin.id }) }}><WeaponIcon weaponId={previewWeapon} skinId={skin.id} /><span>{skin.label}{cosmeticLoadout.weaponSkin === skin.id ? ' · Equipped' : ''}</span></button>
-            })}</div><button type="button" className="button-quiet owned-finish-shop" onClick={onOpenWorkshop}>Browse weapon finishes</button>
-          </fieldset>
           {APPEARANCE_GROUPS.map((group) => (
-            <fieldset className="appearance-group" key={group.field}>
+            <fieldset className={`appearance-group ${group.field === 'victoryStyle' ? 'victory-style-group' : ''}`} key={group.field}>
               <legend>{group.label}</legend>
+              {group.field === 'victoryStyle' && <p className="victory-style-note">Your normal face stays the same. This expression and pose only appear when you win.</p>}
               <div className="appearance-options">
                 {group.entries.map((entry) => (
                   <button
@@ -782,6 +787,7 @@ function CustomizePlayer({
                     onClick={() => onChange(selectedSlot, { ...appearance, [group.field]: entry.id } as PlayerAppearance)}
                   >
                     {'color' in entry && <i style={{ backgroundColor: entry.color }} aria-hidden="true" />}
+                    {group.field === 'victoryStyle' && <PlayerAvatar appearance={{ ...appearance, victoryStyle: entry.id }} pose="victory" label={`${entry.label} victory preview`} />}
                     <span>{entry.label}</span>
                   </button>
                 ))}
@@ -789,9 +795,24 @@ function CustomizePlayer({
             </fieldset>
           ))}
         </div>
-      </div>
+      </div> : <div className="loadout-customizer">
+        <section className="loadout-preview-card">
+          <PlayerAvatar appearance={appearance} teamId={selectedSlot % 2} teamBackground label="Weapon loadout preview" pose="aim" weaponId={previewWeapon} weaponSkinId={previewCosmeticLoadout.weaponSkin} projectileSkinId={previewCosmeticLoadout.projectileSkin} />
+          <div><p className="eyebrow">YOUR SIX</p><h3>Choose the default arsenal</h3><p>Standard online and local matches use these weapons. Chaos mode ignores this limit and enables the full arsenal.</p></div>
+        </section>
+        <fieldset className="appearance-group loadout-weapon-group"><legend>Weapons · {usableArsenalWeapons(arsenal).length}/{MAX_LOADOUT_WEAPONS}</legend><div className="loadout-weapon-grid">{WEAPON_ORDER.map((weaponId) => {
+          const amount = arsenal.ammunition[weaponId]
+          const selected = amount === 'unlimited' || amount > 0
+          const full = usableArsenalWeapons(arsenal).length >= MAX_LOADOUT_WEAPONS
+          return <button type="button" key={weaponId} className={selected ? 'selected' : ''} disabled={!selected && full} aria-pressed={selected} onMouseEnter={() => setPreviewWeapon(weaponId)} onFocus={() => setPreviewWeapon(weaponId)} onClick={() => { setPreviewWeapon(weaponId); setArsenal(sanitizeArsenalRules({ ammunition: { ...arsenal.ammunition, [weaponId]: selected ? 0 : WEAPONS[weaponId].ammunition } })) }}><WeaponIcon weaponId={weaponId} skinId={previewCosmeticLoadout.weaponSkin} /><span>{WEAPONS[weaponId].displayName}</span></button>
+        })}</div></fieldset>
+        <fieldset className="appearance-group owned-finish-group"><legend>Weapon finish</legend><div className="appearance-options owned-finish-options">{WEAPON_SKINS.filter((skin) => isCosmeticOwned('weapon', skin.id, entitlements)).map((skin) => {
+          const previewed = previewCosmeticLoadout.weaponSkin === skin.id
+          return <button type="button" key={skin.id} className={previewed ? 'selected' : ''} aria-pressed={previewed} onClick={() => { setPreviewCosmeticLoadout((current) => ({ ...current, weaponSkin: skin.id })); onCosmeticLoadoutChange({ ...cosmeticLoadout, weaponSkin: skin.id }) }}><WeaponIcon weaponId={previewWeapon} skinId={skin.id} /><span>{skin.label}{cosmeticLoadout.weaponSkin === skin.id ? ' · Equipped' : ''}</span></button>
+        })}</div><button type="button" className="button-quiet owned-finish-shop" onClick={onOpenWorkshop}>Browse weapon finishes</button></fieldset>
+      </div>}
       <div className="actions customize-back">
-        <button className="button-primary" onClick={() => onSave({ appearances, presets, cosmeticLoadout })}>Save changes</button>
+        <button className="button-primary" onClick={() => onSave({ appearances, presets, cosmeticLoadout, arsenal })}>Save changes</button>
         <button className="button-quiet" onClick={onBack}>Discard</button>
       </div>
     </section>
@@ -1506,10 +1527,11 @@ export function App() {
           selectedSlot={customizeSlot}
           onSelectSlot={setCustomizeSlot}
           cosmeticLoadout={entitlementAwareLoadout(preferences.cosmeticLoadout, progression?.entitlements ?? [])}
+          arsenal={preferences.arsenal.presetId === 'chaos' ? cloneArsenalRules(ARSENAL_PRESETS.standard) : preferences.arsenal}
           entitlements={progression?.entitlements ?? []}
-          onSave={({ appearances, presets, cosmeticLoadout }) => {
-            setPreferences((current) => ({ ...current, playerAppearances: appearances, outfitPresets: presets, cosmeticLoadout }))
-            setConfig((current) => ({ ...current, playerAppearances: current.playerAppearances.map((appearance, index) => appearances[index] ?? appearance) }))
+          onSave={({ appearances, presets, cosmeticLoadout, arsenal }) => {
+            setPreferences((current) => ({ ...current, playerAppearances: appearances, outfitPresets: presets, cosmeticLoadout, arsenal }))
+            setConfig((current) => ({ ...current, arsenal, playerAppearances: current.playerAppearances.map((appearance, index) => appearances[index] ?? appearance) }))
             setScreen(customizeReturnScreen)
           }}
           onOpenWorkshop={() => { setWorkshopReturnScreen('customize'); setScreen('workshop') }}

@@ -53,6 +53,10 @@ export const PLAYER_PATTERNS = immutableCatalog([
   { id: 'split', label: 'Split', recipe: Object.freeze({ kind: 'split', compactReadable: true }) },
   { id: 'zigzag', label: 'Zigzag', recipe: Object.freeze({ kind: 'zigzag', compactReadable: true }) },
   { id: 'speckled', label: 'Speckled', recipe: Object.freeze({ kind: 'speckled', compactReadable: true }) },
+  { id: 'chevron', label: 'Chevron', recipe: Object.freeze({ kind: 'chevron', compactReadable: true }) },
+  { id: 'rings', label: 'Rings', recipe: Object.freeze({ kind: 'rings', compactReadable: true }) },
+  { id: 'cracked', label: 'Cracked', recipe: Object.freeze({ kind: 'cracked', compactReadable: true }) },
+  { id: 'confetti', label: 'Confetti', recipe: Object.freeze({ kind: 'confetti', compactReadable: true }) },
 ] as const)
 
 export const PLAYER_FACES = immutableCatalog([
@@ -64,6 +68,10 @@ export const PLAYER_FACES = immutableCatalog([
   { id: 'mischief', label: 'Mischief', recipe: Object.freeze({ expression: 'mischief' }) },
   { id: 'stoic', label: 'Stoic', recipe: Object.freeze({ expression: 'stoic' }) },
   { id: 'cheery', label: 'Cheery', recipe: Object.freeze({ expression: 'cheery' }) },
+  { id: 'wink', label: 'Wink', recipe: Object.freeze({ expression: 'wink' }) },
+  { id: 'starstruck', label: 'Starstruck', recipe: Object.freeze({ expression: 'starstruck' }) },
+  { id: 'goofy', label: 'Goofy', recipe: Object.freeze({ expression: 'goofy' }) },
+  { id: 'suspicious', label: 'Suspicious', recipe: Object.freeze({ expression: 'suspicious' }) },
 ] as const)
 
 export const PLAYER_VICTORY_STYLES = immutableCatalog([
@@ -82,6 +90,18 @@ export const PLAYER_ACCESSORIES = immutableCatalog([
   { id: 'eyepatch', label: 'Eye Patch', recipe: Object.freeze({ kind: 'eyepatch', category: 'face', occludesEyes: 1, occludesMouth: false, compactMark: 'single-ring' }) },
   { id: 'bow', label: 'Bow', recipe: Object.freeze({ kind: 'bow', category: 'rear', occludesEyes: 0, occludesMouth: false, compactMark: 'bow' }) },
   { id: 'mohawk', label: 'Mohawk', recipe: Object.freeze({ kind: 'mohawk', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'spikes' }) },
+  { id: 'beanie', label: 'Beanie', recipe: Object.freeze({ kind: 'beanie', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'dome' }) },
+  { id: 'cowboy-hat', label: 'Cowboy Hat', recipe: Object.freeze({ kind: 'cowboy-hat', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'brim' }) },
+  { id: 'wizard-hat', label: 'Wizard Hat', recipe: Object.freeze({ kind: 'wizard-hat', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'points' }) },
+  { id: 'antenna', label: 'Antenna', recipe: Object.freeze({ kind: 'antenna', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'points' }) },
+  { id: 'halo', label: 'Halo', recipe: Object.freeze({ kind: 'halo', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'ring' }) },
+  { id: 'horns', label: 'Horns', recipe: Object.freeze({ kind: 'horns', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'points' }) },
+  { id: 'monocle', label: 'Monocle', recipe: Object.freeze({ kind: 'monocle', category: 'face', occludesEyes: 1, occludesMouth: false, compactMark: 'single-ring' }) },
+  { id: 'heart-glasses', label: 'Heart Glasses', recipe: Object.freeze({ kind: 'heart-glasses', category: 'face', occludesEyes: 0, occludesMouth: false, compactMark: 'double-ring' }) },
+  { id: 'mustache', label: 'Mustache', recipe: Object.freeze({ kind: 'mustache', category: 'front', occludesEyes: 0, occludesMouth: false, compactMark: 'bow' }) },
+  { id: 'scarf', label: 'Scarf', recipe: Object.freeze({ kind: 'scarf', category: 'front', occludesEyes: 0, occludesMouth: false, compactMark: 'band' }) },
+  { id: 'flower', label: 'Flower', recipe: Object.freeze({ kind: 'flower', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'ring' }) },
+  { id: 'cat-ears', label: 'Cat Ears', recipe: Object.freeze({ kind: 'cat-ears', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'points' }) },
 ] as const)
 
 export const PLAYER_PREVIEW_BACKGROUNDS = Object.freeze([

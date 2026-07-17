@@ -561,6 +561,9 @@ textarea:focus-visible {
 .customize-panel {
   max-width: 1120px;
 }
+.customize-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)); justify-content: center; gap: 8px; margin: 24px 0 8px; }
+.customize-tabs button { min-height: 48px; border: 3px solid var(--line); border-radius: 14px; background: #fff9e9; color: var(--ink); box-shadow: 0 4px 0 var(--line); font-weight: 900; }
+.customize-tabs button.selected { background: var(--sun); transform: translateY(2px); box-shadow: 0 2px 0 var(--line); }
 .customize-layout {
   display: grid;
   grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
@@ -684,6 +687,16 @@ textarea:focus-visible {
   display: grid;
   gap: 16px;
 }
+.loadout-customizer { display: grid; gap: 18px; margin-top: 26px; }
+.loadout-preview-card { display: grid; grid-template-columns: minmax(180px, 280px) 1fr; align-items: center; gap: 24px; padding: 18px 24px; border: 3px solid var(--line); border-radius: 24px; background: #dff1e8; box-shadow: 0 6px 0 #82aa99; }
+.loadout-preview-card .player-avatar { width: 100%; max-height: 250px; }
+.loadout-preview-card h3 { margin: 4px 0 8px; font-size: clamp(1.5rem, 3vw, 2.4rem); }
+.loadout-preview-card p:last-child { color: #52675d; font-weight: 700; }
+.loadout-weapon-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 9px; }
+.loadout-weapon-grid button { display: grid; min-height: 118px; place-items: center; gap: 5px; padding: 8px; border: 2px solid var(--line); border-radius: 13px; background: #fff9e9; color: var(--ink); box-shadow: 0 3px 0 #bba57d; font-weight: 900; }
+.loadout-weapon-grid button.selected { background: var(--sun); box-shadow: 0 2px 0 var(--line); transform: translateY(1px); }
+.loadout-weapon-grid button:disabled { cursor: not-allowed; opacity: .45; }
+.loadout-weapon-grid .weapon-icon { width: 110px; max-width: 100%; height: 68px; }
 .appearance-group {
   min-width: 0;
   margin: 0;
@@ -730,6 +743,10 @@ textarea:focus-visible {
   border: 2px solid var(--line);
   border-radius: 50%;
 }
+.victory-style-note { margin: 0 0 10px; color: #66584a; font-size: .78rem; font-weight: 700; }
+.victory-style-group .appearance-options { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.victory-style-group .appearance-options button { min-height: 150px; }
+.victory-style-group .player-avatar { width: 110px; max-width: 100%; }
 .owned-finish-group { padding: 10px 12px; }
 .owned-finish-options { grid-template-columns: repeat(auto-fit, minmax(100px, 140px)); justify-content: start; }
 .owned-finish-options button { min-height: 88px; }
@@ -2277,6 +2294,9 @@ footer {
   .appearance-options {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+  .loadout-preview-card { grid-template-columns: 1fr; text-align: center; }
+  .loadout-preview-card .player-avatar { max-height: 210px; }
+  .loadout-weapon-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .team-preview-grid { grid-template-columns: 1fr; }
   .lobby-heading {
     display: block;
