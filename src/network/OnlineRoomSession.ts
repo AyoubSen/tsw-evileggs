@@ -202,8 +202,8 @@ export class OnlineRoomSession {
   static async create(
     playerName: string,
     config: LocalMatchConfig,
-    signal?: AbortSignal,
-    gameTicketProvider?: GameTicketProvider,
+    signal: AbortSignal | undefined,
+    gameTicketProvider: GameTicketProvider,
   ): Promise<OnlineRoomSession> {
     try {
       if (config.mode !== '1v1' && config.mode !== '2v2' && config.mode !== '3v3')
@@ -221,7 +221,7 @@ export class OnlineRoomSession {
         arsenal: config.arsenal,
         compatibility: CURRENT_COMPATIBILITY,
         playerAppearance: { ...config.playerAppearances[0] },
-        ...(gameTicketProvider ? { gameTicket: await gameTicketProvider() } : {}),
+        gameTicket: await gameTicketProvider(),
       }
       const room = await client.create(PRIVATE_MATCH_ROOM, options)
       if (signal?.aborted) {

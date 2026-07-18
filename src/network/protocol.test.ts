@@ -171,6 +171,7 @@ describe('online protocol validation', () => {
           compatibility: CURRENT_COMPATIBILITY,
           playerAppearance: DEFAULT_PLAYER_APPEARANCES[0],
           arsenal: cloneArsenalRules(DEFAULT_ARSENAL_RULES),
+          gameTicket: 'A'.repeat(43),
         }).success,
       ).toBe(true)
     }
@@ -196,6 +197,7 @@ describe('online protocol validation', () => {
       compatibility: CURRENT_COMPATIBILITY,
       playerAppearance: DEFAULT_PLAYER_APPEARANCES[0],
       arsenal: cloneArsenalRules(DEFAULT_ARSENAL_RULES),
+      gameTicket: 'A'.repeat(43),
     }
     expect(createRoomOptionsSchema.safeParse(options).success).toBe(true)
     expect(

@@ -32,6 +32,7 @@ import { gameTicketStore } from '../account/gameTickets'
 import { MatchBalanceTracker } from './MatchBalanceTracker'
 import { activeProgressionRepository, type ProgressionParticipant } from '../account/progressionRepository'
 import { cloneArsenalRules, DEFAULT_ARSENAL_RULES, type ArsenalRules } from '../../src/match/arsenal'
+import { activeRoomCreators } from '../activeRoomCreators'
 import {
   MatchResultState,
   PrivateMatchState,
@@ -45,6 +46,7 @@ const RECONNECT_GRACE_SECONDS = 30
 const MAX_RECENT_EVENTS = 256
 const MAX_COMMANDS_PER_SECOND = 24
 const MAX_MOVE_TOGGLES_PER_SECOND = 12
+const SNAPSHOT_REQUEST_COOLDOWN_MS = 1_000
 
 type RoomMetadata = {
   code: string
@@ -63,6 +65,7 @@ type ClientData = {
   commandCount: number
   movementWindowStartedAt: number
   movementCount: number
+  nextSnapshotAllowedAt: number
 }
 
 type QueuedCommand = {
@@ -100,6 +103,9 @@ export class PrivateMatchRoom extends Room<{
   private balanceTracker = new MatchBalanceTracker()
   private arsenal: ArsenalRules = cloneArsenalRules(DEFAULT_ARSENAL_RULES)
   private progressionParticipants: ProgressionParticipant[] = []
+  private creatorClerkUserId: string | null = null
+  private creatorGameTicket: string | null = null
+  private creatorAuthenticated = false
 
   messages: Messages<this> = {
     [NETWORK_MESSAGE_TYPE]: (client: Client, payload: unknown) =>
@@ -120,35 +126,54 @@ export class PrivateMatchRoom extends Room<{
     if (incompatibility)
       throw new ServerError(ErrorCode.APPLICATION_ERROR, `Incompatible game version: ${incompatibility}`)
 
-    const capacity = PLAYER_COUNT_BY_MODE[parsed.data.mode]
-    this.maxClients = capacity
-    const entry = roomCodeRegistry.register(this.roomId, capacity, parsed.data.mode)
-    this.roomCode = entry.code
-    this.state.roomCode = entry.code
-    this.state.mode = parsed.data.mode
-    this.state.capacity = capacity
-    this.state.mapId = parsed.data.mapId
-    this.state.projectileBoundaryMode = parsed.data.projectileBoundaryMode
-    this.state.turnDurationSeconds = parsed.data.turnDurationSeconds
-    this.arsenal = cloneArsenalRules(parsed.data.arsenal)
-    this.state.protocolVersion = CURRENT_COMPATIBILITY.protocol
-    this.state.mapRegistryVersion = CURRENT_COMPATIBILITY.maps
-    this.state.weaponRegistryVersion = CURRENT_COMPATIBILITY.weapons
-    this.state.appearanceRegistryVersion = CURRENT_COMPATIBILITY.appearances
-    this.metadata = {
-      code: entry.code,
-      phase: 'waiting',
-      connectedPlayers: 0,
-      occupiedPlayers: 0,
-      capacity,
-      mode: parsed.data.mode,
+    if (!parsed.data.gameTicket)
+      throw new ServerError(ErrorCode.AUTH_FAILED, 'Sign in to create a private room.')
+    const creatorClerkUserId = gameTicketStore.consume(parsed.data.gameTicket)
+    if (!creatorClerkUserId)
+      throw new ServerError(ErrorCode.AUTH_FAILED, 'The supplied game identity ticket is invalid or expired.')
+    if (!activeRoomCreators.claim(creatorClerkUserId, this.roomId))
+      throw new ServerError(ErrorCode.APPLICATION_ERROR, 'This account already has an active private room.')
+    this.creatorClerkUserId = creatorClerkUserId
+    this.creatorGameTicket = parsed.data.gameTicket
+
+    try {
+      const capacity = PLAYER_COUNT_BY_MODE[parsed.data.mode]
+      this.maxClients = capacity
+      const entry = roomCodeRegistry.register(this.roomId, capacity, parsed.data.mode)
+      this.roomCode = entry.code
+      this.state.roomCode = entry.code
+      this.state.mode = parsed.data.mode
+      this.state.capacity = capacity
+      this.state.mapId = parsed.data.mapId
+      this.state.projectileBoundaryMode = parsed.data.projectileBoundaryMode
+      this.state.turnDurationSeconds = parsed.data.turnDurationSeconds
+      this.arsenal = cloneArsenalRules(parsed.data.arsenal)
+      this.state.protocolVersion = CURRENT_COMPATIBILITY.protocol
+      this.state.mapRegistryVersion = CURRENT_COMPATIBILITY.maps
+      this.state.weaponRegistryVersion = CURRENT_COMPATIBILITY.weapons
+      this.state.appearanceRegistryVersion = CURRENT_COMPATIBILITY.appearances
+      this.metadata = {
+        code: entry.code,
+        phase: 'waiting',
+        connectedPlayers: 0,
+        occupiedPlayers: 0,
+        capacity,
+        mode: parsed.data.mode,
+      }
+      await this.setMatchmaking({ private: true, metadata: this.metadata, maxClients: capacity })
+      const progression = activeProgressionRepository()
+      if (!progression) throw new Error('Room creation tracking is unavailable.')
+      await progression.recordRoomCreated(creatorClerkUserId)
+      this.setSimulationInterval((deltaMs) => this.updateRoom(deltaMs), 1000 / 60)
+      roomLog('room-created', { roomId: this.roomId, roomCode: this.roomCode, creatorClerkUserId })
+    } catch (error) {
+      roomCodeRegistry.remove(this.roomCode)
+      activeRoomCreators.release(this.roomId)
+      throw error
     }
-    await this.setMatchmaking({ private: true, metadata: this.metadata, maxClients: capacity })
-    this.setSimulationInterval((deltaMs) => this.updateRoom(deltaMs), 1000 / 60)
-    roomLog('room-created', { roomId: this.roomId, roomCode: this.roomCode })
   }
 
-  onAuth(_client: Client, options: unknown): { clerkUserId?: string } {
+  onAuth(_client: Client, options: unknown): { clerkUserId?: string; createdRoom?: boolean } {
     const parsed = createRoomOptionsSchema.safeParse(options)
     const joinParsed = joinRoomOptionsSchema.safeParse(options)
     const data = parsed.success ? parsed.data : joinParsed.success ? joinParsed.data : null
@@ -160,6 +185,14 @@ export class PrivateMatchRoom extends Room<{
       throw new ServerError(ErrorCode.APPLICATION_ERROR, 'This match has already started.')
     if (this.state.players.size >= this.state.capacity)
       throw new ServerError(ErrorCode.APPLICATION_ERROR, 'This private room is already full.')
+    if (
+      !this.creatorAuthenticated &&
+      data.gameTicket === this.creatorGameTicket &&
+      this.creatorClerkUserId
+    ) {
+      this.creatorAuthenticated = true
+      return { clerkUserId: this.creatorClerkUserId, createdRoom: true }
+    }
     if (!data.gameTicket) return {}
     const clerkUserId = gameTicketStore.consume(data.gameTicket)
     if (!clerkUserId)
@@ -217,6 +250,7 @@ export class PrivateMatchRoom extends Room<{
       commandCount: 0,
       movementWindowStartedAt: this.clock.currentTime,
       movementCount: 0,
+      nextSnapshotAllowedAt: this.clock.currentTime,
     } satisfies ClientData
     this.updateListing()
     roomLog('player-joined', {
@@ -304,6 +338,7 @@ export class PrivateMatchRoom extends Room<{
   onDispose(): void {
     this.state.phase = 'disposed'
     roomCodeRegistry.remove(this.roomCode)
+    activeRoomCreators.release(this.roomId)
     roomLog('room-disposed', { roomId: this.roomId, roomCode: this.roomCode })
   }
 
@@ -341,7 +376,7 @@ export class PrivateMatchRoom extends Room<{
     const message = parsed.data as ClientRoomMessage
     if (message.type === 'set-ready') this.setReady(player, message.ready)
     else if (message.type === 'command') this.queueCommand(client, player, message)
-    else if (message.type === 'request-snapshot') this.sendSnapshot(client)
+    else if (message.type === 'request-snapshot') this.sendRequestedSnapshot(client)
     else if (message.type === 'rematch-vote') this.setRematchVote(player, message.wantsRematch)
     else this.sendTo(client, { type: 'latency-pong', nonce: message.nonce })
   }
@@ -573,6 +608,13 @@ export class PrivateMatchRoom extends Room<{
       tick: snapshot.state.tick,
       generation: this.state.matchGeneration,
     })
+  }
+
+  private sendRequestedSnapshot(client: Client): void {
+    const data = client.userData as ClientData
+    if (this.clock.currentTime < data.nextSnapshotAllowedAt) return
+    data.nextSnapshotAllowedAt = this.clock.currentTime + SNAPSHOT_REQUEST_COOLDOWN_MS
+    this.sendSnapshot(client)
   }
 
   private finishNormally(): void {

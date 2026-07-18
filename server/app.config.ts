@@ -73,7 +73,10 @@ export const server = defineServer({
       app.get('/diagnostics/rooms', (_request, response) =>
         response.json({ roomCount: roomCodeRegistry.size, rooms: roomCodeRegistry.diagnostics() }),
       )
-    if (process.env.ENABLE_TEST_ROUTES === 'true')
+    if (
+      process.env.NODE_ENV === 'test' &&
+      process.env.ENABLE_TEST_ROUTES === 'true'
+    )
       app.post('/__test/private-rooms/:code/result', (request, response) => {
         const entry = roomCodeRegistry.resolve(request.params.code)
         const room = entry ? matchMaker.getLocalRoomById(entry.roomId) : undefined
@@ -85,7 +88,9 @@ export const server = defineServer({
         response.json({ ok: true })
       })
   },
-  greet: process.env.DEVELOPMENT_LOGGING !== 'false',
+  greet:
+    process.env.NODE_ENV !== 'production' &&
+    process.env.DEVELOPMENT_LOGGING !== 'false',
 })
 
 export type GameServer = typeof server

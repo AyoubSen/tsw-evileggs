@@ -7,6 +7,7 @@ export type ProgressionSummary = {
   levelExperience: number
   nextLevelExperience: number
   currencyBalance: number
+  roomsCreated: number
   matchesPlayed: number
   wins: number
   losses: number

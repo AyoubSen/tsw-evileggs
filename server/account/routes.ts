@@ -38,11 +38,10 @@ export function installAccountRoutes(app: Application, environment: AccountEnvir
   const syncLimit = fixedWindowRateLimit(60, 60_000, authenticatedUserKey)
   const purchaseLimit = fixedWindowRateLimit(30, 60_000, authenticatedUserKey)
   const deletionLimit = fixedWindowRateLimit(3, 60 * 60_000, authenticatedUserKey)
-  const webhookLimit = fixedWindowRateLimit(300, 60_000, (request) => request.ip ?? 'unknown')
 
   if (environment.webhookSigningSecret) {
     const signingSecret = environment.webhookSigningSecret
-    app.post('/api/clerk/webhooks', webhookLimit, express.raw({ type: 'application/json', limit: '256kb' }), async (request, response) => {
+    app.post('/api/clerk/webhooks', express.raw({ type: 'application/json', limit: '256kb' }), async (request, response) => {
       try {
         if (!Buffer.isBuffer(request.body)) throw new Error('Raw webhook body required')
         const headers = new Headers()

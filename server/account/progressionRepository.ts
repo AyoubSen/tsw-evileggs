@@ -25,6 +25,7 @@ export function rewardForMatch(input: { winnerTeamId: TeamId | null; teamId: Tea
 }
 
 export interface ProgressionRepository {
+  recordRoomCreated(clerkUserId: string): Promise<void>
   recordCompletedMatch(match: CompletedOnlineMatch): Promise<boolean>
   getOverview(clerkUserId: string, recentLimit?: number): Promise<ProgressionOverview>
   purchaseCosmetic(clerkUserId: string, cosmeticId: string): Promise<'purchased' | 'owned' | 'insufficient-funds' | 'not-found'>
@@ -32,6 +33,19 @@ export interface ProgressionRepository {
 
 export class DrizzleProgressionRepository implements ProgressionRepository {
   constructor(private readonly db: AccountDatabase) {}
+
+  async recordRoomCreated(clerkUserId: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.insert(profiles).values({ clerkUserId, preferences: sanitizeAccountPreferences(undefined) }).onConflictDoNothing()
+      const [profile] = await tx.select({ id: profiles.id }).from(profiles).where(eq(profiles.clerkUserId, clerkUserId)).limit(1)
+      if (!profile) throw new Error('Profile not found.')
+      await tx.insert(progressionProfiles).values({ profileId: profile.id }).onConflictDoNothing()
+      await tx.update(progressionProfiles).set({
+        roomsCreated: sql`${progressionProfiles.roomsCreated} + 1`,
+        updatedAt: new Date(),
+      }).where(eq(progressionProfiles.profileId, profile.id))
+    })
+  }
 
   async recordCompletedMatch(match: CompletedOnlineMatch): Promise<boolean> {
     return this.db.transaction(async (tx) => {
@@ -98,7 +112,7 @@ export class DrizzleProgressionRepository implements ProgressionRepository {
     const goalClaims = await this.db.select({ id: currencyLedger.referenceId }).from(currencyLedger).where(and(eq(currencyLedger.profileId, profile.id), eq(currencyLedger.reason, 'goal-reward')))
     const experience = summary?.experience ?? 0
     return {
-      summary: { ...progressionLevel(experience), experience, currencyBalance: summary?.currencyBalance ?? 0, matchesPlayed: summary?.matchesPlayed ?? 0, wins: summary?.wins ?? 0, losses: summary?.losses ?? 0, draws: summary?.draws ?? 0 },
+      summary: { ...progressionLevel(experience), experience, currencyBalance: summary?.currencyBalance ?? 0, roomsCreated: summary?.roomsCreated ?? 0, matchesPlayed: summary?.matchesPlayed ?? 0, wins: summary?.wins ?? 0, losses: summary?.losses ?? 0, draws: summary?.draws ?? 0 },
       recentMatches: history.map(({ participant, match }) => ({ id: match.id, completedAt: match.completedAt.toISOString(), mode: match.mode as MatchMode, mapId: match.mapId as MapId, outcome: participant.outcome as MatchOutcome, reason: match.reason as 'normal' | 'forfeit', turnsTaken: match.turnsTaken, durationSeconds: match.durationSeconds, experienceEarned: participant.experienceEarned, currencyEarned: participant.currencyEarned })),
       entitlements: entitlements.map(({ id }) => id),
       goals: PROGRESSION_GOALS.map((goal) => ({ ...goal, progress: Math.min(goal.target, summary?.[goal.metric] ?? 0), completed: goalClaims.some(({ id }) => id === goal.id) })),

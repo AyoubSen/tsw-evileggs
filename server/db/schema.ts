@@ -32,6 +32,7 @@ export const progressionProfiles = pgTable('progression_profiles', {
   profileId: uuid('profile_id').primaryKey().references(() => profiles.id, { onDelete: 'cascade' }),
   experience: integer('experience').notNull().default(0),
   currencyBalance: integer('currency_balance').notNull().default(0),
+  roomsCreated: integer('rooms_created').notNull().default(0),
   matchesPlayed: integer('matches_played').notNull().default(0),
   wins: integer('wins').notNull().default(0),
   losses: integer('losses').notNull().default(0),

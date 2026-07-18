@@ -1274,6 +1274,11 @@ export function App() {
   }
   const createOnlineRoom = async () => {
     if (userOperationBusyRef.current) return
+    if (!auth.signedIn || !gameTicketProvider) {
+      setOnlineError('Sign in to create a private room.')
+      auth.openSignIn()
+      return
+    }
     userOperationBusyRef.current = true
     const operation = beginOnlineOperation()
     setOnlineBusy(true)
@@ -1559,12 +1564,16 @@ export function App() {
         <section className="panel online-panel">
           <p className="eyebrow">PRIVATE 1V1, 2V2, AND 3V3 ROOMS</p>
           <h2>Meet across the table</h2>
-          <p>Create a six-character invite or join a friend. No account or public matchmaking.</p>
+          <p>Create a six-character invite with an account, or join a friend as a guest.</p>
           <div className="online-choice-grid">
             <button
               className="online-choice create-choice"
               onClick={() => {
                 setOnlineError(null)
+                if (!auth.signedIn) {
+                  auth.openSignIn()
+                  return
+                }
                 setConfig(
                   validateMatchConfig({
                     mode: preferences.lastMode,
@@ -1711,7 +1720,7 @@ export function App() {
           <div className="actions setup-actions">
             <button
               className="button-primary button-play"
-              disabled={onlineBusy}
+              disabled={onlineBusy || !auth.signedIn}
               onClick={createOnlineRoom}
             >
               {onlineBusy ? 'Connecting...' : 'Create Room'} <span>›</span>

@@ -127,7 +127,7 @@ export type CreateRoomOptions = {
   arsenal: ArsenalRules
   compatibility: CompatibilityVersions
   playerAppearance: PlayerAppearance
-  gameTicket?: string
+  gameTicket: string
 }
 
 export type JoinRoomOptions = {
@@ -203,7 +203,7 @@ export const createRoomOptionsSchema = z
     arsenal: arsenalSchema,
     compatibility: compatibilitySchema,
     playerAppearance: playerAppearanceSchema,
-    gameTicket: gameTicketSchema.optional(),
+    gameTicket: gameTicketSchema,
   })
   .strict()
   .refine((value) => getMap(value.mapId).mode === value.mode, {

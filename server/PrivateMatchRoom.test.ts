@@ -12,8 +12,10 @@ import { PrivateMatchRoom } from './rooms/PrivateMatchRoom'
 import { DEFAULT_PLAYER_APPEARANCES } from '../src/players/appearanceRegistry'
 import { roomCodeRegistry } from './roomCodeRegistry'
 import { cloneArsenalRules, DEFAULT_ARSENAL_RULES } from '../src/match/arsenal'
+import { gameTicketStore } from './account/gameTickets'
+import { configureProgressionRepository, type ProgressionRepository } from './account/progressionRepository'
 
-const createOptions = {
+const createOptions = () => ({
   playerName: 'Host',
   mode: '1v1' as const,
   mapId: 'rolling-hills' as const,
@@ -22,7 +24,8 @@ const createOptions = {
   compatibility: CURRENT_COMPATIBILITY,
   playerAppearance: DEFAULT_PLAYER_APPEARANCES[0],
   arsenal: cloneArsenalRules(DEFAULT_ARSENAL_RULES),
-}
+  gameTicket: gameTicketStore.issue('test-host'),
+})
 const joinOptions = {
   playerName: 'Guest',
   playerAppearance: DEFAULT_PLAYER_APPEARANCES[1],
@@ -54,6 +57,9 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
   let testServer: ColyseusTestServer
 
   beforeAll(async () => {
+    configureProgressionRepository({
+      recordRoomCreated: async () => undefined,
+    } as unknown as ProgressionRepository)
     testServer = await boot(server, 2767)
   })
 
@@ -64,11 +70,13 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
 
   afterAll(async () => {
     await testServer.shutdown()
+    configureProgressionRepository(null)
   })
 
   const connectPair = async () => {
-    const room = await testServer.createRoom<PrivateMatchRoom>('private_match', createOptions)
-    const host = await testServer.connectTo(room, createOptions)
+    const options = createOptions()
+    const room = await testServer.createRoom<PrivateMatchRoom>('private_match', options)
+    const host = await testServer.connectTo(room, options)
     const guest = await testServer.connectTo(room, joinOptions)
     host.onMessage(NETWORK_MESSAGE_TYPE, () => undefined)
     guest.onMessage(NETWORK_MESSAGE_TYPE, () => undefined)
@@ -138,7 +146,7 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
     const matchmaking = await fetch(`${HTTP_ENDPOINT}/matchmake/create/private_match`, {
       method: 'POST',
       headers: { Origin: DEPLOYED_WEB_ORIGIN, 'Content-Type': 'application/json' },
-      body: JSON.stringify(createOptions),
+      body: JSON.stringify(createOptions()),
     })
     expect(matchmaking.ok).toBe(true)
     expect(matchmaking.headers.get('access-control-allow-origin')).toBe(DEPLOYED_WEB_ORIGIN)
@@ -146,7 +154,7 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
   })
 
   it('applies the shared CORS policy to room-code resolution', async () => {
-    const room = await testServer.createRoom<PrivateMatchRoom>('private_match', createOptions)
+    const room = await testServer.createRoom<PrivateMatchRoom>('private_match', createOptions())
     const response = await fetch(`${HTTP_ENDPOINT}/api/private-rooms/${room.state.roomCode}`, {
       headers: { Origin: DEPLOYED_WEB_ORIGIN },
     })
@@ -167,9 +175,9 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
 
   it('validates room configuration and removes disposed room codes', async () => {
     await expect(
-      testServer.createRoom('private_match', { ...createOptions, mapId: 'unknown-map' }),
+      testServer.createRoom('private_match', { ...createOptions(), mapId: 'unknown-map' }),
     ).rejects.toThrow(/configuration|payload/i)
-    const room = await testServer.createRoom<PrivateMatchRoom>('private_match', createOptions)
+    const room = await testServer.createRoom<PrivateMatchRoom>('private_match', createOptions())
     const code = room.state.roomCode
     expect(roomCodeRegistry.resolve(code)?.roomId).toBe(room.roomId)
     await room.disconnect()
