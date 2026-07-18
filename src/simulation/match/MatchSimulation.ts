@@ -824,7 +824,70 @@ export class MatchSimulation {
         this.terrain.isSolid(impact.position.x, impact.position.y)
       )
         this.boreDrill({ ...projectile, velocity }, impact.position, weapon)
-      else this.explode(impact.position, weapon, projectile.actionId, projectile.ownerId)
+      else if (weapon.mechanic === 'terrain-build') {
+        const target =
+          impact.kind === 'player'
+            ? this.state.players.find((player) => player.id === impact.playerId)?.position
+            : undefined
+        const center = target ?? impact.position
+        this.explode(center, weapon, projectile.actionId, projectile.ownerId)
+        this.createTerrainRing(
+          center,
+          weapon.terrainInnerRadius ?? 0,
+          weapon.terrainOuterRadius ?? 0,
+          projectile.actionId,
+        )
+      } else if (weapon.mechanic === 'wind') {
+        this.pushProjectilesWithWind(
+          impact.position,
+          weapon.blastRadius,
+          weapon.projectilePushForce ?? 0,
+          projectile.id,
+          nextProjectiles,
+        )
+        this.explode(impact.position, weapon, projectile.actionId, projectile.ownerId)
+      } else if (weapon.mechanic === 'gravity') {
+        this.pullPlayersToward(
+          impact.position,
+          weapon.blastRadius,
+          weapon.playerPullForce ?? 0,
+        )
+        this.pushProjectilesWithWind(
+          impact.position,
+          weapon.blastRadius,
+          weapon.projectilePushForce ?? 0,
+          projectile.id,
+          nextProjectiles,
+        )
+        this.explode(impact.position, weapon, projectile.actionId, projectile.ownerId)
+      } else if (
+        weapon.mechanic === 'ricochet' &&
+        impact.kind === 'terrain' &&
+        (projectile.ricochetBounces ?? 0) < (weapon.maxRicochetBounces ?? 0)
+      ) {
+        const normalVelocity = velocity.x * impact.normal.x + velocity.y * impact.normal.y
+        const retention = weapon.bounceRestitution
+        nextProjectiles.push({
+          ...projectile,
+          ricochetBounces: (projectile.ricochetBounces ?? 0) + 1,
+          position: {
+            x: impact.position.x + impact.normal.x * (projectile.radius + 1),
+            y: impact.position.y + impact.normal.y * (projectile.radius + 1),
+          },
+          velocity: {
+            x: (velocity.x - 2 * normalVelocity * impact.normal.x) * retention,
+            y: (velocity.y - 2 * normalVelocity * impact.normal.y) * retention,
+          },
+        })
+        this.emit({
+          type: 'projectile-bounced',
+          projectileId: projectile.id,
+          weaponId: projectile.weaponId,
+          position: { ...impact.position },
+        })
+      } else if (weapon.mechanic === 'ricochet') {
+        this.resolveRicochetImpact(projectile, impact, weapon, velocity)
+      } else this.explode(impact.position, weapon, projectile.actionId, projectile.ownerId)
     }
     this.state.projectiles = nextProjectiles
     if (
@@ -1195,6 +1258,91 @@ export class MatchSimulation {
     this.emit({ type: 'terrain-destroyed', operation })
   }
 
+  private createTerrainRing(
+    center: Vector,
+    innerRadius: number,
+    outerRadius: number,
+    actionId: string,
+  ): void {
+    if (outerRadius <= innerRadius || innerRadius < 0) return
+    const operation: TerrainOperation = {
+      sequence: this.state.nextTerrainSequence++,
+      tick: this.state.tick,
+      type: 'add-ring',
+      x: center.x,
+      y: center.y,
+      radius: outerRadius,
+      innerRadius,
+      sourceActionId: actionId,
+    }
+    this.state.terrainOperations.push(operation)
+    this.terrain.addRing(center.x, center.y, innerRadius, outerRadius)
+    this.emit({ type: 'terrain-created', operation })
+  }
+
+  private pushProjectilesWithWind(
+    center: Vector,
+    radius: number,
+    force: number,
+    sourceProjectileId: string,
+    advancedProjectiles: SimProjectile[],
+  ): void {
+    if (radius <= 0 || force === 0) return
+    const applyPush = (projectile: SimProjectile) => {
+      if (projectile.id === sourceProjectileId) return
+      const dx = projectile.position.x - center.x
+      const dy = projectile.position.y - center.y
+      const distance = Math.hypot(dx, dy)
+      if (distance <= 0 || distance >= radius) return
+      const impulse = force * (1 - distance / radius)
+      projectile.velocity.x += (dx / distance) * impulse
+      projectile.velocity.y += (dy / distance) * impulse
+    }
+    for (const projectile of this.state.projectiles) applyPush(projectile)
+    for (const projectile of advancedProjectiles) applyPush(projectile)
+  }
+
+  private pullPlayersToward(center: Vector, radius: number, force: number): void {
+    if (radius <= 0 || force <= 0) return
+    for (const player of this.state.players) {
+      if (!player.alive) continue
+      const dx = center.x - player.position.x
+      const dy = center.y - player.position.y
+      const distance = Math.hypot(dx, dy)
+      if (distance <= 0 || distance >= radius) continue
+      const impulse = force * (1 - distance / radius)
+      player.velocity.x += (dx / distance) * impulse
+      player.velocity.y += (dy / distance) * impulse
+    }
+  }
+
+  private resolveRicochetImpact(
+    projectile: SimProjectile,
+    impact: ProjectileContact,
+    weapon: WeaponDefinition,
+    velocity: Vector,
+  ): void {
+    this.emit({
+      type: 'explosion-resolved',
+      actionId: projectile.actionId,
+      weaponId: weapon.id,
+      position: { ...impact.position },
+      blastRadius: 0,
+    })
+    if (impact.kind !== 'player') return
+    const target = this.state.players.find((player) => player.id === impact.playerId && player.alive)
+    if (!target) return
+    const damage = Math.min(
+      25,
+      weapon.baseDamage +
+        (projectile.ricochetBounces ?? 0) * (weapon.ricochetDamagePerBounce ?? 0),
+    )
+    this.damagePlayer(target, damage, projectile.actionId, projectile.ownerId)
+    const speed = Math.hypot(velocity.x, velocity.y) || 1
+    target.velocity.x += (velocity.x / speed) * weapon.knockbackForce
+    target.velocity.y += (velocity.y / speed) * weapon.knockbackForce
+  }
+
   private damagePlayer(
     player: SimPlayer,
     amount: number,
@@ -1456,7 +1604,10 @@ export function reconstructTerrain(
   operations: readonly TerrainOperation[],
 ): TerrainMask {
   const terrain = createMapTerrain(getMap(mapId))
-  for (const operation of [...operations].sort((left, right) => left.sequence - right.sequence))
-    terrain.removeCircle(operation.x, operation.y, operation.radius)
+  for (const operation of [...operations].sort((left, right) => left.sequence - right.sequence)) {
+    if (operation.type === 'add-ring')
+      terrain.addRing(operation.x, operation.y, operation.innerRadius ?? 0, operation.radius)
+    else terrain.removeCircle(operation.x, operation.y, operation.radius)
+  }
   return terrain
 }

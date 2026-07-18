@@ -6,7 +6,7 @@ import type { PlayerAppearance } from '../../players/appearanceRegistry'
 
 export const SIMULATION_HZ = 60
 export const FIXED_TICK_SECONDS = 1 / SIMULATION_HZ
-export const SIMULATION_SNAPSHOT_VERSION = 13
+export const SIMULATION_SNAPSHOT_VERSION = 14
 
 export type MatchPhase = 'input' | 'projectile' | 'settling' | 'expired' | 'victory'
 
@@ -40,6 +40,7 @@ export type SimProjectile = {
   velocity: Vector
   radius: number
   fuseTicks: number
+  ricochetBounces?: number
 }
 
 export type SimBeacon = {
@@ -54,10 +55,11 @@ export type SimBeacon = {
 export type TerrainOperation = {
   sequence: number
   tick: number
-  type: 'subtract-circle'
+  type: 'subtract-circle' | 'add-ring'
   x: number
   y: number
   radius: number
+  innerRadius?: number
   sourceActionId: string
 }
 

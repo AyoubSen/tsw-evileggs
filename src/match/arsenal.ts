@@ -1,4 +1,11 @@
-import { WEAPONS, WEAPON_ORDER, type WeaponId, type WeaponInventory } from '../weapons/registry'
+import {
+  WEAPONS,
+  WEAPON_ORDER,
+  isWeaponUnlocked,
+  normalizeWeaponUnlockLevel,
+  type WeaponId,
+  type WeaponInventory,
+} from '../weapons/registry'
 
 export type ArsenalPresetId = 'standard' | 'classic' | 'chaos' | 'custom'
 export type ArsenalRules = { presetId: ArsenalPresetId; ammunition: WeaponInventory }
@@ -59,7 +66,7 @@ export function detectArsenalPreset(ammunition: WeaponInventory): ArsenalPresetI
   return 'custom'
 }
 
-export function sanitizeArsenalRules(value: unknown): ArsenalRules {
+export function sanitizeArsenalRules(value: unknown, level?: number): ArsenalRules {
   if (!value || typeof value !== 'object') return cloneArsenalRules(DEFAULT_ARSENAL_RULES)
   const candidate = value as { ammunition?: Partial<Record<WeaponId, unknown>> }
   const ammunition = Object.fromEntries(
@@ -74,13 +81,17 @@ export function sanitizeArsenalRules(value: unknown): ArsenalRules {
     }),
   ) as WeaponInventory
   const isChaos = WEAPON_ORDER.every((id) => ARSENAL_PRESETS.chaos.ammunition[id] === ammunition[id])
+  if (level !== undefined) {
+    const effectiveLevel = normalizeWeaponUnlockLevel(level)
+    for (const id of WEAPON_ORDER)
+      if (!isWeaponUnlocked(id, effectiveLevel)) ammunition[id] = 0
+  }
   if (!isChaos) {
     const enabled = WEAPON_ORDER.filter((id) => ammunition[id] === 'unlimited' || ammunition[id] > 0)
     for (const id of enabled.slice(MAX_LOADOUT_WEAPONS)) ammunition[id] = 0
   }
-  if (!WEAPON_ORDER.some((id) => ammunition[id] === 'unlimited'))
-    ammunition['basic-rocket'] = 'unlimited'
-  return { presetId: detectArsenalPreset(ammunition), ammunition }
+  ammunition['basic-rocket'] = 'unlimited'
+  return { presetId: isChaos ? 'chaos' : detectArsenalPreset(ammunition), ammunition }
 }
 
 export function arsenalSummary(rules: ArsenalRules): string {

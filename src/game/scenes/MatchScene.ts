@@ -54,6 +54,7 @@ import {
   resolveWeaponPalette,
   type ActivationEffectKind,
   type ImpactStyle,
+  type ShapeRecipe,
 } from '../weaponVisualRecipes'
 import { drawShapeRecipe } from '../weaponRenderer'
 import { upcomingTurnIndices } from '../../simulation/turns/teamTurnOrder'
@@ -73,7 +74,7 @@ import {
   type PlayerVisualPrimitive,
   type PlayerVisualRole,
 } from '../../players/playerVisualRecipes'
-import { DEFAULT_COSMETIC_LOADOUT, applyHeldObjectSkin, applyWeaponSkin } from '../../cosmetics/cosmeticLoadout'
+import { DEFAULT_COSMETIC_LOADOUT, applyHeldObjectSkin, applyWeaponSkin, weaponSkinFor } from '../../cosmetics/cosmeticLoadout'
 
 type BurstEffect = {
   kind: 'explosion' | 'teleport'
@@ -84,6 +85,31 @@ type BurstEffect = {
   age: number
   lifetime: number
   seed: number
+}
+
+function shapeRecipeBounds(recipe: ShapeRecipe) {
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  const include = (x: number, y: number) => {
+    minX = Math.min(minX, x)
+    minY = Math.min(minY, y)
+    maxX = Math.max(maxX, x)
+    maxY = Math.max(maxY, y)
+  }
+  for (const primitive of recipe.primitives) {
+    if (primitive.kind === 'polygon') primitive.points.forEach(({ x, y }) => include(x, y))
+    else if (primitive.kind === 'line') { include(primitive.from.x, primitive.from.y); include(primitive.to.x, primitive.to.y) }
+    else if (primitive.kind === 'circle') {
+      include(primitive.center.x - primitive.radius, primitive.center.y - primitive.radius)
+      include(primitive.center.x + primitive.radius, primitive.center.y + primitive.radius)
+    } else {
+      include(primitive.center.x - primitive.radiusX, primitive.center.y - primitive.radiusY)
+      include(primitive.center.x + primitive.radiusX, primitive.center.y + primitive.radiusY)
+    }
+  }
+  return { centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2, width: maxX - minX, height: maxY - minY }
 }
 type DamageEffect = {
   playerId: string
@@ -190,6 +216,7 @@ export class MatchScene extends Phaser.Scene {
   private playerHudTexts: Phaser.GameObjects.Text[] = []
   private turnTimelineTexts: Phaser.GameObjects.Text[] = []
   private weaponHudTexts: Phaser.GameObjects.Text[] = []
+  private weaponNameHud!: Phaser.GameObjects.Text
   private bottomHud!: Phaser.GameObjects.Text
   private timerText!: Phaser.GameObjects.Text
   private windText!: Phaser.GameObjects.Text
@@ -296,7 +323,17 @@ export class MatchScene extends Phaser.Scene {
         align: 'center',
       }),
     )
-    this.bottomHud = this.add.text(0, 0, '', hudStyle)
+    this.weaponNameHud = this.add.text(0, 0, '', {
+      ...hudStyle,
+      fontSize: '10px',
+      color: '#24313a',
+      fontStyle: 'bold',
+    })
+    this.bottomHud = this.add.text(0, 0, '', {
+      ...hudStyle,
+      fontSize: '10px',
+      color: '#fff8df',
+    })
     this.timerText = this.add
       .text(VIEWPORT_WIDTH / 2, 29, '', {
         ...hudStyle,
@@ -350,6 +387,7 @@ export class MatchScene extends Phaser.Scene {
       ...this.playerHudTexts,
       ...this.turnTimelineTexts,
       ...this.weaponHudTexts,
+      this.weaponNameHud,
       this.bottomHud,
       this.timerText,
       this.windText,
@@ -460,7 +498,7 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private projectilePalette(weaponId: WeaponId) {
-    return applyWeaponSkin(resolveWeaponPalette(weaponId, this.preferences.highContrastHud), this.preferences.cosmeticLoadout.weaponSkin)
+    return applyWeaponSkin(resolveWeaponPalette(weaponId, this.preferences.highContrastHud), weaponSkinFor(this.preferences.cosmeticLoadout, weaponId))
   }
 
   public setRenderScale(nextScale: number): void {
@@ -490,6 +528,7 @@ export class MatchScene extends Phaser.Scene {
       ...this.playerHudTexts,
       ...this.turnTimelineTexts,
       ...this.weaponHudTexts,
+      this.weaponNameHud,
       this.bottomHud,
       this.timerText,
       this.windText,
@@ -2124,8 +2163,12 @@ export class MatchScene extends Phaser.Scene {
       .fillRoundedRect(rackX, rackY, rackWidth, rackHeight, rackHeight / 2)
       .lineStyle(2, 0xfff4d8, 0.28)
       .strokeRoundedRect(rackX, rackY, rackWidth, rackHeight, rackHeight / 2)
-      .fillStyle(0x24313a, 0.94)
-      .fillRoundedRect(VIEWPORT_WIDTH / 2 - 220, rackY - 25, 440, 20, 10)
+      .fillStyle(0xffd166, 0.98)
+      .fillRoundedRect(VIEWPORT_WIDTH / 2 - 220, rackY - 29, 116, 24, 8)
+      .lineStyle(2, 0x24313a, 1)
+      .strokeRoundedRect(VIEWPORT_WIDTH / 2 - 220, rackY - 29, 116, 24, 8)
+      .fillStyle(0x24313a, 0.96)
+      .fillRoundedRect(VIEWPORT_WIDTH / 2 - 100, rackY - 29, 320, 24, 8)
     const enabledWeapons = this.enabledWeaponIds()
     enabledWeapons.forEach((id, index) => {
       const ammo = this.source.activePlayer.inventory[id]
@@ -2151,9 +2194,16 @@ export class MatchScene extends Phaser.Scene {
           selected ? 1 : 0.42,
         )
         .strokeCircle(centerX, weaponCenterY, weaponRadius)
-      const iconScale = 0.72 * visual.iconScale * (weaponDiameter / 48)
-      drawShapeRecipe(this.hudGraphics, visual.icon, {
-        origin: { x: centerX, y: weaponCenterY - 1 },
+      const bounds = shapeRecipeBounds(visual.held)
+      const iconScale = Math.min(
+        (weaponDiameter * 0.72) / Math.max(1, bounds.width),
+        (weaponDiameter * 0.5) / Math.max(1, bounds.height),
+      )
+      drawShapeRecipe(this.hudGraphics, visual.held, {
+        origin: {
+          x: centerX - bounds.centerX * iconScale,
+          y: weaponCenterY - bounds.centerY * iconScale,
+        },
         scale: iconScale,
         palette,
       })
@@ -2206,10 +2256,18 @@ export class MatchScene extends Phaser.Scene {
       power: Math.round((this.dragPreview ?? this.shotAim).power),
       remoteSplitSelected: this.selectedWeapon().mechanic === 'remote-split',
     })
-    this.bottomHud
-      .setPosition(VIEWPORT_WIDTH / 2, rackY - 23)
+    this.weaponNameHud
+      .setPosition(VIEWPORT_WIDTH / 2 - 162, rackY - 23)
       .setOrigin(0.5, 0)
-      .setText(`${this.selectedWeapon().displayName} · ${hint} · click a tool or [ ] cycle`)
+      .setScale(1)
+      .setText(this.selectedWeapon().displayName.toUpperCase())
+    this.weaponNameHud.setScale(Math.min(1, 100 / Math.max(1, this.weaponNameHud.width)))
+    this.bottomHud
+      .setPosition(VIEWPORT_WIDTH / 2 + 60, rackY - 23)
+      .setOrigin(0.5, 0)
+      .setScale(1)
+      .setText(`${hint}  ·  Select: click or [ ]`)
+    this.bottomHud.setScale(Math.min(1, 304 / Math.max(1, this.bottomHud.width)))
     if (this.introDuration > 0) {
       const countdown = this.introDuration > 0.6 ? Math.ceil(this.introDuration / 0.6) : 'Begin'
       this.bannerText

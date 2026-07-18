@@ -548,14 +548,21 @@ export class OnlineMatchSource implements MatchSource {
         this.requestSnapshot()
         return
       }
-      if (event.type === 'terrain-destroyed') {
+      if (event.type === 'terrain-destroyed' || event.type === 'terrain-created') {
         const operation = event.operation
         if (operation.sequence > this.lastTerrainSequence + 1) {
           this.requestSnapshot()
           return
         }
         if (operation.sequence > this.lastTerrainSequence) {
-          this.terrain?.removeCircle(operation.x, operation.y, operation.radius)
+          if (operation.type === 'add-ring')
+            this.terrain?.addRing(
+              operation.x,
+              operation.y,
+              operation.innerRadius ?? 0,
+              operation.radius,
+            )
+          else this.terrain?.removeCircle(operation.x, operation.y, operation.radius)
           this.lastTerrainSequence = operation.sequence
           this.snapshotState?.terrainOperations.push(structuredClone(operation))
         }

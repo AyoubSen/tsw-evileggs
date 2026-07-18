@@ -10,6 +10,10 @@ export type HeldModelKind =
   | 'wide-scrap-blunderbuss'
   | 'heavy-segmented-cluster-canister'
   | 'spiral-borer-launcher'
+  | 'soil-canister-launcher'
+  | 'compressed-air-launcher'
+  | 'gravity-coil-launcher'
+  | 'ricochet-rail-rifle'
   | 'folding-pocket-knife'
   | 'signal-beacon-launcher'
   | 'twin-prong-fork-launcher'
@@ -26,6 +30,10 @@ export type ProjectileModelKind =
   | 'scrap-pellet'
   | 'segmented-cluster-canister'
   | 'spinning-drill'
+  | 'soil-canister'
+  | 'gust-capsule'
+  | 'gravity-core'
+  | 'ricochet-disc'
   | 'beacon-canister'
   | 'fork-rocket'
   | 'flying-shoe'
@@ -177,6 +185,54 @@ export const WEAPON_PRESENTATIONS: Readonly<Record<WeaponId, WeaponPresentation>
     projectileModel: 'spinning-drill',
     trail: { color: 0xf08b35, sampleCount: 8, width: 3 },
     reducedMotionSafe: { recoil: false, trail: false, pulse: false, transient: true },
+  },
+  'dirt-mounder': {
+    heldModel: 'soil-canister-launcher',
+    colors: { primary: 0x69533d, accent: 0x86a85f, flash: 0xffd77a, impact: 0x9a6b3f },
+    body: { length: 38, width: 17 },
+    grip: { x: 9, y: 7 },
+    muzzle: { x: 41, y: 0 },
+    restElevation: 12,
+    recoil: { durationMs: 180, distance: 6 },
+    projectileModel: 'soil-canister',
+    trail: { color: 0xb78a58, sampleCount: 6, width: 3 },
+    reducedMotionSafe: { recoil: false, trail: false, pulse: false, transient: true },
+  },
+  'wind-blaster': {
+    heldModel: 'compressed-air-launcher',
+    colors: { primary: 0x477b89, accent: 0xb9eef2, flash: 0xffffff, impact: 0x82dce5 },
+    body: { length: 42, width: 16 },
+    grip: { x: 9, y: 7 },
+    muzzle: { x: 46, y: 0 },
+    restElevation: 8,
+    recoil: { durationMs: 230, distance: 9 },
+    projectileModel: 'gust-capsule',
+    trail: { color: 0xc9f5f7, sampleCount: 10, width: 4 },
+    reducedMotionSafe: { recoil: false, trail: true, pulse: false, transient: true },
+  },
+  'gravity-orb': {
+    heldModel: 'gravity-coil-launcher',
+    colors: { primary: 0x403b67, accent: 0xb77cff, flash: 0xf2dcff, impact: 0x7d45cc },
+    body: { length: 40, width: 17 },
+    grip: { x: 9, y: 7 },
+    muzzle: { x: 44, y: 0 },
+    restElevation: 10,
+    recoil: { durationMs: 200, distance: 7 },
+    projectileModel: 'gravity-core',
+    trail: { color: 0xb77cff, sampleCount: 10, width: 3.5 },
+    reducedMotionSafe: { recoil: false, trail: true, pulse: false, transient: true },
+  },
+  'ricochet-rifle': {
+    heldModel: 'ricochet-rail-rifle',
+    colors: { primary: 0x4b5660, accent: 0xf2c94c, flash: 0xffffff, impact: 0xff9f43 },
+    body: { length: 52, width: 10 },
+    grip: { x: 12, y: 5 },
+    muzzle: { x: 55, y: 0 },
+    restElevation: 5,
+    recoil: { durationMs: 170, distance: 6 },
+    projectileModel: 'ricochet-disc',
+    trail: { color: 0xffe477, sampleCount: 13, width: 1.8 },
+    reducedMotionSafe: { recoil: false, trail: true, pulse: true, transient: true },
   },
   'pocket-knife': {
     heldModel: 'folding-pocket-knife',

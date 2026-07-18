@@ -36,6 +36,7 @@ export function sanitizePlayerName(value: unknown, fallback: string): string {
 
 export function validateMatchConfig(
   value: Partial<LocalMatchConfig> | undefined,
+  level?: number,
 ): LocalMatchConfig {
   const names = value?.playerNames ?? DEFAULT_PLAYER_NAMES
   const appearances = value?.playerAppearances ?? DEFAULT_PLAYER_APPEARANCES
@@ -64,6 +65,6 @@ export function validateMatchConfig(
     )
       ? (value!.projectileBoundaryMode as ProjectileBoundaryMode)
       : map.projectileBoundary.defaultMode,
-    arsenal: sanitizeArsenalRules(value?.arsenal),
+    arsenal: sanitizeArsenalRules(value?.arsenal, level),
   }
 }

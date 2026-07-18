@@ -121,6 +121,12 @@ const PATTERNS: Record<PlayerPatternId, readonly PlayerVisualPrimitive[]> = {
   'yolk-splash': [circle(64, 62, 13, 'accent'), path([M(64, 43), L(60, 33), M(48, 51), L(39, 45), M(80, 51), L(89, 44), M(47, 72), L(38, 78), M(81, 73), L(91, 80), M(64, 81), L(63, 92)], undefined, 'accent', 5)],
   'battle-scars': [path([M(43, 45), L(57, 57), M(39, 53), L(48, 61), M(72, 68), L(87, 81), M(78, 65), L(88, 73)], undefined, 'accent', 4)],
   sprinkles: [path([M(44, 43), L(49, 39), M(62, 45), L(64, 52), M(79, 40), L(84, 45), M(45, 69), L(51, 74), M(67, 78), L(73, 74), M(82, 65), L(85, 72)], undefined, 'accent', 4)],
+  plaid: [path([M(45, 35), L(45, 88), M(67, 29), L(67, 94), M(87, 39), L(87, 85), M(34, 50), L(96, 50), M(31, 72), L(98, 72)], undefined, 'accent', 3.5)],
+  moons: [path([M(53, 38), C(42, 43, 43, 58, 54, 62), C(48, 55, 49, 45, 53, 38), Z, M(82, 65), C(71, 69, 72, 83, 82, 87), C(77, 81, 77, 71, 82, 65), Z], 'accent')],
+  shards: [path([M(43, 43), L(57, 34), L(62, 58), Z, M(68, 39), L(85, 48), L(69, 62), Z, M(47, 70), L(65, 62), L(61, 88), Z, M(70, 68), L(87, 78), L(69, 87), Z], 'accent')],
+  crosshatch: [path([M(39, 43), L(82, 86), M(48, 35), L(91, 78), M(89, 42), L(46, 85), M(80, 34), L(38, 76)], undefined, 'accent', 3)],
+  bubbles: [circle(49, 45, 8, undefined, 'accent', 3), circle(76, 40, 5, undefined, 'accent', 3), circle(79, 70, 10, undefined, 'accent', 3), circle(49, 79, 5, undefined, 'accent', 3)],
+  circuit: [path([M(39, 44), L(53, 44), L(53, 57), L(75, 57), L(75, 39), M(42, 76), L(60, 76), L(60, 66), L(85, 66), L(85, 82)], undefined, 'accent', 3), circle(39, 44, 3, 'accent'), circle(75, 39, 3, 'accent'), circle(42, 76, 3, 'accent'), circle(85, 82, 3, 'accent')],
 }
 
 const EYES = (kind: PlayerFaceId): readonly PlayerVisualPrimitive[] => {
@@ -137,6 +143,11 @@ const EYES = (kind: PlayerFaceId): readonly PlayerVisualPrimitive[] => {
   if (kind === 'sad' || kind === 'pout') return [path([M(44, 58), C(48, 54, 52, 54, 56, 58)], undefined, 'ink', 2.5), path([M(72, 58), C(76, 54, 80, 54, 84, 58)], undefined, 'ink', 2.5)]
   if (kind === 'robot') return [path([M(44, 52), L(56, 52), L(56, 62), L(44, 62), Z, M(72, 52), L(84, 52), L(84, 62), L(72, 62), Z], undefined, 'ink', 2.5), circle(50, 57, 2, 'accent'), circle(78, 57, 2, 'accent')]
   if (kind === 'shocked') return [ellipse(50, 57, 4, 6, 'face', 'ink', 2.5), ellipse(78, 57, 4, 6, 'face', 'ink', 2.5)]
+  if (kind === 'squint' || kind === 'giggle') return [path([M(43, 58), L(50, 53), L(57, 58)], undefined, 'ink', 2.5), path([M(71, 58), L(78, 53), L(85, 58)], undefined, 'ink', 2.5)]
+  if (kind === 'awestruck') return [circle(50, 57, 5, 'face', 'ink', 2.5), circle(78, 57, 5, 'face', 'ink', 2.5), circle(49, 55, 1.5, 'shine'), circle(77, 55, 1.5, 'shine')]
+  if (kind === 'worried') return [path([M(43, 54), L(56, 51)], undefined, 'ink', 2.5), path([M(72, 51), L(85, 54)], undefined, 'ink', 2.5), circle(50, 58, 2.5, 'ink'), circle(78, 58, 2.5, 'ink')]
+  if (kind === 'deadpan') return [path([M(44, 57), L(56, 57), M(72, 57), L(84, 57)], undefined, 'ink', 2.5)]
+  if (kind === 'side-eye') return [ellipse(50, 57, 4, 3, 'face', 'ink', 2), ellipse(78, 57, 4, 3, 'face', 'ink', 2), circle(53, 57, 1.8, 'ink'), circle(81, 57, 1.8, 'ink')]
   return [circle(50, 57, kind === 'grin' ? 3.5 : 3, 'ink'), circle(78, 57, kind === 'grin' ? 3.5 : 3, 'ink')]
 }
 const MOUTHS: Record<PlayerFaceId, PlayerVisualPrimitive> = {
@@ -170,6 +181,12 @@ const MOUTHS: Record<PlayerFaceId, PlayerVisualPrimitive> = {
   pleading: path([M(55, 73), C(61, 78, 68, 78, 74, 73)], undefined, 'ink', 2.5),
   battlecry: path([M(53, 69), L(75, 69), L(72, 82), L(56, 82), Z], 'face', 'ink', 2.5),
   snickering: path([M(52, 71), C(59, 78, 69, 78, 76, 70), C(70, 73, 59, 74, 52, 71), Z], 'face', 'ink', 2),
+  squint: path([M(53, 71), C(59, 80, 69, 80, 75, 71)], undefined, 'ink', 2.5),
+  awestruck: circle(64, 76, 6, 'face', 'ink', 2.5),
+  worried: path([M(54, 78), C(60, 70, 68, 70, 74, 78)], undefined, 'ink', 2.5),
+  deadpan: path([M(55, 75), L(73, 75)], undefined, 'ink', 2.5),
+  giggle: path([M(52, 69), C(58, 82, 70, 82, 76, 69), Z], 'accent', 'ink', 2),
+  'side-eye': path([M(54, 73), L(74, 72)], undefined, 'ink', 2.5),
 }
 
 const STATE_FACES: Record<Exclude<PlayerExpressionState, 'normal' | 'victory'>, readonly PlayerVisualPrimitive[]> = {
@@ -183,6 +200,10 @@ const VICTORY_FACES: Record<PlayerVictoryStyleId, readonly PlayerVisualPrimitive
   excited: [path([M(43, 58), C(48, 50, 53, 50, 57, 58)], undefined, 'ink', 2.5), path([M(71, 58), C(76, 50, 81, 50, 85, 58)], undefined, 'ink', 2.5), ellipse(64, 75, 8, 10, 'face', 'ink', 2.5)],
   smug: [path([M(44, 57), L(55, 55)], undefined, 'ink', 2.5), path([M(73, 55), L(84, 57)], undefined, 'ink', 2.5), path([M(53, 73), C(62, 79, 70, 75, 76, 69)], undefined, 'ink', 2.5)],
   calm: [path([M(44, 57), C(48, 60, 52, 60, 56, 57)], undefined, 'ink', 2.5), path([M(72, 57), C(76, 60, 80, 60, 84, 57)], undefined, 'ink', 2.5), path([M(55, 72), C(61, 77, 68, 77, 74, 72)], undefined, 'ink', 2.5)],
+  champion: [path([M(43, 58), L(50, 52), L(57, 58), M(71, 58), L(78, 52), L(85, 58)], undefined, 'ink', 2.5), path([M(51, 69), C(58, 83, 71, 83, 77, 69), Z], 'accent', 'ink', 2)],
+  cackling: [path([M(43, 57), C(48, 50, 53, 50, 57, 57), M(71, 57), C(76, 50, 81, 50, 85, 57)], undefined, 'ink', 2.5), path([M(51, 68), C(56, 84, 72, 84, 77, 68), L(74, 80), L(54, 80), Z], 'face', 'ink', 2.5)],
+  relieved: [path([M(44, 57), C(48, 60, 52, 60, 56, 57), M(72, 57), C(76, 60, 80, 60, 84, 57)], undefined, 'ink', 2.5), path([M(53, 71), C(60, 80, 69, 80, 76, 71)], undefined, 'ink', 2.5)],
+  showboat: [path([M(43, 54), L(56, 57), M(72, 57), L(85, 54)], undefined, 'ink', 2.5), circle(51, 59, 2.5, 'ink'), circle(77, 59, 2.5, 'ink'), path([M(52, 71), C(60, 78, 69, 77, 77, 68)], undefined, 'ink', 3)],
 }
 
 const ACCESSORIES: Record<PlayerAccessoryId, readonly PlayerVisualPrimitive[]> = {
@@ -230,6 +251,11 @@ const ACCESSORIES: Record<PlayerAccessoryId, readonly PlayerVisualPrimitive[]> =
   feather: [path([M(58, 32), C(54, 17, 68, 4, 84, 4), C(87, 18, 75, 30, 58, 32), Z], 'accent', 'ink', 2.5), path([M(59, 31), L(80, 8)], undefined, 'ink', 2)],
   'tiny-flag': [path([M(55, 34), L(55, 5)], undefined, 'ink', 3), path([M(57, 6), L(84, 11), L(57, 20), Z], 'accent', 'ink', 2)],
   'eggshell-hat': [path([M(35, 30), L(43, 19), L(51, 28), L(61, 17), L(71, 28), L(81, 18), L(92, 31), C(76, 38, 51, 38, 35, 30), Z], 'face', 'ink', 3)],
+  laurel: [path([M(43, 32), C(38, 23, 40, 13, 48, 7), M(85, 32), C(90, 23, 88, 13, 80, 7)], undefined, 'ink', 2.5), ellipse(43, 22, 4, 7, 'accent', 'ink', 1.5), ellipse(48, 12, 4, 7, 'accent', 'ink', 1.5), ellipse(85, 22, 4, 7, 'accent', 'ink', 1.5), ellipse(80, 12, 4, 7, 'accent', 'ink', 1.5)],
+  'bucket-hat': [path([M(39, 31), C(46, 13, 82, 13, 89, 31), L(84, 38), L(44, 38), Z], 'accent', 'ink', 3), path([M(29, 37), C(48, 32, 80, 32, 99, 37), C(84, 44, 44, 44, 29, 37), Z], 'accent', 'ink', 2.5)],
+  'knight-helmet': [path([M(39, 34), C(42, 11, 86, 11, 89, 34), L(85, 43), L(43, 43), Z], 'face', 'ink', 3), path([M(64, 13), L(64, 4), M(55, 8), C(59, 3, 68, 3, 73, 8)], undefined, 'accent', 4), path([M(42, 33), L(86, 33)], undefined, 'accent', 4)],
+  'pirate-hat': [path([M(35, 34), C(44, 28, 48, 15, 47, 7), C(58, 13, 70, 13, 81, 7), C(80, 17, 85, 28, 94, 34), C(79, 40, 50, 40, 35, 34), Z], 'accent', 'ink', 3), circle(64, 25, 4, 'face', 'ink', 1.5)],
+  'construction-hat': [path([M(36, 34), C(39, 17, 50, 10, 64, 10), C(78, 10, 89, 17, 92, 34), Z], 'accent', 'ink', 3), path([M(64, 11), L(64, 32), M(30, 34), L(98, 34), L(98, 40), L(30, 40), Z], 'accent', 'ink', 2.5)],
 }
 
 function transformPrimitive(item: PlayerVisualPrimitive, x: number, y: number, scale: number): PlayerVisualPrimitive {
@@ -342,6 +368,11 @@ const COMPACT_ACCESSORY_MARKS: Record<PlayerAccessoryId, readonly PlayerVisualPr
   feather: [path([M(58, 40), C(58, 29, 69, 21, 81, 22), C(81, 32, 71, 39, 58, 40), M(60, 39), L(78, 24)], undefined, 'accent', 3)],
   'tiny-flag': [path([M(55, 41), L(55, 23), M(57, 24), L(79, 28), L(57, 34), Z], undefined, 'accent', 3)],
   'eggshell-hat': [path([M(40, 38), L(47, 31), L(54, 38), L(63, 30), L(72, 38), L(81, 31), L(88, 39)], undefined, 'accent', 4)],
+  laurel: [path([M(48, 40), C(41, 34, 42, 25, 49, 21), M(80, 40), C(87, 34, 86, 25, 79, 21)], undefined, 'accent', 4)],
+  'bucket-hat': [path([M(43, 39), C(48, 27, 80, 27, 85, 39), M(35, 40), C(50, 44, 78, 44, 93, 40)], undefined, 'accent', 4)],
+  'knight-helmet': [path([M(44, 40), C(47, 26, 81, 26, 84, 40), M(64, 27), L(64, 21), M(46, 36), L(82, 36)], undefined, 'accent', 4)],
+  'pirate-hat': [path([M(39, 39), C(49, 34, 51, 26, 50, 22), C(59, 27, 69, 27, 78, 22), C(77, 28, 81, 35, 89, 39), C(76, 43, 52, 43, 39, 39)], undefined, 'accent', 4)],
+  'construction-hat': [path([M(42, 39), C(45, 27, 54, 23, 64, 23), C(74, 23, 83, 27, 86, 39), M(64, 24), L(64, 39), M(36, 40), L(92, 40)], undefined, 'accent', 4)],
 }
 
 export function getCompactPlayerRecipe(appearance: Readonly<PlayerAppearance>): CompactPlayerRecipe {

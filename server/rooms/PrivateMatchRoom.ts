@@ -31,7 +31,7 @@ import { roomCodeRegistry } from '../roomCodeRegistry'
 import { gameTicketStore } from '../account/gameTickets'
 import { MatchBalanceTracker } from './MatchBalanceTracker'
 import { activeProgressionRepository, type ProgressionParticipant } from '../account/progressionRepository'
-import { cloneArsenalRules, DEFAULT_ARSENAL_RULES, type ArsenalRules } from '../../src/match/arsenal'
+import { cloneArsenalRules, DEFAULT_ARSENAL_RULES, sanitizeArsenalRules, type ArsenalRules } from '../../src/match/arsenal'
 import { activeRoomCreators } from '../activeRoomCreators'
 import {
   MatchResultState,
@@ -106,6 +106,7 @@ export class PrivateMatchRoom extends Room<{
   private creatorClerkUserId: string | null = null
   private creatorGameTicket: string | null = null
   private creatorAuthenticated = false
+  private matchStartPending = false
 
   messages: Messages<this> = {
     [NETWORK_MESSAGE_TYPE]: (client: Client, payload: unknown) =>
@@ -147,7 +148,11 @@ export class PrivateMatchRoom extends Room<{
       this.state.mapId = parsed.data.mapId
       this.state.projectileBoundaryMode = parsed.data.projectileBoundaryMode
       this.state.turnDurationSeconds = parsed.data.turnDurationSeconds
-      this.arsenal = cloneArsenalRules(parsed.data.arsenal)
+      const progression = activeProgressionRepository()
+      const creatorLevel = progression
+        ? await progression.getOverview(creatorClerkUserId).then(({ summary }) => summary.level).catch(() => 1)
+        : 1
+      this.arsenal = sanitizeArsenalRules(parsed.data.arsenal, creatorLevel)
       this.state.protocolVersion = CURRENT_COMPATIBILITY.protocol
       this.state.mapRegistryVersion = CURRENT_COMPATIBILITY.maps
       this.state.weaponRegistryVersion = CURRENT_COMPATIBILITY.weapons
@@ -161,9 +166,7 @@ export class PrivateMatchRoom extends Room<{
         mode: parsed.data.mode,
       }
       await this.setMatchmaking({ private: true, metadata: this.metadata, maxClients: capacity })
-      const progression = activeProgressionRepository()
-      if (!progression) throw new Error('Room creation tracking is unavailable.')
-      await progression.recordRoomCreated(creatorClerkUserId)
+      if (progression) await progression.recordRoomCreated(creatorClerkUserId)
       this.setSimulationInterval((deltaMs) => this.updateRoom(deltaMs), 1000 / 60)
       roomLog('room-created', { roomId: this.roomId, roomCode: this.roomCode, creatorClerkUserId })
     } catch (error) {
@@ -384,15 +387,34 @@ export class PrivateMatchRoom extends Room<{
   private setReady(player: RoomPlayerState, ready: boolean): void {
     if (this.state.phase !== 'waiting') return
     player.ready = ready
-    if (this.canStartMatch()) this.beginMatch()
+    if (this.canStartMatch()) void this.beginMatch()
   }
 
-  private beginMatch(): void {
+  private async beginMatch(): Promise<void> {
     if (this.state.phase !== 'waiting' && this.state.phase !== 'results') return
+    if (this.matchStartPending) return
+    this.matchStartPending = true
     const players = Array.from({ length: this.state.capacity }, (_, seat) =>
       this.playerAtSeat(seat),
     )
-    if (players.some((player) => !player?.connected)) return
+    if (players.some((player) => !player?.connected)) {
+      this.matchStartPending = false
+      return
+    }
+    const progression = activeProgressionRepository()
+    const levels = await Promise.all(players.map((_, seat) => {
+      const client = this.clients.find((candidate) => (candidate.userData as ClientData | undefined)?.seat === seat)
+      const clerkUserId = (client?.userData as ClientData | undefined)?.clerkUserId
+      return progression && clerkUserId
+        ? progression.getOverview(clerkUserId).then(({ summary }) => summary.level).catch(() => 1)
+        : Promise.resolve(1)
+    }))
+    const samePlayers = players.every((player, seat) => this.playerAtSeat(seat)?.playerId === player?.playerId)
+    if ((this.state.phase !== 'waiting' && this.state.phase !== 'results') || !this.allPlayersConnected() || !samePlayers) {
+      this.matchStartPending = false
+      return
+    }
+    const effectiveArsenal = sanitizeArsenalRules(this.arsenal, Math.min(...levels))
     const config: LocalMatchConfig = {
       mode: this.state.mode as LocalMatchConfig['mode'],
       playerNames: players.map((player) => player!.name),
@@ -413,7 +435,7 @@ export class PrivateMatchRoom extends Room<{
         .projectileBoundaryMode as LocalMatchConfig['projectileBoundaryMode'],
       turnDurationSeconds: this.state
         .turnDurationSeconds as LocalMatchConfig['turnDurationSeconds'],
-      arsenal: cloneArsenalRules(this.arsenal),
+      arsenal: effectiveArsenal,
     }
     this.state.matchGeneration += 1
     this.simulation = new MatchSimulation(config, {
@@ -451,6 +473,7 @@ export class PrivateMatchRoom extends Room<{
       generation: this.state.matchGeneration,
       mapId: config.mapId,
     })
+    this.matchStartPending = false
   }
 
   private queueCommand(
@@ -699,7 +722,7 @@ export class PrivateMatchRoom extends Room<{
       players.every((candidate) => candidate.connected && candidate.wantsRematch)
     ) {
       roomLog('rematch-starting', { roomCode: this.roomCode })
-      this.beginMatch()
+      void this.beginMatch()
     }
   }
 

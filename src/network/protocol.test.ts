@@ -98,7 +98,7 @@ describe('online protocol validation', () => {
       protocol: 'private-room-16',
       snapshot: 13,
       maps: 'maps-9',
-      weapons: 'weapons-5',
+      weapons: 'weapons-10',
       appearances: 'appearances-3.0.3',
       build: '1.12.0',
     })

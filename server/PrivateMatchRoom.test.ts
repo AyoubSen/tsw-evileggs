@@ -59,6 +59,7 @@ describe.sequential('PrivateMatchRoom transport authority', () => {
   beforeAll(async () => {
     configureProgressionRepository({
       recordRoomCreated: async () => undefined,
+      getOverview: async () => ({ summary: { level: 1 } }),
     } as unknown as ProgressionRepository)
     testServer = await boot(server, 2767)
   })

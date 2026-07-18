@@ -45,9 +45,9 @@ export type ProgressionGoal = {
 
 export const PROGRESSION_GOALS: readonly Omit<ProgressionGoal, 'progress' | 'completed'>[] = [
   { id: 'first-sortie', title: 'First Sortie', description: 'Complete an online match.', metric: 'matchesPlayed', target: 1, reward: { experience: 100, currency: 25 } },
-  { id: 'first-victory', title: 'Crack the Shell', description: 'Win an online match.', metric: 'wins', target: 1, reward: { experience: 150, currency: 0, cosmeticId: 'weapon-skin:scrapyard' } },
+  { id: 'first-victory', title: 'Crack the Shell', description: 'Win an online match.', metric: 'wins', target: 1, reward: { experience: 150, currency: 0, cosmeticId: 'weapon-skin:basic-rocket:scrapyard' } },
   { id: 'regular-customer', title: 'Regular Customer', description: 'Complete 10 online matches.', metric: 'matchesPlayed', target: 10, reward: { experience: 300, currency: 75 } },
-  { id: 'ace-gunner', title: 'Ace Gunner', description: 'Win 5 online matches.', metric: 'wins', target: 5, reward: { experience: 400, currency: 0, cosmeticId: 'weapon-skin:royal-icing' } },
+  { id: 'ace-gunner', title: 'Ace Gunner', description: 'Win 5 online matches.', metric: 'wins', target: 5, reward: { experience: 400, currency: 0, cosmeticId: 'weapon-skin:basic-rocket:royal-icing' } },
 ]
 
 export type ProgressionReward = { experience: number; currency: number; outcome: MatchOutcome }

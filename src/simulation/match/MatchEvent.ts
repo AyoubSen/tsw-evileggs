@@ -146,6 +146,7 @@ export type MatchEvent =
     })
   | (EventEnvelope & { type: 'player-jumped'; playerId: string })
   | (EventEnvelope & { type: 'terrain-destroyed'; operation: TerrainOperation })
+  | (EventEnvelope & { type: 'terrain-created'; operation: TerrainOperation })
   | (EventEnvelope & {
       type: 'player-damaged'
       playerId: string

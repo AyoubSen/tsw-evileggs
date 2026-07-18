@@ -35,14 +35,18 @@ import {
   PLAYER_FACES,
   PLAYER_PATTERNS,
   PLAYER_PRIMARY_COLORS,
-  PLAYER_PREVIEW_BACKGROUNDS,
   PLAYER_VICTORY_STYLES,
-  analyzeAppearanceReadability,
   randomPlayerAppearance,
   type PlayerAppearance,
 } from '../players/appearanceRegistry'
-import type { PlayerPoseId } from '../players/playerVisualRecipes'
-import { WEAPONS, WEAPON_ORDER, type WeaponId, type WeaponInventory } from '../weapons/registry'
+import {
+  WEAPONS,
+  WEAPON_ORDER,
+  WEAPON_UNLOCK_LEVEL,
+  isWeaponUnlocked,
+  type WeaponId,
+  type WeaponInventory,
+} from '../weapons/registry'
 import {
   ARSENAL_PRESETS,
   MAX_LOADOUT_WEAPONS,
@@ -64,8 +68,12 @@ import { createGameTicket, getAccountCapabilities, getProgression, purchaseCosme
 import { progressionReward, type ProgressionOverview } from '../shared/progression'
 import {
   WEAPON_SKINS,
+  APPEARANCE_COSMETICS,
+  FREE_APPEARANCE_IDS,
   entitlementAwareLoadout,
   isCosmeticOwned,
+  weaponSkinEntitlementId,
+  weaponSkinFor,
   type CosmeticLoadout,
 } from '../cosmetics/cosmeticLoadout'
 
@@ -367,9 +375,11 @@ function projectileBoundaryLabel(mode: ProjectileBoundaryMode): string {
 
 function ArsenalRulesPanel({
   rules,
+  level,
   onChange,
 }: {
   rules: ArsenalRules
+  level: number
   onChange: (rules: ArsenalRules) => void
 }) {
   const enabledCount = usableArsenalWeapons(rules).length
@@ -378,7 +388,7 @@ function ArsenalRulesPanel({
       sanitizeArsenalRules({
         presetId: 'custom',
         ammunition: { ...rules.ammunition, [weaponId]: amount },
-      }),
+      }, level),
     )
   return (
     <details className="arsenal-rule-control">
@@ -392,7 +402,7 @@ function ArsenalRulesPanel({
             type="button"
             key={presetId}
             className={rules.presetId === presetId ? 'selected' : ''}
-            onClick={() => onChange(cloneArsenalRules(ARSENAL_PRESETS[presetId]))}
+            onClick={() => onChange(sanitizeArsenalRules(ARSENAL_PRESETS[presetId], level))}
           >
             {presetId}
           </button>
@@ -402,22 +412,24 @@ function ArsenalRulesPanel({
         {WEAPON_ORDER.map((weaponId) => {
           const amount = rules.ammunition[weaponId]
           const enabled = amount === 'unlimited' || amount > 0
+          const unlocked = isWeaponUnlocked(weaponId, level)
           return (
-            <label className={`arsenal-weapon-control ${enabled ? '' : 'disabled'}`} key={weaponId}>
+            <label className={`arsenal-weapon-control ${enabled ? '' : 'disabled'} ${unlocked ? '' : 'locked'}`} key={weaponId}>
                  <input
                 className="arsenal-enabled-toggle"
                 type="checkbox"
                    checked={enabled}
-                   disabled={!enabled && rules.presetId !== 'chaos' && enabledCount >= MAX_LOADOUT_WEAPONS}
+                   disabled={!unlocked || (!enabled && rules.presetId !== 'chaos' && enabledCount >= MAX_LOADOUT_WEAPONS)}
                 onChange={(event) =>
                   updateAmount(weaponId, event.target.checked ? WEAPONS[weaponId].ammunition : 0)
                 }
               />
               <WeaponIcon weaponId={weaponId} />
               <span className="arsenal-weapon-name">{WEAPONS[weaponId].displayName}</span>
+              {!unlocked && <small className="weapon-unlock-level">Unlocks at level {WEAPON_UNLOCK_LEVEL[weaponId]}</small>}
               <select
                 aria-label={`${WEAPONS[weaponId].displayName} ammunition`}
-                disabled={!enabled}
+                disabled={!unlocked || !enabled}
                 value={amount}
                 onChange={(event) =>
                   updateAmount(
@@ -433,7 +445,7 @@ function ArsenalRulesPanel({
           )
         })}
       </div>
-      <p className="arsenal-note">Choose up to {MAX_LOADOUT_WEAPONS} weapons. Chaos mode unlocks the full arsenal. At least one weapon remains unlimited.</p>
+      <p className="arsenal-note">Choose up to {MAX_LOADOUT_WEAPONS} unlocked weapons. Chaos mode enables every weapon available at your level. Basic Rocket remains unlimited.</p>
     </details>
   )
 }
@@ -592,10 +604,12 @@ function Settings({
       </label>
       <button
         type="button"
-        className="secondary"
+        className="fullscreen-setting"
         onClick={() => document.documentElement.requestFullscreen?.()}
       >
-        Fullscreen
+        <span className="fullscreen-setting-icon" aria-hidden="true" />
+        <span><strong>Enter fullscreen</strong><small>Use the whole display for the battlefield.</small></span>
+        <b aria-hidden="true">Open</b>
       </button>
     </div>
   )
@@ -645,6 +659,7 @@ function CustomizePlayer({
   onSelectSlot,
   cosmeticLoadout: initialCosmeticLoadout,
   arsenal: initialArsenal,
+  level,
   entitlements,
   onSave,
   onOpenWorkshop,
@@ -656,29 +671,33 @@ function CustomizePlayer({
   onSelectSlot: (slot: number) => void
   cosmeticLoadout: CosmeticLoadout
   arsenal: ArsenalRules
+  level: number
   entitlements: readonly string[]
   onSave: (changes: { appearances: PlayerAppearance[]; presets: OutfitPreset[]; cosmeticLoadout: CosmeticLoadout; arsenal: ArsenalRules }) => void
   onOpenWorkshop: () => void
   onBack: () => void
 }) {
-  const [previewContrast, setPreviewContrast] = useState<'normal' | 'high'>('normal')
   const [activeTab, setActiveTab] = useState<'player' | 'loadout'>('player')
-  const [previewState, setPreviewState] = useState<'idle' | 'aiming' | 'firing' | 'hurt' | 'frozen' | 'defeated' | 'victory'>('aiming')
-  const [previewFacing, setPreviewFacing] = useState<-1 | 1>(1)
   const [previewWeapon, setPreviewWeapon] = useState<WeaponId>('basic-rocket')
   const [appearances, setAppearances] = useState(() => initialAppearances.map((appearance) => ({ ...appearance })))
   const [presets, setPresets] = useState(() => initialPresets.map((preset) => ({ ...preset, appearance: { ...preset.appearance } })))
   const [cosmeticLoadout, setCosmeticLoadout] = useState(initialCosmeticLoadout)
-  const [arsenal, setArsenal] = useState(initialArsenal)
+  const [arsenal, setArsenal] = useState(() => sanitizeArsenalRules(initialArsenal, level))
   const [previewCosmeticLoadout, setPreviewCosmeticLoadout] = useState(initialCosmeticLoadout)
   const [presetName, setPresetName] = useState('')
   const onChange = (slot: number, nextAppearance: PlayerAppearance) => setAppearances((current) => current.map((appearance, index) => index === slot ? nextAppearance : appearance))
   const onPresetsChange = setPresets
   const onCosmeticLoadoutChange = setCosmeticLoadout
   const appearance = appearances[selectedSlot] ?? DEFAULT_PLAYER_APPEARANCES[selectedSlot]
-  const readability = analyzeAppearanceReadability(appearance)
-  const previewPose: PlayerPoseId = previewState === 'aiming' || previewState === 'frozen' ? 'aim' : previewState === 'firing' ? 'fire' : previewState === 'hurt' ? 'idle' : previewState
-  const previewWeapons: readonly { id: WeaponId; label: string }[] = WEAPON_ORDER.map((id) => ({ id, label: WEAPONS[id].displayName }))
+  const appearanceOwned = (field: keyof typeof FREE_APPEARANCE_IDS, id: string) => FREE_APPEARANCE_IDS[field].has(id) || entitlements.includes(`${field === 'victoryStyle' ? 'victory-style' : field}:${id}`)
+  const randomOwnedAppearance = () => {
+    const next = randomPlayerAppearance()
+    for (const field of ['pattern', 'face', 'victoryStyle', 'accessory'] as const) {
+      const owned = APPEARANCE_GROUPS.find((group) => group.field === field)!.entries.filter((entry) => appearanceOwned(field, entry.id))
+      next[field] = owned[Math.floor(Math.random() * owned.length)].id as never
+    }
+    return next
+  }
   const uniquePresetId = () => {
     let id: string
     do id = globalThis.crypto?.randomUUID?.() ?? `outfit-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -726,26 +745,9 @@ function CustomizePlayer({
               </button>
             ))}
           </div>
-          <div className="team-preview-grid" aria-label="Appearance on both team backgrounds">
-            {PLAYER_PREVIEW_BACKGROUNDS.map((background) => <figure className="large-avatar-preview" key={background.teamId}>
-              <PlayerAvatar appearance={appearance} teamId={background.teamId} teamBackground highContrast={previewContrast === 'high'} label={`${background.label} preview`} pose={previewPose} facing={previewFacing} weaponId={previewState === 'idle' || previewState === 'defeated' || previewState === 'victory' ? undefined : previewWeapon} weaponSkinId={previewCosmeticLoadout.weaponSkin} projectileSkinId={previewCosmeticLoadout.projectileSkin} hurt={previewState === 'hurt'} frozen={previewState === 'frozen'} />
-              <figcaption>{background.label} · {readability.backgroundContrast.find((item) => item.teamId === background.teamId)!.ratio.toFixed(1)}:1</figcaption>
-            </figure>)}
-          </div>
-          <div className="combat-preview-controls">
-            <label>Combat state<select value={previewState} onChange={(event) => setPreviewState(event.target.value as typeof previewState)}>{['idle', 'aiming', 'firing', 'hurt', 'frozen', 'defeated', 'victory'].map((state) => <option key={state} value={state}>{state[0].toUpperCase() + state.slice(1)}</option>)}</select></label>
-            <label>Facing<select value={previewFacing} onChange={(event) => setPreviewFacing(Number(event.target.value) as -1 | 1)}><option value={1}>Right</option><option value={-1}>Left</option></select></label>
-            <label className="combat-weapon-control">Representative weapon<select value={previewWeapon} onChange={(event) => { setPreviewWeapon(event.target.value as WeaponId); setPreviewState('aiming') }}>{previewWeapons.map((weapon) => <option key={weapon.id} value={weapon.id}>{weapon.label}</option>)}</select></label>
-          </div>
-          <div className="compact-hud-preview"><PlayerAvatar appearance={appearance} teamId={selectedSlot % 2} teamBackground highContrast={previewContrast === 'high'} compact label="Compact HUD and timeline portrait preview" /><span><strong>P{selectedSlot + 1} · HUD / timeline</strong><i><b /></i></span></div>
-          <fieldset className="preview-contrast-toggle"><legend>Preview contrast</legend><button type="button" aria-pressed={previewContrast === 'normal'} onClick={() => setPreviewContrast('normal')}>Normal</button><button type="button" aria-pressed={previewContrast === 'high'} onClick={() => setPreviewContrast('high')}>High contrast</button></fieldset>
-          <div className={`readability-report ${readability.warnings.length ? 'has-warnings' : ''}`} role="status" aria-live="polite">
-            <strong>Readability check</strong>
-            <span>Primary/accent {readability.primaryAccentContrast.toFixed(1)}:1 · ink {readability.inkContrast.toFixed(1)}:1 · face {readability.faceContrast.toFixed(1)}:1 · {readability.compactSafe ? 'compact safe' : 'compact warning'} · {readability.highContrastSafe ? 'high contrast safe' : 'high contrast warning'}</span>
-            {readability.warnings.length ? <ul>{readability.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : <p>No readability warnings.</p>}
-          </div>
+          <div className="customize-player-stage"><PlayerAvatar appearance={appearance} teamId={selectedSlot % 2} teamBackground label="Your current player" pose="aim" weaponId={previewWeapon} weaponSkinId={weaponSkinFor(previewCosmeticLoadout, previewWeapon)} projectileSkinId={previewCosmeticLoadout.projectileSkin} /><strong>Your player</strong><span>Every choice below is shown directly on this model.</span></div>
           <div className="actions customize-random-actions">
-            <button type="button" onClick={() => onChange(selectedSlot, randomPlayerAppearance())}>Randomize</button>
+            <button type="button" onClick={() => onChange(selectedSlot, randomOwnedAppearance())}>Randomize</button>
             <button type="button" className="secondary" onClick={() => onChange(selectedSlot, { ...DEFAULT_PLAYER_APPEARANCES[selectedSlot] })}>Reset</button>
           </div>
           <section className="preset-library" aria-labelledby="preset-library-title">
@@ -778,7 +780,7 @@ function CustomizePlayer({
               <legend>{group.label}</legend>
               {group.field === 'victoryStyle' && <p className="victory-style-note">Your normal face stays the same. This expression and pose only appear when you win.</p>}
               <div className="appearance-options">
-                {group.entries.map((entry) => (
+                {group.entries.filter((entry) => !(['pattern', 'face', 'victoryStyle', 'accessory'] as string[]).includes(group.field) || appearanceOwned(group.field as keyof typeof FREE_APPEARANCE_IDS, entry.id)).map((entry) => (
                   <button
                     type="button"
                     className={appearance[group.field] === entry.id ? 'selected' : ''}
@@ -786,8 +788,8 @@ function CustomizePlayer({
                     key={entry.id}
                     onClick={() => onChange(selectedSlot, { ...appearance, [group.field]: entry.id } as PlayerAppearance)}
                   >
+                    <PlayerAvatar appearance={{ ...appearance, [group.field]: entry.id } as PlayerAppearance} pose={group.field === 'victoryStyle' ? 'victory' : 'idle'} label={`${entry.label} preview`} />
                     {'color' in entry && <i style={{ backgroundColor: entry.color }} aria-hidden="true" />}
-                    {group.field === 'victoryStyle' && <PlayerAvatar appearance={{ ...appearance, victoryStyle: entry.id as PlayerAppearance['victoryStyle'] }} pose="victory" label={`${entry.label} victory preview`} />}
                     <span>{entry.label}</span>
                   </button>
                 ))}
@@ -797,18 +799,19 @@ function CustomizePlayer({
         </div>
       </div> : <div className="loadout-customizer">
         <section className="loadout-preview-card">
-          <PlayerAvatar appearance={appearance} teamId={selectedSlot % 2} teamBackground label="Weapon loadout preview" pose="aim" weaponId={previewWeapon} weaponSkinId={previewCosmeticLoadout.weaponSkin} projectileSkinId={previewCosmeticLoadout.projectileSkin} />
+          <PlayerAvatar appearance={appearance} teamId={selectedSlot % 2} teamBackground label="Weapon loadout preview" pose="aim" weaponId={previewWeapon} weaponSkinId={weaponSkinFor(previewCosmeticLoadout, previewWeapon)} projectileSkinId={previewCosmeticLoadout.projectileSkin} />
           <div><p className="eyebrow">YOUR SIX</p><h3>Choose the default arsenal</h3><p>Standard online and local matches use these weapons. Chaos mode ignores this limit and enables the full arsenal.</p></div>
         </section>
         <fieldset className="appearance-group loadout-weapon-group"><legend>Weapons · {usableArsenalWeapons(arsenal).length}/{MAX_LOADOUT_WEAPONS}</legend><div className="loadout-weapon-grid">{WEAPON_ORDER.map((weaponId) => {
           const amount = arsenal.ammunition[weaponId]
           const selected = amount === 'unlimited' || amount > 0
           const full = usableArsenalWeapons(arsenal).length >= MAX_LOADOUT_WEAPONS
-          return <button type="button" key={weaponId} className={selected ? 'selected' : ''} disabled={!selected && full} aria-pressed={selected} onMouseEnter={() => setPreviewWeapon(weaponId)} onFocus={() => setPreviewWeapon(weaponId)} onClick={() => { setPreviewWeapon(weaponId); setArsenal(sanitizeArsenalRules({ ammunition: { ...arsenal.ammunition, [weaponId]: selected ? 0 : WEAPONS[weaponId].ammunition } })) }}><WeaponIcon weaponId={weaponId} skinId={previewCosmeticLoadout.weaponSkin} /><span>{WEAPONS[weaponId].displayName}</span></button>
+          const unlocked = isWeaponUnlocked(weaponId, level)
+          return <button type="button" key={weaponId} className={selected ? 'selected' : ''} disabled={!unlocked || (!selected && full)} aria-pressed={selected} onMouseEnter={() => setPreviewWeapon(weaponId)} onFocus={() => setPreviewWeapon(weaponId)} onClick={() => { setPreviewWeapon(weaponId); setArsenal(sanitizeArsenalRules({ ammunition: { ...arsenal.ammunition, [weaponId]: selected ? 0 : WEAPONS[weaponId].ammunition } }, level)) }}><WeaponIcon weaponId={weaponId} skinId={weaponSkinFor(previewCosmeticLoadout, weaponId)} /><span>{WEAPONS[weaponId].displayName}</span>{!unlocked && <small>Unlocks at level {WEAPON_UNLOCK_LEVEL[weaponId]}</small>}</button>
         })}</div></fieldset>
-        <fieldset className="appearance-group owned-finish-group"><legend>Weapon finish</legend><div className="appearance-options owned-finish-options">{WEAPON_SKINS.filter((skin) => isCosmeticOwned('weapon', skin.id, entitlements)).map((skin) => {
-          const previewed = previewCosmeticLoadout.weaponSkin === skin.id
-          return <button type="button" key={skin.id} className={previewed ? 'selected' : ''} aria-pressed={previewed} onClick={() => { setPreviewCosmeticLoadout((current) => ({ ...current, weaponSkin: skin.id })); onCosmeticLoadoutChange({ ...cosmeticLoadout, weaponSkin: skin.id }) }}><WeaponIcon weaponId={previewWeapon} skinId={skin.id} /><span>{skin.label}{cosmeticLoadout.weaponSkin === skin.id ? ' · Equipped' : ''}</span></button>
+        <fieldset className="appearance-group owned-finish-group"><legend>{WEAPONS[previewWeapon].displayName} finish</legend><div className="appearance-options owned-finish-options">{WEAPON_SKINS.filter((skin) => isCosmeticOwned('weapon', skin.id, entitlements, previewWeapon)).map((skin) => {
+          const previewed = weaponSkinFor(previewCosmeticLoadout, previewWeapon) === skin.id
+          return <button type="button" key={skin.id} className={previewed ? 'selected' : ''} aria-pressed={previewed} onClick={() => { const next = { ...cosmeticLoadout, weaponSkins: { ...cosmeticLoadout.weaponSkins, [previewWeapon]: skin.id } }; setPreviewCosmeticLoadout(next); onCosmeticLoadoutChange(next) }}><WeaponIcon weaponId={previewWeapon} skinId={skin.id} /><span>{skin.label}{weaponSkinFor(cosmeticLoadout, previewWeapon) === skin.id ? ' · Equipped' : ''}</span></button>
         })}</div><button type="button" className="button-quiet owned-finish-shop" onClick={onOpenWorkshop}>Browse weapon finishes</button></fieldset>
       </div>}
       <div className="actions customize-back">
@@ -825,6 +828,7 @@ function CosmeticWorkshop({
   progression,
   signedIn,
   onEquip,
+  onEquipAppearance,
   onPurchase,
   onBack,
 }: {
@@ -833,21 +837,36 @@ function CosmeticWorkshop({
   progression: ProgressionOverview | null
   signedIn: boolean
   onEquip: (loadout: CosmeticLoadout) => void
-  onPurchase: (cosmeticId: string, loadout: CosmeticLoadout) => Promise<void>
+  onEquipAppearance: (appearance: PlayerAppearance) => void
+  onPurchase: (cosmeticId: string, loadout?: CosmeticLoadout, appearance?: PlayerAppearance) => Promise<void>
   onBack: () => void
 }) {
   const [previewLoadout, setPreviewLoadout] = useState(loadout)
   const [previewWeapon, setPreviewWeapon] = useState<WeaponId>('basic-rocket')
+  const [category, setCategory] = useState<'weapon' | 'pattern' | 'face' | 'victoryStyle' | 'accessory'>('weapon')
+  const [page, setPage] = useState(0)
+  const [previewAppearance, setPreviewAppearance] = useState(appearance)
+  const [selectedAppearanceCosmetic, setSelectedAppearanceCosmetic] = useState(APPEARANCE_COSMETICS[0])
   const [purchaseBusy, setPurchaseBusy] = useState<string | null>(null)
   const [purchaseError, setPurchaseError] = useState<string | null>(null)
   const entitlements = progression?.entitlements ?? []
   const balance = progression?.summary.currencyBalance ?? 0
-  const buy = async (cosmeticId: string, next: CosmeticLoadout) => {
+  const previewSkin = WEAPON_SKINS.find((skin) => skin.id === weaponSkinFor(previewLoadout, previewWeapon))!
+  const previewOwned = category === 'weapon' ? isCosmeticOwned('weapon', previewSkin.id, entitlements, previewWeapon) : entitlements.includes(selectedAppearanceCosmetic.entitlementId)
+  const previewEquipped = category === 'weapon' ? weaponSkinFor(loadout, previewWeapon) === previewSkin.id : appearance[selectedAppearanceCosmetic.kind] === selectedAppearanceCosmetic.id
+  const previewNext = { ...loadout, weaponSkins: { ...loadout.weaponSkins, [previewWeapon]: previewSkin.id } }
+  const categoryItems = category === 'weapon'
+    ? WEAPON_SKINS
+    : APPEARANCE_COSMETICS.filter((cosmetic) => cosmetic.kind === category)
+  const pageSize = 8
+  const pageCount = Math.max(1, Math.ceil(categoryItems.length / pageSize))
+  const visibleItems = categoryItems.slice(page * pageSize, (page + 1) * pageSize)
+  const buy = async (cosmeticId: string, next?: CosmeticLoadout, nextAppearance?: PlayerAppearance) => {
     setPurchaseBusy(cosmeticId)
     setPurchaseError(null)
     try {
-      await onPurchase(cosmeticId, next)
-      setPreviewLoadout(next)
+      await onPurchase(cosmeticId, next, nextAppearance)
+      if (next) setPreviewLoadout(next)
     } catch (caught) {
       setPurchaseError(caught instanceof Error ? caught.message : 'Purchase failed.')
     } finally {
@@ -856,21 +875,42 @@ function CosmeticWorkshop({
   }
   return (
     <section className="panel workshop-panel">
-      <header className="screen-heading"><p className="eyebrow">SPEND SCRAP, SHINE BRIGHT</p><h2>Cosmetic workshop</h2><p>Preview every finish. Purchases are cosmetic only and equip immediately.</p></header>
-      <div className="workshop-balance"><strong>{balance} Scrap</strong><span>{signedIn ? 'Earn more in signed-in online matches.' : 'Sign in to earn and spend Scrap.'}</span></div>
-      <div className="workshop-stage">
-        <PlayerAvatar appearance={appearance} teamId={0} teamBackground label="Your player cosmetic preview" pose="aim" weaponId={previewWeapon} weaponSkinId={previewLoadout.weaponSkin} projectileSkinId={previewLoadout.projectileSkin} />
-        <label>Preview weapon<select value={previewWeapon} onChange={(event) => setPreviewWeapon(event.target.value as WeaponId)}>{WEAPON_ORDER.map((id) => <option value={id} key={id}>{WEAPONS[id].displayName}</option>)}</select></label>
+      <header className="workshop-toolbar">
+        <button className="button-quiet" onClick={onBack}>Back</button>
+        <div><p className="eyebrow">SPEND SCRAP, SHINE BRIGHT</p><h2>Cosmetic workshop</h2></div>
+        <div className="workshop-balance"><strong>{balance}</strong><span>Scrap</span></div>
+      </header>
+      <div className="workshop-layout">
+        <aside className="workshop-inspector">
+          <div className="workshop-stage">
+            <PlayerAvatar appearance={previewAppearance} teamId={0} teamBackground label="Your player cosmetic preview" pose={category === 'victoryStyle' ? 'victory' : category === 'weapon' ? 'aim' : 'idle'} weaponId={category === 'weapon' ? previewWeapon : undefined} weaponSkinId={weaponSkinFor(previewLoadout, previewWeapon)} projectileSkinId={previewLoadout.projectileSkin} />
+          </div>
+          {category === 'weapon' && <div className="workshop-weapon-picker" role="listbox" aria-label="Choose a weapon">{WEAPON_ORDER.map((id) => <button type="button" role="option" aria-selected={previewWeapon === id} className={previewWeapon === id ? 'selected' : ''} onClick={() => { setPreviewWeapon(id); setPage(0) }} key={id}><WeaponIcon weaponId={id} skinId={weaponSkinFor(previewLoadout, id)} /><span>{WEAPONS[id].displayName}</span></button>)}</div>}
+          <div className="workshop-selection-copy">
+            <span className={`workshop-status ${previewOwned ? 'owned' : 'locked'}`}>{previewOwned ? 'Owned' : `${category === 'weapon' ? previewSkin.price : selectedAppearanceCosmetic.price} Scrap`}</span>
+            <h3>{category === 'weapon' ? `${previewSkin.label} for ${WEAPONS[previewWeapon].displayName}` : selectedAppearanceCosmetic.label}</h3>
+            <p>{category === 'weapon' ? previewSkin.description : selectedAppearanceCosmetic.description}</p>
+          </div>
+          {previewOwned ? (
+            <button className="button-primary workshop-commit" type="button" disabled={previewEquipped} onClick={() => { if (category === 'weapon') { onEquip(previewNext); setPreviewLoadout(previewNext) } else onEquipAppearance(previewAppearance) }}>{previewEquipped ? 'Currently equipped' : `Equip ${category === 'weapon' ? 'finish' : 'item'}`}</button>
+          ) : <button className="button-primary workshop-commit" type="button" disabled={!signedIn || !progression || purchaseBusy !== null || balance < (category === 'weapon' ? previewSkin.price : selectedAppearanceCosmetic.price)} onClick={() => category === 'weapon' ? void buy(weaponSkinEntitlementId(previewWeapon, previewSkin.id), previewNext) : void buy(selectedAppearanceCosmetic.entitlementId, undefined, previewAppearance)}>{purchaseBusy ? 'Buying...' : `Buy & equip · ${category === 'weapon' ? previewSkin.price : selectedAppearanceCosmetic.price} Scrap`}</button>}
+          {!signedIn && <small className="workshop-account-note">Sign in to earn and spend Scrap.</small>}
+          {purchaseError && <p className="form-error" role="alert">{purchaseError}</p>}
+        </aside>
+        <section className="workshop-shelf">
+          <div className="workshop-categories" role="tablist">{(['weapon', 'pattern', 'face', 'victoryStyle', 'accessory'] as const).map((item) => <button type="button" role="tab" aria-selected={category === item} className={category === item ? 'selected' : ''} onClick={() => { setCategory(item); setPage(0); const first = APPEARANCE_COSMETICS.find((cosmetic) => cosmetic.kind === item); if (first) { setSelectedAppearanceCosmetic(first); setPreviewAppearance({ ...appearance, [item]: first.id } as PlayerAppearance) } }} key={item}>{item === 'victoryStyle' ? 'Victory' : item[0].toUpperCase() + item.slice(1)}</button>)}</div>
+          <header><div><p className="eyebrow">COSMETIC DRAWER</p><h3>{category === 'weapon' ? `${WEAPONS[previewWeapon].displayName} finishes` : `${category === 'victoryStyle' ? 'Victory' : category[0].toUpperCase() + category.slice(1)} collection`}</h3></div></header>
+          <p>{category === 'weapon' ? 'Finishes are bought and equipped only for the weapon shown.' : 'Starter choices remain free; collect more looks with Scrap.'}</p>
+          <div className={`workshop-grid workshop-grid-${category}`}>{category === 'weapon' ? (visibleItems as readonly (typeof WEAPON_SKINS)[number][]).map((skin) => {
+        const owned = isCosmeticOwned('weapon', skin.id, entitlements, previewWeapon)
+        const equipped = weaponSkinFor(loadout, previewWeapon) === skin.id
+        const previewed = weaponSkinFor(previewLoadout, previewWeapon) === skin.id
+        const next = { ...loadout, weaponSkins: { ...loadout.weaponSkins, [previewWeapon]: skin.id } }
+        return <button type="button" className={`workshop-card ${previewed ? 'previewing' : ''}`} key={skin.id} aria-pressed={previewed} onClick={() => setPreviewLoadout(next)}><span className="workshop-item-preview weapon"><WeaponIcon weaponId={previewWeapon} skinId={skin.id} /></span><span className="workshop-card-copy"><strong>{skin.label}</strong><small className={`workshop-status ${owned ? 'owned' : 'locked'}`}>{equipped ? 'Equipped' : owned ? 'Owned' : `${skin.price} Scrap`}</small></span></button>
+      }) : (visibleItems as readonly (typeof APPEARANCE_COSMETICS)[number][]).map((cosmetic) => { const owned = entitlements.includes(cosmetic.entitlementId); const nextAppearance = { ...appearance, [cosmetic.kind]: cosmetic.id } as PlayerAppearance; return <button type="button" className={`workshop-card ${selectedAppearanceCosmetic.entitlementId === cosmetic.entitlementId ? 'previewing' : ''}`} key={cosmetic.entitlementId} onClick={() => { setSelectedAppearanceCosmetic(cosmetic); setPreviewAppearance(nextAppearance) }}><span className="workshop-item-preview player"><PlayerAvatar appearance={nextAppearance} pose={cosmetic.kind === 'victoryStyle' ? 'victory' : 'idle'} label="" /></span><span className="workshop-card-copy"><strong>{cosmetic.label}</strong><small className={`workshop-status ${owned ? 'owned' : 'locked'}`}>{appearance[cosmetic.kind] === cosmetic.id ? 'Equipped' : owned ? 'Owned' : `${cosmetic.price} Scrap`}</small></span></button> })}</div>
+          {pageCount > 1 && <nav className="workshop-pagination" aria-label={`${category} pages`}><button type="button" disabled={page === 0} onClick={() => setPage((current) => current - 1)}>Previous</button><span>Page {page + 1} of {pageCount}</span><button type="button" disabled={page === pageCount - 1} onClick={() => setPage((current) => current + 1)}>Next</button></nav>}
+        </section>
       </div>
-      <section className="workshop-shelf"><h3>Weapon finishes</h3><p>Each finish also colors that weapon's projectile or thrown object.</p><div className="workshop-grid">{WEAPON_SKINS.map((skin) => {
-        const owned = isCosmeticOwned('weapon', skin.id, entitlements)
-        const equipped = loadout.weaponSkin === skin.id
-        const previewed = previewLoadout.weaponSkin === skin.id
-        const next = { ...loadout, weaponSkin: skin.id }
-        return <article className={`workshop-card ${previewed ? 'previewing' : ''}`} key={skin.id}><button type="button" className="workshop-preview" aria-pressed={previewed} onClick={() => setPreviewLoadout(next)}><span className="workshop-item-preview weapon"><WeaponIcon weaponId={previewWeapon} skinId={next.weaponSkin} /></span><strong>{skin.label}</strong><small>{skin.description}</small><span className={`workshop-status ${owned ? 'owned' : 'locked'}`}>{owned ? 'Owned' : `${skin.price} Scrap`}</span></button>{owned ? <button type="button" disabled={equipped} onClick={() => { onEquip(next); setPreviewLoadout(next) }}>{equipped ? 'Equipped' : 'Equip'}</button> : skin.entitlementId && <button type="button" disabled={!signedIn || !progression || purchaseBusy !== null || balance < skin.price} onClick={() => void buy(skin.entitlementId, next)}>{purchaseBusy === skin.entitlementId ? 'Buying...' : 'Buy & equip'}</button>}</article>
-      })}</div></section>
-      {purchaseError && <p className="form-error" role="alert">{purchaseError}</p>}
-      <button className="button-quiet" onClick={onBack}>Back</button>
     </section>
   )
 }
@@ -887,6 +927,7 @@ export function App() {
   const [accountActionError, setAccountActionError] = useState<string | null>(null)
   const [cloudAccountAvailable, setCloudAccountAvailable] = useState<boolean | null>(null)
   const [progression, setProgression] = useState<ProgressionOverview | null>(null)
+  const accountLevel = progression?.summary.level ?? 1
   const [progressionLoading, setProgressionLoading] = useState(false)
   const [customizeSlot, setCustomizeSlot] = useState(0)
   const [customizeReturnScreen, setCustomizeReturnScreen] = useState<
@@ -894,7 +935,7 @@ export function App() {
   >('menu')
   const [workshopReturnScreen, setWorkshopReturnScreen] = useState<'menu' | 'customize'>('menu')
   const [config, setConfig] = useState<LocalMatchConfig>(() =>
-    validateMatchConfig(loadPreferences()),
+    validateMatchConfig(loadPreferences(), 1),
   )
   const [paused, setPaused] = useState(false)
   const [pausePanel, setPausePanel] = useState<PausePanel>('main')
@@ -1217,12 +1258,12 @@ export function App() {
         turnDurationSeconds: preferences.turnDurationSeconds,
         projectileBoundaryMode: preferences.projectileBoundaryMode,
         arsenal: preferences.arsenal,
-      }),
+      }, accountLevel),
     )
     setScreen('setup')
   }
   const start = () => {
-    const next = validateMatchConfig(config)
+    const next = validateMatchConfig(config, accountLevel)
     setConfig(next)
     setPreferences({
       ...preferences,
@@ -1256,7 +1297,7 @@ export function App() {
         turnDurationSeconds: preferences.turnDurationSeconds,
         projectileBoundaryMode: getMap('custom-draft').projectileBoundary.defaultMode,
         arsenal: preferences.arsenal,
-      }),
+      }, accountLevel),
     )
     setPaused(false)
     setResult(null)
@@ -1292,7 +1333,7 @@ export function App() {
         playerNames: config.playerNames.map((name, index) =>
           index === 0 ? name : `Player ${index + 1}`,
         ),
-      })
+      }, accountLevel)
       const session = await OnlineRoomSession.create(
         next.playerNames[0],
         next,
@@ -1412,9 +1453,9 @@ export function App() {
     setOnlineSession(null)
     if (session) void session.leave().catch(() => undefined)
   }
-  const chooseMap = (mapId: MapId) => setConfig(validateMatchConfig({ ...config, mapId }))
+  const chooseMap = (mapId: MapId) => setConfig(validateMatchConfig({ ...config, mapId }, accountLevel))
   const chooseProjectileBoundaryMode = (projectileBoundaryMode: ProjectileBoundaryMode) =>
-    setConfig(validateMatchConfig({ ...config, projectileBoundaryMode }))
+    setConfig(validateMatchConfig({ ...config, projectileBoundaryMode }, accountLevel))
   const chooseGameMode = (mode: GameMode) => {
     const playerNames = preferences.playerNames.map(
       (name, index) => config.playerNames[index] ?? name,
@@ -1430,7 +1471,7 @@ export function App() {
         mapId: defaultMapForMode(mode).id,
         playerNames,
         playerAppearances,
-      }),
+      }, accountLevel),
     )
   }
   const updatePlayerName = (index: number, name: string) => {
@@ -1533,10 +1574,12 @@ export function App() {
           onSelectSlot={setCustomizeSlot}
           cosmeticLoadout={entitlementAwareLoadout(preferences.cosmeticLoadout, progression?.entitlements ?? [])}
           arsenal={preferences.arsenal.presetId === 'chaos' ? cloneArsenalRules(ARSENAL_PRESETS.standard) : preferences.arsenal}
+          level={accountLevel}
           entitlements={progression?.entitlements ?? []}
           onSave={({ appearances, presets, cosmeticLoadout, arsenal }) => {
-            setPreferences((current) => ({ ...current, playerAppearances: appearances, outfitPresets: presets, cosmeticLoadout, arsenal }))
-            setConfig((current) => ({ ...current, arsenal, playerAppearances: current.playerAppearances.map((appearance, index) => appearances[index] ?? appearance) }))
+            const effectiveArsenal = sanitizeArsenalRules(arsenal, accountLevel)
+            setPreferences((current) => ({ ...current, playerAppearances: appearances, outfitPresets: presets, cosmeticLoadout, arsenal: effectiveArsenal }))
+            setConfig((current) => ({ ...current, arsenal: effectiveArsenal, playerAppearances: current.playerAppearances.map((appearance, index) => appearances[index] ?? appearance) }))
             setScreen(customizeReturnScreen)
           }}
           onOpenWorkshop={() => { setWorkshopReturnScreen('customize'); setScreen('workshop') }}
@@ -1551,10 +1594,15 @@ export function App() {
           progression={progression}
           signedIn={auth.signedIn}
           onEquip={(cosmeticLoadout) => setPreferences((current) => ({ ...current, cosmeticLoadout }))}
-          onPurchase={async (cosmeticId, cosmeticLoadout) => {
+          onEquipAppearance={(appearance) => setPreferences((current) => ({ ...current, playerAppearances: current.playerAppearances.map((item, index) => index === 0 ? appearance : item) }))}
+          onPurchase={async (cosmeticId, cosmeticLoadout, appearance) => {
             const nextProgression = await purchaseCosmetic(auth.getToken, cosmeticId)
             setProgression(nextProgression)
-            setPreferences((current) => ({ ...current, cosmeticLoadout }))
+            setPreferences((current) => ({
+              ...current,
+              cosmeticLoadout: cosmeticLoadout ?? current.cosmeticLoadout,
+              playerAppearances: appearance ? current.playerAppearances.map((item, index) => index === 0 ? appearance : item) : current.playerAppearances,
+            }))
           }}
           onBack={() => setScreen(workshopReturnScreen)}
         />
@@ -1575,7 +1623,7 @@ export function App() {
                   return
                 }
                 setConfig(
-                  validateMatchConfig({
+                   validateMatchConfig({
                     mode: preferences.lastMode,
                     playerNames: preferences.playerNames,
                     playerAppearances: preferences.playerAppearances,
@@ -1586,7 +1634,7 @@ export function App() {
                     turnDurationSeconds: preferences.turnDurationSeconds,
                     projectileBoundaryMode: preferences.projectileBoundaryMode,
                     arsenal: preferences.arsenal,
-                  }),
+                   }, accountLevel),
                 )
                 setScreen('online-create')
               }}
@@ -1611,7 +1659,7 @@ export function App() {
                   turnDurationSeconds: preferences.turnDurationSeconds,
                   projectileBoundaryMode: preferences.projectileBoundaryMode,
                   arsenal: preferences.arsenal,
-                }))
+                }, accountLevel))
                 setScreen('online-join')
               }}
             >
@@ -1709,6 +1757,7 @@ export function App() {
           </div>
           <ArsenalRulesPanel
             rules={config.arsenal}
+            level={accountLevel}
             onChange={(arsenal) => setConfig({ ...config, arsenal })}
           />
           {onlineError && <ConnectionTroubleshooting message={onlineError} />}
@@ -1926,6 +1975,8 @@ export function App() {
             <h2>Set the tabletop</h2>
             <p>Choose your contenders, then pick a place worth wrecking.</p>
           </header>
+          <div className="setup-layout">
+            <div className="setup-column setup-contenders-column">
           <div className="mode-picker" aria-label="Local match mode">
             {(['1v1', '2v2', '3v3'] as const).map((mode) => (
               <button
@@ -2002,6 +2053,8 @@ export function App() {
               each player.
             </span>
           </div>
+            </div>
+            <div className="setup-column setup-rules-column">
           <div className="battlefield-picker">
             <div className="picker-heading">
               <div>
@@ -2044,9 +2097,19 @@ export function App() {
           </div>
           <ArsenalRulesPanel
             rules={config.arsenal}
+            level={accountLevel}
             onChange={(arsenal) => setConfig({ ...config, arsenal })}
           />
+            </div>
+          </div>
           <div className="actions setup-actions">
+            <div className="setup-launch-summary">
+              <span>Ready to play</span>
+              <strong>
+                {config.playerNames.length} players · {MAPS[config.mapId].displayName} ·{' '}
+                {config.turnDurationSeconds}s turns
+              </strong>
+            </div>
             <button className="button-primary button-play" onClick={start}>
               Start Skirmish <span>›</span>
             </button>
@@ -2171,17 +2234,14 @@ export function App() {
         <section className="panel credits-panel">
           <p className="eyebrow">THE TOYBOX LABEL</p>
           <h2>Made for the table</h2>
-          <div className="credits-toys">
-            <PlayerAvatar appearance={DEFAULT_PLAYER_APPEARANCES[0]} />
-            <span>✦</span>
-            <PlayerAvatar appearance={DEFAULT_PLAYER_APPEARANCES[1]} />
+          <div className="credits-toys"><PlayerAvatar appearance={preferences.playerAppearances[0]} pose="victory" label="Your player in the credits" /></div>
+          <div className="credits-copy">
+            <section><span>Game</span><h3>{BRAND.title}</h3><p>A turn-based artillery game about tiny customizable fighters, destructible battlefields, and carefully aimed chaos.</p></section>
+            <section><span>Built for</span><h3>Friends at one table or online</h3><p>Play local skirmishes, create private online rooms, build maps, unlock weapons, and spend earned Scrap on your toybox.</p></section>
+            <section><span>Technology</span><h3>React · TypeScript · Phaser</h3><p>Created with React, Vite, TypeScript, Phaser, and a lot of hand-built SVG game art.</p></section>
           </div>
           <p>{BRAND.footer}</p>
-          <p>Built with React, Vite, TypeScript, and Phaser.</p>
-          <p>
-            This original artillery project is not affiliated with any other artillery-game
-            franchise.
-          </p>
+          <p className="credits-disclaimer">This original artillery project is not affiliated with any other artillery-game franchise.</p>
           <button className="button-quiet" onClick={() => setScreen('menu')}>
             Back
           </button>
@@ -2292,7 +2352,7 @@ export function App() {
                 )}
                 <button onClick={() => setPausePanel('how-to')}>How to Play</button>
                 <button onClick={() => setPausePanel('settings')}>Settings</button>
-                <button onClick={() => setPausePanel('confirm-menu')}>
+                <button className="return-menu-button" onClick={() => setPausePanel('confirm-menu')}>
                   {editorTestActive ? 'Return to Map Editor' : 'Return to Main Menu'}
                 </button>
               </div>

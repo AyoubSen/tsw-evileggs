@@ -8,7 +8,7 @@ import { applyHeldObjectSkin, applyProjectileSkin, type ProjectileSkinId, type W
 type PlayerAvatarProps = { appearance: Readonly<PlayerAppearance>; label?: string; teamId?: number; teamBackground?: boolean; highContrast?: boolean; className?: string; pose?: PlayerPoseId; facing?: -1 | 1; weaponId?: WeaponId; weaponSkinId?: WeaponSkinId; projectileSkinId?: ProjectileSkinId; hurt?: boolean; frozen?: boolean; compact?: boolean }
 
 function WeaponSvg({ recipe, weaponId, skinId = 'standard', projectileSkinId = 'standard' }: { recipe: ShapeRecipe; weaponId: WeaponId; skinId?: WeaponSkinId; projectileSkinId?: ProjectileSkinId }) {
-  const palette = applyHeldObjectSkin(resolveWeaponPalette(weaponId), weaponId, { weaponSkin: skinId, projectileSkin: projectileSkinId })
+  const palette = applyHeldObjectSkin(resolveWeaponPalette(weaponId), weaponId, { version: 2, weaponSkins: { [weaponId]: skinId }, projectileSkin: projectileSkinId })
   const color = (role: keyof typeof palette) => `#${palette[role].toString(16).padStart(6, '0')}`
   return <>{recipe.primitives.map((item, index) => {
     if (item.kind === 'polygon') return <polygon key={index} points={item.points.map((point) => `${point.x},${point.y}`).join(' ')} fill={item.fill ? color(item.fill) : 'none'} stroke={item.stroke ? color(item.stroke) : undefined} strokeWidth={item.strokeWidth} />

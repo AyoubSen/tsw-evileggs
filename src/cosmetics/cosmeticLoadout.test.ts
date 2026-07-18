@@ -19,9 +19,9 @@ describe('cosmetic loadouts', () => {
   it('requires entitlements for premium finishes and preserves free finishes', () => {
     expect(isCosmeticOwned('weapon', 'standard', [])).toBe(true)
     expect(isCosmeticOwned('weapon', 'sunset-brass', [])).toBe(false)
-    expect(isCosmeticOwned('weapon', 'sunset-brass', ['weapon-skin:sunset-brass'])).toBe(true)
-    expect(entitlementAwareLoadout({ version: 1, weaponSkin: 'sunset-brass', projectileSkin: 'plasma-mint' }, []))
-      .toEqual(DEFAULT_COSMETIC_LOADOUT)
+    expect(isCosmeticOwned('weapon', 'sunset-brass', ['weapon-skin:basic-rocket:sunset-brass'], 'basic-rocket')).toBe(true)
+    expect(entitlementAwareLoadout({ version: 2, weaponSkins: { 'basic-rocket': 'sunset-brass' }, projectileSkin: 'plasma-mint' }, []))
+      .toMatchObject({ weaponSkins: { 'basic-rocket': 'standard' }, projectileSkin: 'standard' })
   })
 
   it('changes palette roles without changing visual recipes or gameplay data', () => {
@@ -35,11 +35,12 @@ describe('cosmetic loadouts', () => {
     expect(resolveWeaponPalette('basic-rocket')).toBe(base)
   })
 
-  it('uses the projectile finish for the shoe while held and airborne', () => {
+  it('uses the selected finish for each held weapon', () => {
     const base = resolveWeaponPalette('old-shoe')
-    expect(applyHeldObjectSkin(base, 'old-shoe', { weaponSkin: 'hazard-pop', projectileSkin: 'ghost-ion' }))
-      .toEqual(applyProjectileSkin(base, 'ghost-ion'))
-    expect(applyHeldObjectSkin(base, 'basic-rocket', { weaponSkin: 'hazard-pop', projectileSkin: 'ghost-ion' }))
-      .not.toEqual(applyProjectileSkin(base, 'ghost-ion'))
+    const loadout = { version: 2 as const, weaponSkins: { 'old-shoe': 'hazard-pop' as const }, projectileSkin: 'ghost-ion' as const }
+    expect(applyHeldObjectSkin(base, 'old-shoe', loadout))
+      .toEqual(applyWeaponSkin(base, 'hazard-pop'))
+    expect(applyHeldObjectSkin(base, 'basic-rocket', loadout))
+      .toEqual(base)
   })
 })

@@ -6,6 +6,10 @@ export type WeaponId =
   | 'scatter-shot'
   | 'cluster-charge'
   | 'terrain-boring-drill'
+  | 'dirt-mounder'
+  | 'wind-blaster'
+  | 'gravity-orb'
+  | 'ricochet-rifle'
   | 'pocket-knife'
   | 'bomb-beacon'
   | 'fork-rocket'
@@ -13,7 +17,7 @@ export type WeaponId =
   | 'siege-bazooka'
   | 'cryo-shot'
   | 'teleporter'
-export const WEAPON_REGISTRY_VERSION = 'weapons-5'
+export const WEAPON_REGISTRY_VERSION = 'weapons-11'
 export type WeaponMechanic =
   | 'projectile'
   | 'timed-bounce'
@@ -25,6 +29,10 @@ export type WeaponMechanic =
   | 'beacon'
   | 'remote-split'
   | 'freeze'
+  | 'terrain-build'
+  | 'wind'
+  | 'gravity'
+  | 'ricochet'
 export type WeaponDefinition = {
   id: WeaponId
   mechanic: WeaponMechanic
@@ -62,6 +70,12 @@ export type WeaponDefinition = {
   beaconBombSpacing?: number
   remoteSplitAngleRadians?: number
   freezeTurns?: number
+  terrainInnerRadius?: number
+  terrainOuterRadius?: number
+  projectilePushForce?: number
+  playerPullForce?: number
+  maxRicochetBounces?: number
+  ricochetDamagePerBounce?: number
 }
 
 export const WEAPON_ORDER: WeaponId[] = [
@@ -72,6 +86,10 @@ export const WEAPON_ORDER: WeaponId[] = [
   'scatter-shot',
   'cluster-charge',
   'terrain-boring-drill',
+  'dirt-mounder',
+  'wind-blaster',
+  'gravity-orb',
+  'ricochet-rifle',
   'pocket-knife',
   'bomb-beacon',
   'fork-rocket',
@@ -80,6 +98,37 @@ export const WEAPON_ORDER: WeaponId[] = [
   'cryo-shot',
   'teleporter',
 ]
+
+export const WEAPON_UNLOCK_LEVEL: Record<WeaponId, number> = {
+  'basic-rocket': 1,
+  'precision-cannon': 1,
+  'high-arc-mortar': 1,
+  'timed-grenade': 1,
+  'scatter-shot': 1,
+  'cluster-charge': 1,
+  'old-shoe': 10,
+  'terrain-boring-drill': 20,
+  'pocket-knife': 30,
+  'bomb-beacon': 40,
+  'fork-rocket': 50,
+  'cryo-shot': 55,
+  'dirt-mounder': 60,
+  'wind-blaster': 65,
+  'gravity-orb': 70,
+  'ricochet-rifle': 75,
+  'siege-bazooka': 80,
+  teleporter: 85,
+}
+
+export function normalizeWeaponUnlockLevel(level: unknown): number {
+  return typeof level === 'number' && Number.isFinite(level)
+    ? Math.max(1, Math.floor(level))
+    : 1
+}
+
+export function isWeaponUnlocked(id: WeaponId, level: unknown): boolean {
+  return normalizeWeaponUnlockLevel(level) >= WEAPON_UNLOCK_LEVEL[id]
+}
 
 export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
   'basic-rocket': {
@@ -90,7 +139,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     ammunition: 'unlimited',
     powerMode: 'variable',
     aimMode: 'directional',
-    baseDamage: 55,
+    baseDamage: 15,
     blastRadius: 72,
     terrainRadius: 40,
     projectileSpeed: 950,
@@ -122,7 +171,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     ammunition: 3,
     powerMode: 'variable',
     aimMode: 'directional',
-    baseDamage: 76,
+    baseDamage: 25,
     blastRadius: 30,
     terrainRadius: 14,
     projectileSpeed: 1480,
@@ -154,7 +203,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     ammunition: 3,
     powerMode: 'variable',
     aimMode: 'directional',
-    baseDamage: 64,
+    baseDamage: 25,
     blastRadius: 84,
     terrainRadius: 47,
     projectileSpeed: 610,
@@ -186,7 +235,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     ammunition: 3,
     powerMode: 'variable',
     aimMode: 'directional',
-    baseDamage: 52,
+    baseDamage: 25,
     blastRadius: 64,
     terrainRadius: 35,
     projectileSpeed: 760,
@@ -218,7 +267,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     ammunition: 3,
     powerMode: 'fixed',
     aimMode: 'directional',
-    baseDamage: 12,
+    baseDamage: 4,
     blastRadius: 0,
     terrainRadius: 0,
     projectileSpeed: 0,
@@ -282,7 +331,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     ammunition: 2,
     powerMode: 'variable',
     aimMode: 'directional',
-    baseDamage: 48,
+    baseDamage: 25,
     blastRadius: 46,
     terrainRadius: 24,
     projectileSpeed: 860,
@@ -306,6 +355,141 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     teleportEdgeMargin: 0,
     teleportPlayerClearance: 0,
   },
+  'dirt-mounder': {
+    id: 'dirt-mounder',
+    mechanic: 'terrain-build',
+    displayName: 'Dirt Mounder',
+    description: 'Builds a thick ring of soil around its target',
+    ammunition: 2,
+    powerMode: 'variable',
+    aimMode: 'directional',
+    baseDamage: 25,
+    blastRadius: 46,
+    terrainRadius: 0,
+    projectileSpeed: 760,
+    gravityScale: 1,
+    windSensitivity: 0.8,
+    knockbackForce: 180,
+    fuseSeconds: 0,
+    bounceRestitution: 0,
+    bounceHorizontalRetention: 0,
+    pelletCount: 0,
+    pelletRange: 0,
+    pelletSpreadRadians: 0,
+    clusterChildCount: 0,
+    clusterChildDamage: 0,
+    clusterChildSpeed: 0,
+    clusterChildLift: 0,
+    drillDistance: 0,
+    drillRadius: 0,
+    mineRadius: 0,
+    mineTriggerRadius: 0,
+    teleportEdgeMargin: 0,
+    teleportPlayerClearance: 0,
+    terrainInnerRadius: 28,
+    terrainOuterRadius: 56,
+  },
+  'wind-blaster': {
+    id: 'wind-blaster',
+    mechanic: 'wind',
+    displayName: 'Wind Blaster',
+    description: 'A broad gust that launches players and deflects projectiles',
+    ammunition: 2,
+    powerMode: 'variable',
+    aimMode: 'directional',
+    baseDamage: 5,
+    blastRadius: 112,
+    terrainRadius: 0,
+    projectileSpeed: 920,
+    gravityScale: 0.45,
+    windSensitivity: 0.2,
+    knockbackForce: 980,
+    fuseSeconds: 0,
+    bounceRestitution: 0,
+    bounceHorizontalRetention: 0,
+    pelletCount: 0,
+    pelletRange: 0,
+    pelletSpreadRadians: 0,
+    clusterChildCount: 0,
+    clusterChildDamage: 0,
+    clusterChildSpeed: 0,
+    clusterChildLift: 0,
+    drillDistance: 0,
+    drillRadius: 0,
+    mineRadius: 0,
+    mineTriggerRadius: 0,
+    teleportEdgeMargin: 0,
+    teleportPlayerClearance: 0,
+    projectilePushForce: 520,
+  },
+  'gravity-orb': {
+    id: 'gravity-orb',
+    mechanic: 'gravity',
+    displayName: 'Gravity Orb',
+    description: 'Pulls players and airborne projectiles toward its impact',
+    ammunition: 2,
+    powerMode: 'variable',
+    aimMode: 'directional',
+    baseDamage: 8,
+    blastRadius: 120,
+    terrainRadius: 0,
+    projectileSpeed: 820,
+    gravityScale: 0.65,
+    windSensitivity: 0.25,
+    knockbackForce: 0,
+    fuseSeconds: 0,
+    bounceRestitution: 0,
+    bounceHorizontalRetention: 0,
+    pelletCount: 0,
+    pelletRange: 0,
+    pelletSpreadRadians: 0,
+    clusterChildCount: 0,
+    clusterChildDamage: 0,
+    clusterChildSpeed: 0,
+    clusterChildLift: 0,
+    drillDistance: 0,
+    drillRadius: 0,
+    mineRadius: 0,
+    mineTriggerRadius: 0,
+    teleportEdgeMargin: 0,
+    teleportPlayerClearance: 0,
+    projectilePushForce: -560,
+    playerPullForce: 720,
+  },
+  'ricochet-rifle': {
+    id: 'ricochet-rifle',
+    mechanic: 'ricochet',
+    displayName: 'Ricochet Rifle',
+    description: 'A precision round that gains damage across three terrain bounces',
+    ammunition: 3,
+    powerMode: 'variable',
+    aimMode: 'directional',
+    baseDamage: 18,
+    blastRadius: 0,
+    terrainRadius: 0,
+    projectileSpeed: 1500,
+    gravityScale: 0.08,
+    windSensitivity: 0.08,
+    knockbackForce: 150,
+    fuseSeconds: 0,
+    bounceRestitution: 0.92,
+    bounceHorizontalRetention: 0.92,
+    pelletCount: 0,
+    pelletRange: 0,
+    pelletSpreadRadians: 0,
+    clusterChildCount: 0,
+    clusterChildDamage: 0,
+    clusterChildSpeed: 0,
+    clusterChildLift: 0,
+    drillDistance: 0,
+    drillRadius: 0,
+    mineRadius: 0,
+    mineTriggerRadius: 0,
+    teleportEdgeMargin: 0,
+    teleportPlayerClearance: 0,
+    maxRicochetBounces: 3,
+    ricochetDamagePerBounce: 7 / 3,
+  },
   'pocket-knife': {
     id: 'pocket-knife',
     mechanic: 'melee',
@@ -314,7 +498,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     ammunition: 'unlimited',
     powerMode: 'fixed',
     aimMode: 'directional',
-    baseDamage: 36,
+    baseDamage: 25,
     blastRadius: 0,
     terrainRadius: 0,
     projectileSpeed: 0,
@@ -347,7 +531,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     ammunition: 2,
     powerMode: 'variable',
     aimMode: 'directional',
-    baseDamage: 32,
+    baseDamage: 15,
     blastRadius: 50,
     terrainRadius: 25,
     projectileSpeed: 720,
@@ -382,7 +566,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     ammunition: 2,
     powerMode: 'variable',
     aimMode: 'directional',
-    baseDamage: 42,
+    baseDamage: 25,
     blastRadius: 48,
     terrainRadius: 25,
     projectileSpeed: 900,
@@ -447,7 +631,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     ammunition: 1,
     powerMode: 'variable',
     aimMode: 'directional',
-    baseDamage: 92,
+    baseDamage: 25,
     blastRadius: 118,
     terrainRadius: 72,
     projectileSpeed: 740,

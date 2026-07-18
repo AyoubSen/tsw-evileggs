@@ -75,6 +75,12 @@ export const PLAYER_PATTERNS = immutableCatalog([
   { id: 'yolk-splash', label: 'Yolk Splash', recipe: Object.freeze({ kind: 'yolk-splash', compactReadable: true }) },
   { id: 'battle-scars', label: 'Battle Scars', recipe: Object.freeze({ kind: 'battle-scars', compactReadable: true }) },
   { id: 'sprinkles', label: 'Sprinkles', recipe: Object.freeze({ kind: 'sprinkles', compactReadable: true }) },
+  { id: 'plaid', label: 'Picnic Plaid', recipe: Object.freeze({ kind: 'plaid', compactReadable: true }) },
+  { id: 'moons', label: 'Moon Shell', recipe: Object.freeze({ kind: 'moons', compactReadable: true }) },
+  { id: 'shards', label: 'Crystal Shards', recipe: Object.freeze({ kind: 'shards', compactReadable: true }) },
+  { id: 'crosshatch', label: 'Crosshatch', recipe: Object.freeze({ kind: 'crosshatch', compactReadable: true }) },
+  { id: 'bubbles', label: 'Bubbles', recipe: Object.freeze({ kind: 'bubbles', compactReadable: true }) },
+  { id: 'circuit', label: 'Circuit Shell', recipe: Object.freeze({ kind: 'circuit', compactReadable: true }) },
 ] as const)
 
 export const PLAYER_FACES = immutableCatalog([
@@ -108,6 +114,12 @@ export const PLAYER_FACES = immutableCatalog([
   { id: 'pleading', label: 'Pleading', recipe: Object.freeze({ expression: 'pleading' }) },
   { id: 'battlecry', label: 'Battle Cry', recipe: Object.freeze({ expression: 'battlecry' }) },
   { id: 'snickering', label: 'Snickering', recipe: Object.freeze({ expression: 'snickering' }) },
+  { id: 'squint', label: 'Big Squint', recipe: Object.freeze({ expression: 'squint' }) },
+  { id: 'awestruck', label: 'Awestruck', recipe: Object.freeze({ expression: 'awestruck' }) },
+  { id: 'worried', label: 'Worried', recipe: Object.freeze({ expression: 'worried' }) },
+  { id: 'deadpan', label: 'Deadpan', recipe: Object.freeze({ expression: 'deadpan' }) },
+  { id: 'giggle', label: 'Giggle', recipe: Object.freeze({ expression: 'giggle' }) },
+  { id: 'side-eye', label: 'Side Eye', recipe: Object.freeze({ expression: 'side-eye' }) },
 ] as const)
 
 export const PLAYER_VICTORY_STYLES = immutableCatalog([
@@ -115,6 +127,10 @@ export const PLAYER_VICTORY_STYLES = immutableCatalog([
   { id: 'excited', label: 'Excited', recipe: Object.freeze({ expression: 'excited' }) },
   { id: 'smug', label: 'Smug', recipe: Object.freeze({ expression: 'smug' }) },
   { id: 'calm', label: 'Calm', recipe: Object.freeze({ expression: 'calm' }) },
+  { id: 'champion', label: 'Champion', recipe: Object.freeze({ expression: 'champion' }) },
+  { id: 'cackling', label: 'Cackling', recipe: Object.freeze({ expression: 'cackling' }) },
+  { id: 'relieved', label: 'Relieved', recipe: Object.freeze({ expression: 'relieved' }) },
+  { id: 'showboat', label: 'Showboat', recipe: Object.freeze({ expression: 'showboat' }) },
 ] as const)
 
 export const PLAYER_ACCESSORIES = immutableCatalog([
@@ -162,6 +178,11 @@ export const PLAYER_ACCESSORIES = immutableCatalog([
   { id: 'feather', label: 'Battle Feather', recipe: Object.freeze({ kind: 'feather', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'points' }) },
   { id: 'tiny-flag', label: 'Tiny Flag', recipe: Object.freeze({ kind: 'tiny-flag', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'points' }) },
   { id: 'eggshell-hat', label: 'Eggshell Hat', recipe: Object.freeze({ kind: 'eggshell-hat', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'points' }) },
+  { id: 'laurel', label: 'Victory Laurel', recipe: Object.freeze({ kind: 'laurel', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'points' }) },
+  { id: 'bucket-hat', label: 'Bucket Hat', recipe: Object.freeze({ kind: 'bucket-hat', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'brim' }) },
+  { id: 'knight-helmet', label: 'Knight Helmet', recipe: Object.freeze({ kind: 'knight-helmet', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'dome' }) },
+  { id: 'pirate-hat', label: 'Pirate Hat', recipe: Object.freeze({ kind: 'pirate-hat', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'brim' }) },
+  { id: 'construction-hat', label: 'Builder Helmet', recipe: Object.freeze({ kind: 'construction-hat', category: 'head', occludesEyes: 0, occludesMouth: false, compactMark: 'dome' }) },
 ] as const)
 
 export const PLAYER_PREVIEW_BACKGROUNDS = Object.freeze([
