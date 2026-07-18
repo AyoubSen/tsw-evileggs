@@ -15,7 +15,7 @@ const rig = (shoulderY: number, faceY: number, accessoryY: number, accessoryScal
 
 export const PLAYER_BODIES = immutableCatalog([
   { id: 'classic', label: 'Classic', recipe: Object.freeze({ shape: 'egg', scale: 1, rig: rig(78, 64, 29) }) },
-  { id: 'round', label: 'Round', recipe: Object.freeze({ shape: 'round', scale: 1.04, rig: rig(76, 63, 31, 1.08) }) },
+  { id: 'round', label: 'Round', recipe: Object.freeze({ shape: 'round', scale: 1.04, rig: rig(76, 63, 31) }) },
   { id: 'tall', label: 'Tall', recipe: Object.freeze({ shape: 'tall', scale: 1, rig: rig(77, 62, 26, 0.92) }) },
   { id: 'scrambled', label: 'Scrambled', recipe: Object.freeze({ shape: 'scrambled', scale: 0.98, rig: rig(78, 64, 30, 1.1, -1) }) },
 ] as const)
